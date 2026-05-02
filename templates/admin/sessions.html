@@ -1,0 +1,80 @@
+{% extends "admin/base.html" %}
+{% block title %}Sessions{% endblock %}
+
+{% block content %}
+<div class="section-title">Active Sessions</div>
+
+<div class="card">
+  <div class="card-title">Logged-in users ({{ sessions | length }})</div>
+  <p class="dim" style="margin-bottom:14px;">
+    Sessions are kept in memory and lost on container restart.
+    Idle sessions expire after 8 hours.
+  </p>
+
+  {% if sessions %}
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Identity</th>
+        <th>Logged in</th>
+        <th>Last activity</th>
+        <th>IP</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      {% set age = (now - s.last_seen) | int %}
+      <tr>
+        <td>
+          {{ s.name }}
+          {% if s.is_admin %}<span class="badge badge-ok" style="margin-left:6px;">admin</span>{% endif %}
+        </td>
+        <td class="dim mono" style="font-size:11px;" title="{{ s.sub }}">
+          {% if s.email %}{{ s.email }}
+          {% else %}{{ s.sub[:24] }}…{% endif %}
+        </td>
+        <td class="dim">{{ s.login_at | strftime }}</td>
+        <td class="dim">
+          {% if age < 60 %}{{ age }}s ago
+          {% elif age < 3600 %}{{ (age // 60) }}m ago
+          {% elif age < 86400 %}{{ (age // 3600) }}h ago
+          {% else %}{{ (age // 86400) }}d ago{% endif %}
+        </td>
+        <td class="dim mono" style="font-size:11px;">
+          {{ s.last_ip }}
+          {% if s.last_ip != s.login_ip %}
+          <span class="dim" title="Login IP was {{ s.login_ip }}" style="margin-left:4px;">⚑</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;">
+          <form method="post" action="{{ url_for('admin.session_revoke', sub=s.sub) }}" style="display:inline;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-danger" type="submit"
+                    data-confirm="Revoke {{ s.name }}'s session?">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="dim">No active sessions.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">Bulk actions</div>
+  <form method="post" action="{{ url_for('admin.sessions_revoke') }}" style="display:inline;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-warn"
+            data-confirm="Revoke ALL active sessions? Every user (including you) will need to log in again.">
+      &#10227; Revoke all sessions
+    </button>
+  </form>
+  <p class="dim" style="margin-top:8px;font-size:12px;">
+    Forces every logged-in user to re-authenticate. Use if you suspect a session has been compromised.
+  </p>
+</div>
+{% endblock %}

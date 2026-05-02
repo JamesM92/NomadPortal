@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block title %}Cache{% endblock %}
+
+{% block content %}
+<div class="section-title">Page Cache</div>
+
+<div class="stat-grid">
+  <div class="stat-box">
+    <div class="stat-label">Live entries</div>
+    <div class="stat-value">{{ stats.live }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Total entries</div>
+    <div class="stat-value">{{ stats.entries }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Actions</div>
+  <form method="post" action="{{ url_for('admin.cache_clear') }}"
+        data-confirm="Clear the entire page cache?">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Clear all cached pages</button>
+  </form>
+  <p class="dim mt8">
+    Pages are cached for {{ config.get('CACHE_TTL', 300) }}s (set via
+    <code>CACHE_TTL</code> environment variable). Clearing forces a fresh
+    fetch from the node on next visit.
+  </p>
+</div>
+{% endblock %}

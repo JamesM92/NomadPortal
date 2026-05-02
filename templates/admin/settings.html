@@ -1,0 +1,230 @@
+{% extends "admin/base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="section-title">UI Settings</div>
+
+{% if no_oidc_admin %}
+<div class="notice" style="margin-bottom:18px;">
+  &#9888; <strong>No OIDC admins are configured.</strong> Logging in via OIDC will only grant
+  user-level access. To grant admin to OIDC users, either set
+  <code>OIDC_ADMIN_EMAILS</code> / <code>OIDC_ADMIN_SUBJECTS</code> in your environment,
+  or promote a user from the Users page after they have logged in once.
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">Display</div>
+  <p class="dim" style="margin-bottom:18px;">
+    Controls what visitors see on the main page. Changes take effect immediately without a restart.
+  </p>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Application title — Micron markup supported</label>
+    <textarea id="s-app-title" rows="2" maxlength="128"
+              style="max-width:480px;font-family:var(--font-mono);font-size:12px;resize:vertical;">{{ settings.app_title | e }}</textarea>
+    <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+      <span class="dim" style="font-size:11px;">Preview:</span>
+      <span id="title-preview"
+            style="font-size:14px;font-weight:bold;padding:3px 8px;
+                   background:var(--bg2);border:1px solid var(--border);border-radius:2px;">
+        {{ settings.app_title | e }}
+      </span>
+    </div>
+    <span class="dim" style="margin-top:6px;font-size:11px;line-height:1.7;">
+      <code>`Fxxx</code> foreground &nbsp;
+      <code>`Bxxx</code> background &nbsp;
+      <code>`*bold`*</code> &nbsp;
+      — 3-char hex, each digit doubled:
+      <code>f40</code>=<span style="color:#ff4400">&#9632;</span>
+      <code>4af</code>=<span style="color:#44aaff">&#9632;</span>
+      <code>4a4</code>=<span style="color:#44aa44">&#9632;</span><br>
+      Example: <code>`B111`Ff40 ■ MyNode</code>
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Node name (announced to the Reticulum mesh)</label>
+    <input type="text" id="s-site-name" value="{{ settings.site_name | e }}"
+           style="max-width:320px;" maxlength="64"
+           placeholder="{{ config.get('SITE_NAME', 'NomadPortal') }}">
+    <span class="dim" style="margin-top:4px;">
+      The name other NomadNet clients see when they discover this node.
+      Saving applies immediately and sends a fresh announce — no restart needed.
+      Leave blank to use the <code>SITE_NAME</code> environment variable.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Default node (loaded on startup)</label>
+    <input type="text" id="s-default-node" value="{{ settings.default_node | e }}"
+           style="max-width:480px;font-size:12px;" maxlength="128"
+           placeholder="hex hash — leave blank to use hosted node (if running)">
+    <span class="dim" style="margin-top:4px;">
+      Paste a full destination hash. Leave blank to auto-load the hosted site, or show the welcome screen if no site is running.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:8px;">
+    <label>Access preset</label>
+    <select id="s-access-preset" style="max-width:260px;">
+      <option value="public" {% if settings.access_mode == 'public' %}selected{% endif %}>Public — anyone can browse anywhere</option>
+      <option value="gated"  {% if settings.access_mode == 'gated'  %}selected{% endif %}>Gated — guests restricted, logged-in users free</option>
+      <option value="locked" {% if settings.access_mode == 'locked' %}selected{% endif %}>Locked — kiosk mode, only admins browse externally</option>
+      <option value="custom" {% if settings.access_mode == 'custom' %}selected{% endif %} disabled hidden>Custom</option>
+    </select>
+    <span class="dim" style="margin-top:4px;">
+      Picking a preset overwrites the table below. Edit individual cells for fine control —
+      the dropdown will switch to "Custom".
+    </span>
+    <span class="dim" style="margin-top:6px;color:#c8a84a;">
+      &#9888; <strong>Public</strong> exposes the unmoderated NomadNet network to anonymous visitors.
+      Use <strong>Gated</strong> unless you know what you're doing. Admins are never restricted by these settings.
+    </span>
+  </div>
+
+  {% set ad = '' if is_super_admin else 'disabled' %}
+  <table class="admin-table" id="access-table" style="margin-top:8px;margin-bottom:18px;max-width:760px;">
+    <thead>
+      <tr>
+        <th>Setting</th>
+        <th style="width:120px;text-align:center;">Guests</th>
+        <th style="width:120px;text-align:center;">Logged-in users</th>
+        <th style="width:120px;text-align:center;">
+          Admins
+          {% if not is_super_admin %}
+          <div class="dim" style="font-weight:normal;text-transform:none;letter-spacing:0;font-size:10px;margin-top:2px;"
+               title="Only the super admin (the env-var ADMIN_PASSWORD account) can edit this column.">
+            🔒 super admin only
+          </div>
+          {% endif %}
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Locked to default node
+          <div class="dim" style="font-size:11px;">When checked, this audience can only browse the hosted site or default node.</div>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-guests-default-lock"
+                 {% if settings.guests_default_lock %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-users-default-lock"
+                 {% if settings.users_default_lock %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-admins-default-lock" {{ ad }}
+                 {% if settings.admins_default_lock %}checked{% endif %}>
+        </td>
+      </tr>
+      <tr>
+        <td>Address bar
+          <div class="dim" style="font-size:11px;">URL input above the page area. <em>Disabled</em> shows it greyed out; <em>Hidden</em> removes it.</div>
+        </td>
+        <td style="text-align:center;">
+          <select id="s-guests-address-bar" style="font-size:12px;padding:3px 6px;">
+            <option value="enabled"  {% if settings.guests_address_bar == 'enabled'  %}selected{% endif %}>Enabled</option>
+            <option value="disabled" {% if settings.guests_address_bar == 'disabled' %}selected{% endif %}>Disabled</option>
+            <option value="hidden"   {% if settings.guests_address_bar == 'hidden'   %}selected{% endif %}>Hidden</option>
+          </select>
+        </td>
+        <td style="text-align:center;">
+          <select id="s-users-address-bar" style="font-size:12px;padding:3px 6px;">
+            <option value="enabled"  {% if settings.users_address_bar == 'enabled'  %}selected{% endif %}>Enabled</option>
+            <option value="disabled" {% if settings.users_address_bar == 'disabled' %}selected{% endif %}>Disabled</option>
+            <option value="hidden"   {% if settings.users_address_bar == 'hidden'   %}selected{% endif %}>Hidden</option>
+          </select>
+        </td>
+        <td style="text-align:center;">
+          <select id="s-admins-address-bar" {{ ad }} style="font-size:12px;padding:3px 6px;">
+            <option value="enabled"  {% if settings.admins_address_bar == 'enabled'  %}selected{% endif %}>Enabled</option>
+            <option value="disabled" {% if settings.admins_address_bar == 'disabled' %}selected{% endif %}>Disabled</option>
+            <option value="hidden"   {% if settings.admins_address_bar == 'hidden'   %}selected{% endif %}>Hidden</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td>Nodes panel
+          <div class="dim" style="font-size:11px;">Sidebar list of discovered nodes.</div>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-guests-nodes-panel"
+                 {% if settings.guests_nodes_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-users-nodes-panel"
+                 {% if settings.users_nodes_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-admins-nodes-panel" {{ ad }}
+                 {% if settings.admins_nodes_panel %}checked{% endif %}>
+        </td>
+      </tr>
+      <tr>
+        <td>Messages panel
+          <div class="dim" style="font-size:11px;">Sidebar inbox of received LXMF messages.</div>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-guests-messages-panel"
+                 {% if settings.guests_messages_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-users-messages-panel"
+                 {% if settings.users_messages_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-admins-messages-panel" {{ ad }}
+                 {% if settings.admins_messages_panel %}checked{% endif %}>
+        </td>
+      </tr>
+      <tr>
+        <td>Can send LXMF messages
+          <div class="dim" style="font-size:11px;">Whether logged-in users may send messages. Guests can never send; admins always can.</div>
+        </td>
+        <td class="dim" style="text-align:center;">—</td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-users-can-message"
+                 {% if settings.users_can_message %}checked{% endif %}>
+        </td>
+        <td class="dim" style="text-align:center;">always</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Abuse contact</label>
+    <input type="text" id="s-abuse-contact" value="{{ settings.abuse_contact | e }}"
+           style="max-width:360px;" maxlength="256"
+           placeholder="abuse@example.com or https://…">
+    <span class="dim" style="margin-top:4px;">
+      Displayed in the site footer. Allows users to report problematic content.
+      Recommended when allowing access to the wider NomadNet network.
+    </span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" id="btn-save-settings">Save</button>
+    <span id="settings-status" style="font-size:12px;color:var(--text-dim);"></span>
+  </div>
+</div>
+
+<div class="card" style="margin-top:24px;">
+  <div class="card-title">Node Blocklist</div>
+  <p class="dim" style="margin-bottom:14px;line-height:1.6;">
+    Blocked nodes cannot be fetched by any user. Use this to respond to abuse reports
+    or remove access to known-harmful content.
+  </p>
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <input type="text" id="blocklist-hash-input" placeholder="Node destination hash"
+           style="flex:1;max-width:480px;font-size:12px;">
+    <button class="btn btn-danger btn-sm" id="btn-block-node">Block node</button>
+  </div>
+  <div id="blocklist-table-wrap">
+    <p class="dim">Loading…</p>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-settings.js"></script>{% endblock %}

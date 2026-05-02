@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}Audit{% endblock %}
+
+{% block content %}
+<div class="section-title" style="display:flex;align-items:center;gap:14px;">
+  Audit Log
+  <span id="status-dot" style="
+    width:8px;height:8px;border-radius:50%;
+    background:var(--text-dim);display:inline-block;
+    transition:background .3s;" title="Stream status"></span>
+  <span id="status-label" style="font-size:11px;color:var(--text-dim);font-weight:normal;">connecting…</span>
+  <label style="margin-left:auto;font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:6px;cursor:pointer;">
+    <input type="checkbox" id="autoScroll" checked> Auto-scroll
+  </label>
+  <button class="btn btn-sm btn-neutral" id="btn-clear-log">Clear view</button>
+</div>
+
+<p class="dim" style="margin-bottom:10px;font-size:12px;">
+  Privileged actions only — user creation, role changes, session revocation, identity reset,
+  cache clear, interface saves, settings changes, and backup downloads. Stored in memory
+  (last 500 lines across all loggers); persistent audit logging is the operator's responsibility.
+</p>
+
+<div id="log-wrap" data-stream-url="{{ url_for('admin.audit_stream') }}" style="
+  background:var(--bg); border:1px solid var(--border); border-radius:3px;
+  font-family:var(--font-mono); font-size:12px; line-height:1.6;
+  padding:10px 14px; height:calc(100vh - 220px);
+  overflow-y:auto; white-space:pre-wrap; word-break:break-all;">
+</div>
+
+<style>
+  .ll-DEBUG    { color: var(--text-dim); }
+  .ll-INFO     { color: var(--text); }
+  .ll-WARNING  { color: var(--warn); }
+  .ll-ERROR    { color: var(--error); }
+  .ll-CRITICAL { color: var(--error); font-weight:bold; }
+  .log-line    { display:block; }
+  .log-line.hidden { display:none; }
+</style>
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-logs.js"></script>{% endblock %}

@@ -1,0 +1,44 @@
+# Reticulum interfaces configuration example.
+# Copy this file to interfaces.conf and edit as needed.
+# Restart the container after changes.
+#
+# Full reference: https://reticulum.network/manual/interfaces.html
+
+# ------------------------------------------------------------------
+# AutoInterface — zero-config local network discovery (recommended
+# for getting started; works over LAN / WiFi automatically).
+# ------------------------------------------------------------------
+[[Default Interface]]
+  type = AutoInterface
+  interface_enabled = True
+
+# ------------------------------------------------------------------
+# TCP Client — connect to a remote Reticulum hub/testnet.
+# ------------------------------------------------------------------
+# [[RNS Testnet Dublin]]
+#   type = TCPClientInterface
+#   interface_enabled = True
+#   target_host = dublin.connect.reticulum.network
+#   target_port = 4965
+
+# ------------------------------------------------------------------
+# TCP Server — accept incoming connections on a port.
+# ------------------------------------------------------------------
+# [[TCP Server]]
+#   type = TCPServerInterface
+#   interface_enabled = True
+#   listen_ip = 0.0.0.0
+#   listen_port = 4242
+
+# ------------------------------------------------------------------
+# Serial / LoRa (RNode) — physical radio interface.
+# ------------------------------------------------------------------
+# [[RNode LoRa]]
+#   type = RNodeInterface
+#   interface_enabled = True
+#   port = /dev/ttyUSB0
+#   frequency = 867500000
+#   bandwidth = 125000
+#   txpower = 7
+#   spreadingfactor = 8
+#   codingrate = 5

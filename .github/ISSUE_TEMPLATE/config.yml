@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/JamesM92/NomadPortal/security/policy
+    about: Please report security issues privately — do not open a public issue.
+  - name: NomadNet questions
+    url: https://github.com/markqvist/NomadNet/discussions
+    about: For questions about NomadNet itself (not this web frontend).
+  - name: Reticulum questions
+    url: https://github.com/markqvist/Reticulum/discussions
+    about: For questions about the Reticulum network stack.

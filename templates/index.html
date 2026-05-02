@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>NomadPortal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    /* User area inside topbar */
+    #user-area {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--text-dim); white-space: nowrap;
+      border-left: 1px solid var(--border); padding-left: 10px; margin-left: 4px;
+    }
+    #user-area a { color: var(--accent); text-decoration: none; }
+    #user-area a:hover { text-decoration: underline; }
+    #user-area .user-name { color: var(--accent2); }
+    #user-area .ub-sep { color: var(--border); }
+    #user-area .badge-admin {
+      background: #1a2a1a; border: 1px solid var(--accent2);
+      color: var(--accent2); padding: 0 5px; border-radius: 2px; font-size: 10px;
+    }
+
+    /* ---- Compose modal ---- */
+    #msg-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+    }
+    #msg-modal[hidden] { display: none; }
+    .modal-box {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 3px; padding: 24px 28px; width: 520px; max-width: 95vw;
+    }
+    .modal-title {
+      color: var(--accent2); font-size: 14px; font-weight: bold; margin-bottom: 16px;
+    }
+    .modal-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .modal-field label { font-size: 11px; color: var(--text-dim); }
+    .modal-field input, .modal-field select, .modal-field textarea {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      font-family: var(--font-mono); font-size: 12px; padding: 5px 8px;
+      border-radius: 2px; outline: none;
+    }
+    .modal-field input:focus, .modal-field select:focus, .modal-field textarea:focus {
+      border-color: var(--accent);
+    }
+    .modal-field textarea { resize: vertical; min-height: 90px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+    .btn-modal-send {
+      background: var(--accent); border: none; color: var(--bg);
+      padding: 6px 16px; border-radius: 2px; cursor: pointer;
+      font-family: var(--font-mono); font-weight: bold; font-size: 13px;
+    }
+    .btn-modal-send:hover { background: #7ec8e3; }
+    .btn-modal-cancel {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      padding: 6px 12px; border-radius: 2px; cursor: pointer; font-family: var(--font-mono);
+    }
+    .btn-modal-cancel:hover { border-color: var(--error); color: var(--error); }
+
+    /* ---- Messages panel (inside sidebar) ---- */
+    .msg-item {
+      padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .msg-item:last-child { border-bottom: none; }
+    .msg-item .msg-state-ok   { color: var(--accent2); }
+    .msg-item .msg-state-fail { color: var(--error); }
+    .msg-item .msg-state-pend { color: var(--warn); }
+    .msg-empty { padding: 16px 10px; color: var(--text-dim); font-size: 12px; }
+
+    /* Tab bar inside messages panel */
+    #msg-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .msg-tab {
+      flex: 1; background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-dim); padding: 5px 4px; cursor: pointer;
+      font-family: var(--font-mono); font-size: 11px; position: relative;
+    }
+    .msg-tab:hover { color: var(--text); }
+    .msg-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .msg-tab-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+    .msg-tab-panel[hidden] { display: none; }
+    /* Contacts tab needs inner scroll so the add-form stays pinned */
+    #tab-contacts { overflow: hidden; }
+    #contacts-list-inner { flex: 1; overflow-y: auto; }
+
+    /* Inbox + sidebar badge */
+    .inbox-badge {
+      background: var(--accent); color: var(--bg); border-radius: 8px;
+      padding: 0 4px; font-size: 9px; margin-left: 3px; vertical-align: middle;
+    }
+
+    /* Contact items */
+    .contact-item {
+      padding: 5px 10px; border-bottom: 1px solid var(--border);
+      font-size: 12px; display: flex; align-items: center; gap: 6px;
+    }
+    .contact-item:last-child { border-bottom: none; }
+    .contact-fav-btn {
+      background: none; border: none; cursor: pointer;
+      color: #777; font-size: 18px; padding: 0 2px; flex-shrink: 0; line-height: 1;
+    }
+    .contact-fav-btn.fav-active { color: #f4a500; }
+    .contact-compose-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--accent); font-size: 13px; padding: 0 2px; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== Top bar ====================================================== -->
+<header id="topbar">
+  <span class="brand">&#9632; NomadNet</span>
+  <div id="nav-bar">
+    <button id="btn-back" title="Back" disabled>&#8592;</button>
+    <button id="btn-forward" title="Forward" disabled>&#8594;</button>
+    <input id="address-bar" type="text" spellcheck="false"
+           placeholder="hash://<node_hash>/page.mu  or click a node →">
+    <button id="btn-go">Go</button>
+    <button id="btn-fav-page" class="icon-btn" hidden
+            title="Bookmark this page">&#9734;</button>
+    <button id="btn-identify" class="icon-btn" hidden
+            title="Identify to this site">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.5 13c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5"/>
+        <path d="M9 13c0-1.7 1.3-3 3-3s3 1.3 3 3v1.5"/>
+        <path d="M12 13v3"/>
+        <path d="M4 11c0-4.4 3.6-8 8-8s8 3.6 8 8v2"/>
+        <path d="M9 19c-1 0-2-.7-2-2v-2"/>
+        <path d="M15 17v.5c0 1-1 2-2 2"/>
+      </svg>
+    </button>
+  </div>
+  <div id="topbar-actions">
+    <label class="raw-toggle">
+      <input type="checkbox" id="toggle-raw"> Raw
+    </label>
+  </div>
+  <div id="status-indicator" class="status-idle" title="Network status">&#11044;</div>
+  <div id="user-area">
+    <span id="ub-user-section" hidden>
+      <span class="user-name" id="ub-name"></span>
+      <span class="badge-admin" id="ub-admin-badge" hidden>admin</span>
+      <span class="ub-sep">&#8231;</span>
+      <span id="ub-admin-sep" hidden>&#8231;</span>
+      <a href="/admin" id="ub-admin-link" hidden>Admin</a>
+      <span class="ub-sep">&#8231;</span>
+      <a id="ub-logout" href="/auth/logout">Sign out</a>
+    </span>
+    <span id="ub-guest-section">
+      <a href="/auth/login">Sign in</a>
+    </span>
+  </div>
+</header>
+
+<!-- ===== Disclaimer banner (shown once per session for logged-in users) == -->
+<div id="disclaimer-banner" hidden>
+  <span style="flex:1;">
+    &#9888; This interface is not a hardened or secure way to access LXMF.
+    Site administrators may have access to your messages and private information.
+    For private communications, use a dedicated LXMF client directly.
+  </span>
+  <button id="btn-dismiss-disclaimer">Dismiss</button>
+</div>
+
+<!-- ===== Main layout ================================================= -->
+<main id="layout">
+
+  <aside id="sidebar">
+
+    <!-- Panel switcher -->
+    <div id="sidebar-tabs">
+      <button class="sidebar-tab active" id="sidebar-tab-nodes" data-panel="nodes">Nodes</button>
+      <button class="sidebar-tab" id="sidebar-tab-messages" data-panel="messages">
+        Messages <span id="sidebar-msg-badge" class="inbox-badge" hidden></span>
+      </button>
+    </div>
+
+    <!-- ── Nodes panel ────────────────────────────────────────────────── -->
+    <div id="sidebar-panel-nodes">
+      <div class="sidebar-header">
+        Discovered Nodes
+        <button id="btn-refresh-nodes" class="icon-btn" title="Refresh node list">&#8635;</button>
+      </div>
+      <div id="node-filter-wrap">
+        <input id="node-filter" type="text" placeholder="Filter nodes…">
+      </div>
+      <ul id="node-list">
+        <li class="node-placeholder">Waiting for announces…</li>
+      </ul>
+      <div id="sidebar-footer">
+        <span id="node-count">0 nodes</span>
+      </div>
+    </div>
+
+    <!-- ── Messages panel ─────────────────────────────────────────────── -->
+    <div id="sidebar-panel-messages" hidden>
+
+      <!-- Announce identity -->
+      <div id="announce-section"
+           style="flex-shrink:0;border-bottom:1px solid var(--border);padding:6px 10px 8px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+                    color:var(--text-dim);margin-bottom:5px;">Announce identity</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button id="btn-edit-icon" type="button"
+                  title="Edit your icon"
+                  style="background:none;border:none;padding:0;cursor:pointer;
+                         flex-shrink:0;width:28px;height:28px;display:flex;
+                         align-items:center;justify-content:center;border-radius:50%;">
+            <span id="my-icon-preview"
+                  style="display:inline-block;width:28px;height:28px;border-radius:50%;
+                         background:var(--bg3);"></span>
+          </button>
+          <span id="announce-identity-name"
+                style="flex:1;font-size:12px;color:var(--text-dim);overflow:hidden;
+                       text-overflow:ellipsis;white-space:nowrap;"></span>
+          <button id="btn-rename-identity"
+                  style="background:none;border:none;cursor:pointer;color:var(--text-dim);
+                         font-size:11px;padding:0 2px;line-height:1;flex-shrink:0;"
+                  title="Edit name">✎</button>
+          <button id="btn-announce" class="btn btn-sm btn-neutral"
+                  style="white-space:nowrap;" disabled>Announce</button>
+        </div>
+
+        <!-- Icon editor (hidden by default) -->
+        <div id="icon-editor" hidden
+             style="margin-top:8px;padding:8px;background:var(--bg3);border-radius:3px;
+                    display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="icon-editor-preview"
+                  style="width:36px;height:36px;border-radius:50%;flex-shrink:0;"></span>
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-dim);">
+              <label style="display:flex;align-items:center;gap:6px;">
+                Letter
+                <input type="text" id="icon-glyph" maxlength="2"
+                       style="background:var(--bg);border:1px solid var(--border);color:var(--text);
+                              font-family:var(--font-mono);font-size:13px;padding:2px 6px;
+                              border-radius:2px;width:40px;text-align:center;outline:none;">
+              </label>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="display:flex;align-items:center;gap:4px;">
+                  Text <input type="color" id="icon-fg"
+                              style="width:24px;height:20px;border:none;background:none;cursor:pointer;padding:0;">
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;">
+                  Background <input type="color" id="icon-bg"
+                                    style="width:24px;height:20px;border:none;background:none;cursor:pointer;padding:0;">
+                </label>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:6px;">
+            <button id="btn-icon-cancel" class="btn btn-sm btn-neutral">Cancel</button>
+            <button id="btn-icon-save"   class="btn btn-sm btn-primary">Save</button>
+          </div>
+        </div>
+
+        <div id="announce-lxmf-addr"
+             style="font-size:10px;color:var(--text-dim);margin-top:4px;
+                    font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;
+                    white-space:nowrap;cursor:pointer;" title="Click to copy"></div>
+        <div id="announce-status"
+             style="font-size:12px;margin-top:3px;min-height:15px;"></div>
+      </div>
+
+      <!-- Tab bar: Chats | Users -->
+      <div id="msg-tabs">
+        <button class="msg-tab active" data-tab="chats">
+          Chats <span id="inbox-badge" class="inbox-badge" hidden></span>
+        </button>
+        <button class="msg-tab" data-tab="users">Users</button>
+      </div>
+
+      <!-- Chats tab -->
+      <div id="tab-chats" class="msg-tab-panel">
+
+        <!-- Conversation list view -->
+        <div id="chat-list-view">
+          <div id="chat-list-inner">
+            <div class="msg-empty">No conversations yet.</div>
+          </div>
+          <div id="chat-list-footer">
+            <button id="btn-compose-new" disabled>&#9670; New Message</button>
+          </div>
+        </div>
+
+        <!-- Open conversation view -->
+        <div id="chat-view" hidden>
+          <div id="chat-header">
+            <button id="btn-chat-back" class="icon-btn" title="Back">&#8592;</button>
+            <div id="chat-header-icon" style="flex-shrink:0;"></div>
+            <div style="flex:1;min-width:0;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span id="chat-contact-name"></span>
+                <button id="btn-rename-chat"
+                        style="background:none;border:none;cursor:pointer;color:var(--text-dim);
+                               font-size:11px;padding:0 2px;line-height:1;flex-shrink:0;"
+                        title="Edit name">✎</button>
+                <button id="btn-delete-chat"
+                        style="background:none;border:none;cursor:pointer;color:var(--error);
+                               font-size:11px;padding:0 2px;line-height:1;flex-shrink:0;"
+                        title="Delete conversation">🗑</button>
+              </div>
+              <div id="chat-contact-hash"
+                   style="font-size:9px;color:var(--text-dim);overflow:hidden;
+                          text-overflow:ellipsis;white-space:nowrap;"></div>
+            </div>
+          </div>
+          <div id="chat-log"></div>
+          <div id="chat-compose">
+            <input type="hidden" id="chat-dest-hidden">
+            <div class="chat-input-row">
+              <textarea id="chat-input" rows="2" placeholder="Message… (Enter to send)"></textarea>
+              <button id="btn-chat-send">&#10140;</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Users tab (LXMF announce tracker) -->
+      <div id="tab-users" class="msg-tab-panel" hidden>
+        <div style="padding:5px 8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+          <input id="user-filter" type="text" placeholder="Filter users…"
+                 style="width:100%;font-size:11px;padding:3px 6px;background:var(--bg);
+                        border:1px solid var(--border);color:var(--text);
+                        font-family:var(--font-mono);border-radius:2px;outline:none;">
+        </div>
+        <div id="user-list-inner" style="flex:1;overflow-y:auto;">
+          <div class="msg-empty">No LXMF announces heard yet.</div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Content area -->
+  <section id="content-wrap">
+
+    <div id="page-content">
+      <div id="welcome">
+        <pre class="welcome-art">
+  ┌─────────────────────────────────────┐
+  │         NomadNet Browser            │
+  └─────────────────────────────────────┘
+        </pre>
+        <p>Select a node from the sidebar or enter a node URL in the address bar.</p>
+        <p class="muted" id="welcome-guest">
+          <a href="/auth/login" style="color:var(--accent)">Sign in</a>
+          to enable messaging and fingerprinting.
+        </p>
+        <p class="muted" id="welcome-user" hidden>
+          You are signed in.
+          Use the &#9670; Fingerprint button or
+          <a href="#" id="welcome-msg-link" style="color:var(--accent)">compose a message</a>
+          to interact with nodes.
+        </p>
+      </div>
+    </div>
+    <div id="page-error" hidden></div>
+    <div id="loading-overlay" hidden>
+      <span class="spinner">&#9632;</span>
+      <span id="loading-text">Fetching…</span>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===== Bottom status bar =========================================== -->
+<footer id="statusbar">
+  <span id="status-text">Ready</span>
+  <span id="cache-info"></span>
+  <span id="abuse-contact" hidden style="margin-left:auto;font-size:10px;color:var(--text-dim);"></span>
+</footer>
+
+<!-- ===== Compose message modal ======================================= -->
+<div id="msg-modal" hidden>
+  <div class="modal-box">
+    <div class="modal-title">&#9670; Compose Message</div>
+    <div class="modal-field">
+      <label>To: destination hash</label>
+      <input type="text" id="msg-dest" placeholder="hex hash of recipient">
+    </div>
+    <div class="modal-field">
+      <label>Title (optional)</label>
+      <input type="text" id="msg-title" placeholder="Subject line">
+    </div>
+    <div class="modal-field">
+      <label>Message</label>
+      <textarea id="msg-content" placeholder="Your message…"></textarea>
+    </div>
+    <div id="msg-error" style="color:var(--error);font-size:12px;margin-top:6px;" hidden></div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" id="btn-msg-cancel">Cancel</button>
+      <button class="btn-modal-send"   id="btn-msg-send">Send &#10140;</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

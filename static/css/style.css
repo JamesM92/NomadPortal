@@ -1,0 +1,937 @@
+/* =========================================================
+   NomadPortal — dark terminal-aesthetic stylesheet
+   ========================================================= */
+
+/* Roboto Mono Nerd Font — bundled to match MeshChat's renderer exactly.
+ * Box-drawing glyphs in this font fully span the em-box, so adjacent rows
+ * touch at line-height: 1 / normal without sub-pixel gaps. */
+@font-face {
+  font-family: 'Roboto Mono Nerd Font';
+  src: url('/static/fonts/RobotoMonoNerdFont/RobotoMonoNerdFont-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #131313;
+  --bg2:        #1c1c1c;
+  --bg3:        #252525;
+  --border:     #333;
+  --text:       #c8c8c8;
+  --text-dim:   #666;
+  --accent:     #5ba3c9;
+  --accent2:    #7ec8a0;
+  --warn:       #c8905b;
+  --error:      #c85b5b;
+  --font-mono:  "Roboto Mono Nerd Font", "Cascadia Code", "Fira Code",
+                "JetBrains Mono", "Consolas", "Courier New", monospace;
+  --font-ui:    system-ui, -apple-system, "Segoe UI", "Roboto",
+                "Helvetica Neue", Arial, sans-serif;
+  --topbar-h:   42px;
+  --statusbar-h:24px;
+  --sidebar-w:  260px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Disclaimer banner ---- */
+#disclaimer-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  background: #1a1500;
+  border-bottom: 1px solid #554400;
+  color: #c8b86a;
+  font-size: 11px;
+  padding: 6px 14px;
+  line-height: 1.5;
+}
+#disclaimer-banner[hidden] { display: none; }
+#disclaimer-banner button {
+  background: none;
+  border: 1px solid #554400;
+  color: #c8b86a;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+#disclaimer-banner button:hover { background: #2a2000; }
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* =========================================================
+   Top bar
+   ========================================================= */
+#topbar {
+  height: var(--topbar-h);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.brand {
+  color: var(--accent);
+  font-weight: bold;
+  white-space: nowrap;
+  font-size: 14px;
+  user-select: none;
+}
+
+#nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+#nav-bar[hidden] { display: none; }
+
+#nav-bar button {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  border-radius: 2px;
+}
+#nav-bar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+#nav-bar button:disabled { opacity: 0.35; cursor: default; }
+
+#address-bar {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 2px;
+  outline: none;
+}
+#address-bar:focus { border-color: var(--accent); }
+
+#btn-go {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  padding: 3px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: bold;
+  border-radius: 2px;
+}
+#btn-go:hover { background: #7ec8e3; }
+
+#status-indicator {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.status-idle  { color: var(--text-dim); }
+.status-ok    { color: var(--accent2); }
+.status-busy  { color: var(--warn); }
+.status-error { color: var(--error); }
+
+/* =========================================================
+   Main layout
+   ========================================================= */
+#layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* =========================================================
+   Sidebar
+   ========================================================= */
+#sidebar {
+  width: var(--sidebar-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Sidebar panel switcher (Nodes / Messages) */
+#sidebar-tabs {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  padding: 7px 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.sidebar-tab:hover { color: var(--text); }
+.sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+#sidebar-panel-nodes,
+#sidebar-panel-messages {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+#sidebar[hidden] { display: none; }
+#sidebar-panel-nodes[hidden],
+#sidebar-panel-messages[hidden] { display: none; }
+
+.sidebar-header {
+  padding: 8px 10px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  color: var(--accent2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.icon-btn:hover { color: var(--accent); }
+.icon-btn.fav-active { color: var(--warn); }
+#btn-fav-page { font-size: 18px; padding: 0 6px; }
+#btn-identify { padding: 0 6px; display: inline-flex; align-items: center; }
+#btn-identify svg { display: block; }
+#btn-identify.identify-active { color: var(--accent); }
+
+#node-filter-wrap {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+#node-filter {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 2px;
+  outline: none;
+}
+#node-filter:focus { border-color: var(--accent); }
+
+#node-list {
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+#node-list li {
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#node-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
+#node-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
+#node-list .node-name  { display: block; font-size: 13px; }
+#node-list .node-hash  { display: block; font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+#node-list .node-age   { display: block; font-size: 10px; color: var(--text-dim); }
+#node-list .node-hops  {
+  display: block;
+  font-size: 10px;
+  color: var(--accent2);
+  margin-top: 2px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+#node-list .node-hops-unknown { color: var(--text-dim); font-style: italic; }
+.node-dot          { font-size: 10px; margin-right: 5px; vertical-align: middle; }
+.node-dot-none     { color: var(--border); }
+.node-dot-ok       { color: var(--accent); }
+.node-dot-degraded { color: var(--warn); }
+.node-dot-err      { color: var(--error); }
+
+#node-list .node-section-header {
+  padding: 4px 10px 2px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  cursor: default;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+  user-select: none;
+}
+#node-list .node-section-header:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+#node-list .node-section-header:hover {
+  background: transparent;
+  border-left-color: transparent;
+}
+#node-list .node-section-header.collapsible {
+  cursor: pointer;
+}
+#node-list .node-section-header.collapsible:hover {
+  color: var(--text);
+  background: var(--bg3);
+}
+.section-toggle {
+  display: inline-block;
+  width: 12px;
+  margin-right: 3px;
+  text-align: center;
+  font-size: 12px;
+}
+
+/* Right-side stack: star (or pin) on top, hops badge below it */
+#node-list .node-right {
+  float: right;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.node-fav-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0;
+  line-height: 1;
+  color: #777;
+}
+.node-fav-btn.fav-active { color: var(--warn); }
+.node-fav-btn:hover { color: var(--warn); }
+
+.node-placeholder { color: var(--text-dim); font-style: italic; font-size: 12px; }
+#node-list li.node-locked { opacity: 0.35; cursor: default; }
+#node-list li.node-locked:hover { background: transparent; }
+
+#sidebar-footer {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* =========================================================
+   Content area
+   ========================================================= */
+#content-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+#topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 12px;
+  margin-left: auto;
+}
+.raw-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-dim); }
+.raw-toggle input { cursor: pointer; accent-color: var(--accent); }
+
+
+/* Force Roboto Mono Nerd Font with no fallbacks for the Micron content area
+ * — the bundled font ships with Micron2HTML and has the box-drawing metrics
+ * we rely on. monospace is a last-resort fallback if the font fails to load. */
+#page-content,
+#page-content * {
+  font-family: "Roboto Mono Nerd Font", monospace;
+  /* We only ship the Regular weight of the font. Without `font-synthesis`
+   * disabled, Firefox synthesizes bold by thickening regular glyphs which
+   * subtly widens characters and breaks monospace alignment in centered
+   * lines that mix bold/non-bold spans. */
+  font-synthesis-weight: none;
+  font-kerning: none;
+}
+
+/* Fake-bold via `text-shadow`: drawing the glyph offset 0.5px to the right
+ * of itself thickens it visually without changing the layout box (so
+ * monospace alignment is preserved in centered lines). Applies to every
+ * <strong> the Micron2HTML converter emits for `! tokens. */
+#page-content strong {
+  font-weight: normal;
+  text-shadow: 0.5px 0 0 currentColor;
+}
+
+#page-content {
+  flex: 1;
+  overflow: auto;
+  /* MeshChat parity: uniform 12px padding (Tailwind `p-3`) on the container.
+   * All inner elements have NO horizontal padding so text is flush with the
+   * container's content edge — and heading bgs span exactly the same width
+   * as the body text rows (no 1-char grey strip beside heading text).
+   *
+   * NomadPortal-specific (intentional deviation from MeshChat): never wrap
+   * Micron lines. Long lines extend off the right and the container shows
+   * a horizontal scrollbar — preserving box-drawing alignment, ASCII art,
+   * and code blocks that would otherwise break when wrapped. */
+  padding: 12px;
+  min-width: 0;
+  background: #000000;
+  color: #dddddd;
+  white-space: pre;
+  line-height: normal;
+  font-size: 16.64px;
+}
+
+#page-error {
+  margin: 20px 28px;
+  padding: 12px 16px;
+  background: #2a1010;
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 2px;
+}
+
+/* ---- Welcome screen ---- */
+#welcome { color: var(--text-dim); max-width: 560px; margin: 40px auto; text-align: center; }
+#welcome .welcome-art { color: var(--accent); margin-bottom: 20px; line-height: 1.4; }
+#welcome p { margin-bottom: 8px; }
+#welcome .muted { font-size: 11px; color: var(--text-dim); margin-top: 16px; }
+
+/* ---- Loading overlay ---- */
+#loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(19,19,19,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--accent);
+  gap: 10px;
+}
+#loading-overlay[hidden] { display: none; }
+.spinner {
+  animation: blink 0.8s step-end infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* =========================================================
+   Status bar
+   ========================================================= */
+#statusbar {
+  height: var(--statusbar-h);
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+#cache-info { margin-left: auto; }
+
+/* =========================================================
+   Micron-rendered content — MeshChat-parity rendering.
+   Reference: liamcottle/reticulum-meshchat → src/frontend/js/MicronParser.js
+   ========================================================= */
+/* MeshChat ignores `#!bg=` / `#!fg=` document headers (treats # lines as
+ * comments). We override Micron2HTML's `.mu-page` inline-style wrapper so the
+ * page bg/fg always come from `#page-content`, matching MeshChat. */
+.mu-page {
+  padding: 0;
+  min-height: 100%;
+  background: transparent !important;
+  color: inherit !important;
+}
+
+/* ---- Section headings — match MeshChat's dark-theme defaults ----
+ * Source: liamcottle/reticulum-meshchat → src/frontend/js/MicronParser.js
+ *   STYLES_DARK.heading1 = { fg: "222", bg: "bbb" }
+ *   STYLES_DARK.heading2 = { fg: "111", bg: "999" }
+ *   STYLES_DARK.heading3 = { fg: "000", bg: "777" }
+ * Author-supplied `Fxxx` flows through and overrides the default fg via the
+ * inline `style="color:..."` that the converter emits for inner spans. */
+.mu-h1, .mu-h2, .mu-h3 {
+  display: block;
+  font-family: var(--font-mono);
+  font-weight: bold;
+  /* `margin: 0` matches MeshChat's Tailwind preflight reset — its headings
+   * have no vertical spacing of their own; the only gap comes from the
+   * surrounding blank lines in the source.
+   *
+   * `margin-bottom: -1.08em` matches `.mu-line` so the next element doesn't
+   * sit on top of an extra empty row from Roboto Mono Nerd Font's inflated
+   * line metrics. */
+  margin: 0 0 -1.08em 0;
+  white-space: pre;
+}
+.mu-h1 { background: #bbbbbb; color: #222222; }
+.mu-h2 { background: #999999; color: #111111; }
+.mu-h3 { background: #777777; color: #000000; }
+
+/* ---- Regular lines & blanks — match MeshChat's `<pre>` wrapping behaviour:
+ *      preserve whitespace inside a line but wrap at viewport width, and
+ *      give blank lines a full line-height so they read like real blank rows
+ *      (MeshChat emits `<br>` for blanks; we use a div so we size manually). */
+/* Each Micron line is its own `<div>`. Roboto Mono Nerd Font has inflated
+ * vertical metrics (extra leading for the Nerd Font icon glyphs), so even
+ * at `line-height: 1` rows leave a small gap that breaks the box-drawing
+ * characters (║, │, ─). Forcing a small negative top margin pulls each line
+ * up enough to overlap and visually connect the box-drawing rows. */
+.mu-line  {
+  display: block;
+  /* `-1.08em` scales with the font-size (was tuned at 13px → -14px = ~1.08em).
+   * Keeps box-drawing rows touching at any font-size. */
+  margin: 0 0 -1.08em 0;
+  line-height: 1;
+  /* `white-space: pre` — never wrap; long lines scroll horizontally via the
+   * container (NomadPortal viewer choice, not Micron parity). */
+  white-space: pre;
+}
+.mu-blank { display: block; line-height: 1; height: 1em; margin-bottom: -1.08em; }
+.mu-h1, .mu-h2, .mu-h3 { line-height: 1.2; padding: 2px 0; }
+pre.mu-literal { line-height: 1; }
+
+/* ---- Dividers ----
+ * MeshChat parity:
+ *   `-`  / `--`  → plain thin horizontal line (browser-default <hr>)
+ *   `-=` / `=-`  → row of `=` characters
+ *   `-X`          → row of X (the source char)
+ *
+ * `.mu-hr-double` uses hardcoded `::before` content because the `<hr>`
+ * element has no text content.  `.mu-divider` uses `text-shadow` to repeat
+ * whatever single character the converter emitted. Both share the body
+ * text colour so they don't look dimmer than surrounding paragraph text. */
+/* Dividers align with body text — no extra horizontal padding (the
+ * 12px container padding on #page-content already keeps them inset
+ * from the screen edge). */
+.mu-hr {
+  display: block;
+  border: 0;
+  border-top: 1px solid currentColor;
+  /* `-1.08em` matches `.mu-line` to remove the empty row that the inflated
+   * Nerd Font metrics would otherwise leave below this divider. */
+  margin: 0 0 -1.08em 0;
+  height: 0;
+}
+.mu-hr-double {
+  display: block;
+  border: 0;
+  margin: 0 0 -1.08em 0;
+  height: 1em;
+  overflow: hidden;
+  white-space: nowrap;
+  color: inherit;
+  font-family: inherit;
+}
+.mu-hr-double::before {
+  content: "================================================================================================================================================================";
+}
+.mu-divider {
+  display: block;
+  margin: 0 0 -1.08em 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: inherit;
+  text-shadow:
+    1ch 0, 2ch 0, 3ch 0, 4ch 0, 5ch 0, 6ch 0, 7ch 0, 8ch 0, 9ch 0, 10ch 0,
+    11ch 0, 12ch 0, 13ch 0, 14ch 0, 15ch 0, 16ch 0, 17ch 0, 18ch 0, 19ch 0, 20ch 0,
+    21ch 0, 22ch 0, 23ch 0, 24ch 0, 25ch 0, 26ch 0, 27ch 0, 28ch 0, 29ch 0, 30ch 0,
+    31ch 0, 32ch 0, 33ch 0, 34ch 0, 35ch 0, 36ch 0, 37ch 0, 38ch 0, 39ch 0, 40ch 0,
+    41ch 0, 42ch 0, 43ch 0, 44ch 0, 45ch 0, 46ch 0, 47ch 0, 48ch 0, 49ch 0, 50ch 0,
+    51ch 0, 52ch 0, 53ch 0, 54ch 0, 55ch 0, 56ch 0, 57ch 0, 58ch 0, 59ch 0, 60ch 0,
+    61ch 0, 62ch 0, 63ch 0, 64ch 0, 65ch 0, 66ch 0, 67ch 0, 68ch 0, 69ch 0, 70ch 0,
+    71ch 0, 72ch 0, 73ch 0, 74ch 0, 75ch 0, 76ch 0, 77ch 0, 78ch 0, 79ch 0, 80ch 0,
+    81ch 0, 82ch 0, 83ch 0, 84ch 0, 85ch 0, 86ch 0, 87ch 0, 88ch 0, 89ch 0, 90ch 0,
+    91ch 0, 92ch 0, 93ch 0, 94ch 0, 95ch 0, 96ch 0, 97ch 0, 98ch 0, 99ch 0, 100ch 0,
+    101ch 0, 102ch 0, 103ch 0, 104ch 0, 105ch 0, 106ch 0, 107ch 0, 108ch 0, 109ch 0, 110ch 0,
+    111ch 0, 112ch 0, 113ch 0, 114ch 0, 115ch 0, 116ch 0, 117ch 0, 118ch 0, 119ch 0, 120ch 0,
+    121ch 0, 122ch 0, 123ch 0, 124ch 0, 125ch 0, 126ch 0, 127ch 0, 128ch 0, 129ch 0, 130ch 0,
+    131ch 0, 132ch 0, 133ch 0, 134ch 0, 135ch 0, 136ch 0, 137ch 0, 138ch 0, 139ch 0, 140ch 0,
+    141ch 0, 142ch 0, 143ch 0, 144ch 0, 145ch 0, 146ch 0, 147ch 0, 148ch 0, 149ch 0, 150ch 0;
+}
+
+/* MeshChat parity: line-level bg from a leading `B` token shouldn't fill
+ * the whole row. Micron2HTML emits `style="background-color:..."` on the
+ * `.mu-line` wrapper to mimic terminal behaviour; force it transparent so
+ * only the explicit `<span style="background-color:...">` segments show
+ * the bg colour, matching MeshChat's parser. */
+#page-content .mu-line {
+  background-color: transparent !important;
+}
+
+/* ---- Links ----
+ * MeshChat parity: links take whatever colour is active in the parser state
+ * (the author's `Fxxx` if any, or the plain default #ddd). They are not
+ * underlined by default; hover adds an underline. We mirror that with
+ * `color: inherit` so the surrounding span colour flows through. */
+a.mu-link {
+  color: inherit;
+  text-decoration: none;
+}
+a.mu-link:hover { text-decoration: underline; }
+
+a.mu-dynamic {
+  color: var(--warn);
+  font-size: 11px;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+/* ---- Inline formatting ---- */
+.mu-ul { text-decoration: underline; }
+
+/* ---- Form fields ----
+ * MeshChat parity: text inputs are white background with mid-grey text
+ * (matches the disabled-input look that MeshChat ships out of the box).
+ * Padding bumped from default browser metrics so they read at body size. */
+input.mu-field {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  color: #bababa;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  padding: 6px 8px;
+  border-radius: 2px;
+  cursor: not-allowed;
+}
+input.mu-field:not([disabled]) {
+  color: #bababa;
+  cursor: text;
+  outline: none;
+}
+input.mu-field:not([disabled]):focus {
+  border-color: var(--accent);
+}
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0 4px 0 0;
+}
+input[type="checkbox"][disabled], input[type="radio"][disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---- Literal / code blocks ----
+ * MeshChat parity: literal blocks have NO border, bg, or padding — they
+ * flow inline with surrounding text using the same font/colour. The boxed
+ * "code-block" appearance is a NomadPortal-specific embellishment we drop
+ * here. Whitespace preservation comes from `<pre>` itself.
+ *
+ * Selector includes `#page-content` so it beats the `#page-content pre`
+ * rule (lower in this file, used for the "Raw Micron view") on specificity. */
+#page-content pre.mu-literal {
+  white-space: pre;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Raw Micron view */
+#page-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* =========================================================
+   Chat / Conversations
+   ========================================================= */
+
+/* tab-chats needs its own flex layout so the two sub-views fill correctly */
+#tab-chats { overflow: hidden; }
+
+#chat-list-view, #chat-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+#chat-list-view[hidden], #chat-view[hidden] { display: none; }
+
+#chat-list-inner { flex: 1; overflow-y: auto; }
+
+#chat-list-footer {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+}
+#btn-compose-new {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+#btn-compose-new:hover { background: #1a2a35; }
+
+/* Conversation list items */
+.conv-item {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.conv-item:hover { background: var(--bg3); }
+.conv-item.conv-unread .conv-name { font-weight: bold; color: var(--text); }
+.conv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+.conv-name { font-size: 12px; color: var(--text-dim); }
+.conv-time { font-size: 10px; color: var(--text-dim); flex-shrink: 0; margin-left: 4px; }
+.conv-preview {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-you { color: var(--accent); }
+
+/* Chat header (back btn + name) */
+#chat-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+}
+#chat-contact-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--accent2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chat log (the scrollable bubble area) */
+#chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Inline compose area */
+#chat-compose {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#chat-compose select {
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  border-radius: 2px;
+  outline: none;
+}
+.chat-input-row { display: flex; gap: 4px; align-items: flex-end; }
+#chat-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 2px;
+  outline: none;
+  resize: none;
+  line-height: 1.4;
+}
+#chat-input:focus { border-color: var(--accent); }
+#btn-chat-send {
+  background: var(--accent);
+  border: none;
+  color: var(--bg);
+  padding: 4px 9px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  align-self: flex-end;
+  line-height: 1;
+}
+#btn-chat-send:hover { background: #7ec8e3; }
+#btn-chat-send:disabled { opacity: 0.4; cursor: default; }
+
+/* Chat bubbles */
+.chat-bubble {
+  max-width: 88%;
+  padding: 5px 9px;
+  border-radius: 10px;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.chat-bubble-received {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+.chat-bubble-sent {
+  background: #173040;
+  border: 1px solid #2a5570;
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+}
+.chat-title {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+.chat-content { white-space: pre-wrap; }
+.chat-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  text-align: right;
+}
+.chat-state-ok   { color: var(--accent2); }
+.chat-state-fail { color: var(--error); }
+.chat-state-pend { color: var(--warn); }
+
+/* =========================================================
+   Mobile / narrow-screen layout
+   ========================================================= */
+@media (max-width: 640px) {
+  :root { --sidebar-w: 100%; }
+
+  /* Topbar: let items wrap and shrink */
+  #topbar { flex-wrap: wrap; height: auto; padding: 6px 8px; gap: 6px; }
+  #nav-bar { order: 2; width: 100%; }
+  #topbar-actions { order: 3; }
+  #status-indicator { order: 4; }
+  #user-area { order: 5; border-left: none; padding-left: 0; }
+
+  /* Sidebar overlays content on mobile */
+  #layout { position: relative; }
+  #sidebar {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    z-index: 20;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    width: 85%;
+    max-width: 300px;
+  }
+  #sidebar.mobile-open { transform: translateX(0); box-shadow: 4px 0 16px rgba(0,0,0,.5); }
+
+  /* Content fills full width */
+  #content-wrap { width: 100%; }
+
+  /* Sidebar toggle button (injected by JS) */
+  #btn-sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px; height: 32px;
+    cursor: pointer;
+    font-size: 16px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* Mobile overlay backdrop */
+  #sidebar-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.4);
+    z-index: 19;
+  }
+  #sidebar-backdrop.visible { display: block; }
+
+  /* Admin panel — stack nav vertically */
+  #admin-topbar { flex-wrap: wrap; height: auto; padding: 8px; gap: 0; }
+  .admin-brand  { border-right: none; border-bottom: 1px solid var(--border);
+                  width: 100%; padding: 6px 0; margin-bottom: 4px; }
+  nav.admin-nav { flex-wrap: wrap; width: 100%; }
+  nav.admin-nav a { padding: 6px 10px; font-size: 12px; }
+  .admin-user { margin-left: 0; border-left: none; padding-left: 0;
+                border-top: 1px solid var(--border); width: 100%; padding-top: 6px; }
+  #admin-content { padding: 16px; }
+}

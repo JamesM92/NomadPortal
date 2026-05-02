@@ -1,0 +1,86 @@
+services:
+  nomadportal:
+    build: .
+    image: nomadportal:latest
+    container_name: nomadportal
+    restart: unless-stopped
+    # Run as UID 1000 (matches the nomadnet user in the image).
+    # Ensure the host config directory is owned by that UID:
+    #   chown -R 1000:1000 ./config
+    user: "1000:1000"
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - ./config:/config
+      - ./site:/site       # optional: add pages/ and files/ here to host a NomadNet node
+    environment:
+      RNS_CONFIG_DIR: /config/reticulum
+      NOMADNET_CONFIG: /config/nomadnetwork
+      CONFIG_YML: /config/config.yml
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8080"
+      WEB_PORT_HTTPS: "8443"
+      CACHE_TTL: "300"
+      LOG_LEVEL: INFO
+
+      # ── Local admin login ──────────────────────────────────────────
+      ADMIN_USERNAME: admin
+      # Set a strong password here to enable local admin login.
+      # Local login is disabled while this is empty (the app logs a warning at startup).
+      # CHANGE THIS BEFORE EXPOSING TO ANY NETWORK — "changeme" is a placeholder.
+      ADMIN_PASSWORD: "changeme"
+
+      # ── Flask session key ───────────────────────────────────────────
+      # Set explicitly so sessions survive container rebuilds.
+      FLASK_SECRET_KEY: ""
+
+      # ── Reverse proxy / TLS ─────────────────────────────────────────
+      # Set TRUSTED_PROXIES to the number of upstream proxy hops (e.g. 1
+      # for a single nginx/Caddy in front). This enables correct client-IP
+      # detection for rate limiting. Leave 0 if directly exposed.
+      TRUSTED_PROXIES: "0"
+      # Set to "true" when TLS is terminated by a reverse proxy and you
+      # want the app to redirect plain HTTP → HTTPS.
+      HTTPS_REDIRECT: "false"
+
+      # ── Site hosting ────────────────────────────────────────────────
+      # Create ./site/pages/ and ./site/files/ on the host, then set:
+      SITE_NAME: "NomadPortal"
+      SITE_PAGES_DIR: /site/pages
+      SITE_FILES_DIR: /site/files
+      
+
+      # ── OIDC / SSO ──────────────────────────────────────────────────
+      # Leave empty to disable OIDC entirely (local admin login still works).
+      # For real values, copy docker-compose.override.yml.example to
+      # docker-compose.override.yml and set them there — keeps secrets out
+      # of the committed file and lets your config survive a `git pull`.
+      OIDC_CLIENT_ID: ""
+      OIDC_CLIENT_SECRET: ""
+      # Discovery URL examples:
+      #   Keycloak:   https://auth.example.com/realms/<realm>/.well-known/openid-configuration
+      #   Authentik:  https://auth.example.com/application/o/<slug>/.well-known/openid-configuration
+      #   Auth0:      https://<tenant>.auth0.com/.well-known/openid-configuration
+      #   Google:     https://accounts.google.com/.well-known/openid-configuration
+      OIDC_DISCOVERY_URL: ""
+
+      OIDC_ALLOWED_EMAILS: ""
+      OIDC_ALLOWED_SUBJECTS: ""
+      # Users on neither list are treated as standard users. Use the
+      # local ADMIN_USERNAME / ADMIN_PASSWORD account as the bootstrap
+      # admin, then promote OIDC users from Admin → Users.
+      OIDC_ADMIN_EMAILS: ""
+      OIDC_ADMIN_SUBJECTS: ""
+      # Set to "true" to skip TLS verification of the OIDC provider — only
+      # appropriate for trusted-LAN setups with a self-signed Authentik /
+      # Keycloak. Logs a warning at startup. Leave empty for production.
+      OIDC_INSECURE_SKIP_VERIFY: ""
+
+    # Reticulum needs CAP_NET_RAW for some transports (e.g. LoRa via serial).
+    # Remove if you only use TCP/UDP interfaces.
+    cap_add:
+      - NET_RAW
+    # Uncomment for USB radio hardware (RNode, etc.):
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0

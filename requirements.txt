@@ -1,0 +1,23 @@
+# Pinned dependencies for reproducible Docker builds.
+#
+# The Reticulum stack (rns / lxmf / nomadnet) ships frequently with tight
+# inter-package version constraints. The versions below are a known-good
+# mutually-compatible set — verify with `pip install -r requirements.txt`
+# in a fresh venv before bumping any of them.
+
+# Reticulum stack
+rns==1.1.3
+lxmf==0.9.4
+nomadnet==0.9.8
+
+# Web app stack
+flask==3.0.0
+flask-login==0.6.3
+authlib==1.3.0
+requests==2.31.0
+pyyaml==6.0.1
+gunicorn==22.0.0
+pytest==8.0.0
+
+# Renderer — pinned by tag
+Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@v1.0.3

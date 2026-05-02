@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 — Not Found</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; }
+    .err-box { text-align: center; color: var(--text-dim); max-width: 360px; }
+    .err-code { font-size: 64px; font-weight: bold; color: var(--border); line-height: 1; }
+    .err-msg  { font-size: 14px; color: var(--text); margin: 12px 0 6px; }
+    .err-sub  { font-size: 12px; margin-bottom: 20px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="err-box">
+    <div class="err-code">404</div>
+    <div class="err-msg">Page not found</div>
+    <div class="err-sub">The path you requested doesn't exist on this server.</div>
+    <a href="/">&#8592; Back to home</a>
+  </div>
+</body>
+</html>

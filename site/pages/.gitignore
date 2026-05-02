@@ -1,0 +1,7 @@
+# Anything dropped into this directory at runtime is user content
+# and must not be committed. The directory itself is preserved by .gitkeep
+# and seeded with a default index.mu from templates/site/index.mu on first
+# container start (see entrypoint.sh).
+*
+!.gitignore
+!.gitkeep

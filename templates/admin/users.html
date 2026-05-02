@@ -1,0 +1,142 @@
+{% extends "admin/base.html" %}
+{% block title %}Users{% endblock %}
+
+{% block content %}
+<div class="section-title">Users</div>
+
+<!-- Create user -->
+<div class="card" style="max-width:520px;margin-bottom:24px;">
+  <div class="card-title">Create Local User</div>
+  <form method="post" action="{{ url_for('admin.user_create') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;">
+        <label class="dim" style="font-size:11px;">Username</label>
+        <input type="text" name="username" required autocomplete="off"
+               style="background:var(--bg);border:1px solid var(--border);color:var(--text);
+                      font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:2px;outline:none;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;">
+        <label class="dim" style="font-size:11px;">Password (min 8 chars)</label>
+        <input type="password" name="password" required autocomplete="new-password"
+               style="background:var(--bg);border:1px solid var(--border);color:var(--text);
+                      font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:2px;outline:none;">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;white-space:nowrap;padding-bottom:2px;">
+        <input type="checkbox" name="is_admin"> Admin
+      </label>
+      <button class="btn btn-primary btn-sm" type="submit" style="padding:6px 14px;">Create</button>
+    </div>
+  </form>
+</div>
+
+<!-- Backup -->
+<div class="card" style="max-width:520px;margin-bottom:24px;">
+  <div class="card-title">Backup</div>
+  <p class="dim" style="margin-bottom:12px;font-size:12px;line-height:1.6;">
+    Download a tar.gz of <code>/config</code> — identities, user accounts, contacts, message
+    history, blocklist, and UI settings. Excludes regenerated runtime state (TLS cert,
+    LXMF storage, Reticulum routing tables).
+    <strong>Contains private key material</strong> — store it securely.
+  </p>
+  <a href="{{ url_for('admin.backup_download') }}" class="btn btn-primary btn-sm"
+     download>&#11015; Download backup</a>
+  <p class="dim" style="margin-top:10px;font-size:12px;">
+    Restore by stopping the container, replacing the contents of <code>./config/</code>
+    with the unpacked archive, and starting the container again.
+  </p>
+</div>
+
+<!-- New-user policy (OIDC) -->
+<div class="card" style="max-width:520px;margin-bottom:24px;">
+  <div class="card-title">OIDC New-User Policy</div>
+  <form method="post" action="{{ url_for('admin.users_settings') }}" style="display:flex;align-items:center;gap:14px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+      <input type="checkbox" name="new_users_enabled"
+             {% if new_users_enabled %}checked{% endif %}
+             data-autosubmit>
+      Enable new OIDC accounts automatically on first login
+    </label>
+    <noscript><button class="btn btn-primary btn-sm" type="submit">Save</button></noscript>
+  </form>
+</div>
+
+<!-- User table -->
+<div class="card">
+  <div class="card-title">All accounts ({{ users|length }})</div>
+  {% if users %}
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email / Type</th>
+        <th>Last seen</th>
+        <th>Status</th>
+        <th>Admin</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.name }}</td>
+        <td class="dim" style="font-size:11px;">
+          {% if u.get('local') %}
+            <span style="color:var(--warn);">local</span>
+          {% else %}
+            {{ u.email or u.sub }}
+          {% endif %}
+        </td>
+        <td class="dim">{{ u.last_seen | strftime }}</td>
+        <td>
+          {% if u.enabled %}
+            <span class="badge badge-ok">enabled</span>
+          {% else %}
+            <span class="badge badge-off">disabled</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('admin.user_set_admin', sub=u.sub) }}" style="display:inline;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="is_admin" value="{{ '0' if u.get('effective_admin') else '1' }}">
+            <button class="btn btn-sm {{ 'btn-primary' if u.get('effective_admin') else 'btn-neutral' }}"
+                    type="submit" title="{{ 'Remove admin' if u.get('effective_admin') else 'Make admin' }}">
+              {{ '★ admin' if u.get('effective_admin') else '☆' }}
+            </button>
+          </form>
+          {% if u.get('admin_via_env') %}
+            <span class="dim" style="font-size:10px;margin-left:4px;"
+                  title="Admin via OIDC_ADMIN_EMAILS / OIDC_ADMIN_SUBJECTS env var. Click ★ to override.">
+              (via env)
+            </span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if u.enabled %}
+          <form method="post" action="{{ url_for('admin.user_disable', sub=u.sub) }}" style="display:inline;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-warn" type="submit"
+                    data-confirm="Disable {{ u.name }}?">Disable</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('admin.user_enable', sub=u.sub) }}" style="display:inline;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-primary" type="submit">Enable</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('admin.user_delete', sub=u.sub) }}" style="display:inline;margin-left:4px;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-danger" type="submit"
+                    data-confirm="Permanently delete {{ u.name }}?">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="dim">No users yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

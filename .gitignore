@@ -1,0 +1,115 @@
+# ---------------------------------------------------------------------------
+# Site content — user-provided, not tracked.
+# A default index.mu lives at templates/site/index.mu and is copied into
+# site/pages/ on first container start by entrypoint.sh.
+# ---------------------------------------------------------------------------
+site/pages/*
+!site/pages/.gitkeep
+site/files/*
+!site/files/.gitkeep
+
+# Per-instance Python packages and writable application state
+# (managed by entrypoint.sh and operator scripts respectively).
+site/lib/
+site/data/
+site/requirements.txt
+
+# ---------------------------------------------------------------------------
+# Local-only Docker Compose override — secrets, real hostnames, etc.
+# Auto-merged on `docker compose up`. NEVER commit this file.
+# ---------------------------------------------------------------------------
+docker-compose.override.yml
+
+# ---------------------------------------------------------------------------
+# Runtime config and user data — never commit
+# ---------------------------------------------------------------------------
+
+# User data files
+config/messages.json
+config/contacts.yml
+config/contacts/
+config/nodes.json
+config/blocklist.json
+config/favorites.json
+config/users.yml
+config/lxmf_peers.json
+config/ui_settings.json
+config/iface_stats.json
+
+# Private key material and secrets
+config/secret.key
+config/reticulum/secret.key
+config/reticulum/site_identity.id
+config/reticulum/identities/*
+!config/reticulum/identities/.gitkeep
+config/ssl/*
+!config/ssl/.gitkeep
+
+# Reticulum runtime state — regenerated from config.yml on start
+config/config.yml
+config/reticulum/config
+config/reticulum/storage/
+config/reticulum/interfaces
+config/reticulum/interfaces.conf
+config/reticulum/lxmf/
+
+# LXMF and NomadNet runtime
+config/lxmf/
+config/nomadnetwork/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Testing
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---------------------------------------------------------------------------
+# IDEs
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Environment files
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log

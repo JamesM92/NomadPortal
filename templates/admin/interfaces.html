@@ -1,0 +1,303 @@
+{% extends "admin/base.html" %}
+{% block title %}Interfaces{% endblock %}
+
+{% block content %}
+{% macro _mode_select(name, current) %}
+<select name="{{ name }}" style="width:104px;font-size:12px;padding:4px 6px;">
+  <option value=""             {{ 'selected' if not current }}>full</option>
+  <option value="gateway"      {{ 'selected' if current == 'gateway' }}>gateway</option>
+  <option value="access_point" {{ 'selected' if current == 'access_point' }}>access point</option>
+  <option value="roaming"      {{ 'selected' if current == 'roaming' }}>roaming</option>
+  <option value="boundary"     {{ 'selected' if current == 'boundary' }}>boundary</option>
+</select>
+{% endmacro %}
+
+<div class="section-title">Interface Configuration</div>
+
+<div class="notice">
+  Changes are saved to <strong>config.yml</strong>. Click <strong>Apply now</strong>
+  after saving to gracefully reload Reticulum without restarting the container —
+  active sessions will be revoked.
+</div>
+
+<form method="post" action="{{ url_for('admin.interfaces_save') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <!-- ── Transport Mode ──────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Transport Mode</div>
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;">
+      <input type="checkbox" name="transport_mode" style="accent-color:var(--accent);width:16px;height:16px;"
+             {{ 'checked' if transport_mode }}>
+      <div>
+        <strong>Enable Transport Mode</strong>
+        <div class="dim" style="margin-top:2px;">
+          Routes traffic for other Reticulum nodes. Enable this if you want other
+          devices on your home network to share your testnet connection, or if
+          this container acts as a hub. Disable for a simple leaf node.
+        </div>
+      </div>
+    </label>
+  </div>
+
+  <!-- ── AutoInterface ───────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">AutoInterface — zero-config local network discovery</div>
+    <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;white-space:nowrap;">
+        <input type="checkbox" name="auto_enabled" style="accent-color:var(--accent);width:16px;height:16px;"
+               {{ 'checked' if ifaces.get('auto',{}).get('enabled') }}>
+        Enabled
+      </label>
+      <div class="form-field" style="flex:1;min-width:200px;">
+        <label>Group ID <span class="dim">(optional — isolate from other Reticulum users on same LAN)</span></label>
+        <input type="text" name="auto_group_id" style="width:260px;"
+               value="{{ ifaces.get('auto',{}).get('group_id','') }}"
+               placeholder="leave blank for default">
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TCP Clients ─────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">TCP Client Interfaces — connect to remote hubs / testnets</div>
+    <table class="admin-table" id="tcp-client-table" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:32px" title="Enabled">On</th>
+          <th style="width:140px">Name</th>
+          <th>Target Host</th>
+          <th style="width:70px">Port</th>
+          <th style="width:110px">Mode</th>
+          <th style="width:140px">Network Name</th>
+          <th style="width:120px">Passphrase</th>
+          <th style="width:36px"></th>
+        </tr>
+      </thead>
+      <tbody id="tcp-client-body">
+        {% for i, c in (ifaces.get('tcp_clients') or []) | enumerate %}
+        <tr>
+          <td><input type="checkbox" name="tcp_client_enabled" value="{{ i }}"
+                     style="accent-color:var(--accent)" {{ 'checked' if c.get('enabled') }}
+                    ></td>
+          <td><input type="text" name="tcp_client_name" value="{{ c.name }}"
+                     style="width:130px"></td>
+          <td><input type="text" name="tcp_client_host" value="{{ c.host }}"
+                     placeholder="hostname or IP" style="width:100%;min-width:160px"
+                    ></td>
+          <td><input type="number" name="tcp_client_port" value="{{ c.port }}"
+                     min="1" max="65535" style="width:64px"></td>
+          <td>{{ _mode_select('tcp_client_mode', c.get('mode','')) }}</td>
+          <td><input type="text" name="tcp_client_network_name"
+                     value="{{ c.get('network_name','') }}" placeholder="optional"
+                     style="width:130px"></td>
+          <td><input type="text" name="tcp_client_passphrase"
+                     value="{{ c.get('passphrase','') }}" placeholder="optional"
+                     style="width:110px"></td>
+          <td><button type="button" class="btn btn-sm btn-danger"
+                      data-action="remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-sm btn-neutral mt8"
+            id="btn-add-tcp-client">+ Add TCP Client</button>
+  </div>
+
+  <!-- ── TCP Servers ─────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">TCP Server Interfaces — accept incoming connections</div>
+    <table class="admin-table" id="tcp-server-table" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:32px">On</th>
+          <th style="width:140px">Name</th>
+          <th style="width:140px">Listen IP</th>
+          <th style="width:70px">Port</th>
+          <th style="width:110px">Mode</th>
+          <th style="width:140px">Network Name</th>
+          <th style="width:120px">Passphrase</th>
+          <th style="width:36px"></th>
+        </tr>
+      </thead>
+      <tbody id="tcp-server-body">
+        {% for i, s in (ifaces.get('tcp_servers') or []) | enumerate %}
+        <tr>
+          <td><input type="checkbox" name="tcp_server_enabled" value="{{ i }}"
+                     style="accent-color:var(--accent)" {{ 'checked' if s.get('enabled') }}
+                    ></td>
+          <td><input type="text" name="tcp_server_name" value="{{ s.name }}"
+                     style="width:130px"></td>
+          <td><input type="text" name="tcp_server_ip" value="{{ s.get('listen_ip','0.0.0.0') }}"
+                     style="width:130px"></td>
+          <td><input type="number" name="tcp_server_port" value="{{ s.port }}"
+                     min="1" max="65535" style="width:64px"></td>
+          <td>{{ _mode_select('tcp_server_mode', s.get('mode','')) }}</td>
+          <td><input type="text" name="tcp_server_network_name"
+                     value="{{ s.get('network_name','') }}" placeholder="optional"
+                     style="width:130px"></td>
+          <td><input type="text" name="tcp_server_passphrase"
+                     value="{{ s.get('passphrase','') }}" placeholder="optional"
+                     style="width:110px"></td>
+          <td><button type="button" class="btn btn-sm btn-danger"
+                      data-action="remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-sm btn-neutral mt8"
+            id="btn-add-tcp-server">+ Add TCP Server</button>
+  </div>
+
+  <!-- ── UDP ─────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">UDP Interfaces — LAN broadcast / custom UDP links</div>
+    <table class="admin-table" id="udp-table" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:32px">On</th>
+          <th style="width:130px">Name</th>
+          <th style="width:130px">Listen IP</th>
+          <th style="width:70px">Listen Port</th>
+          <th style="width:160px">Forward IP</th>
+          <th style="width:70px">Fwd Port</th>
+          <th style="width:36px"></th>
+        </tr>
+      </thead>
+      <tbody id="udp-body">
+        {% for i, u in (ifaces.get('udp') or []) | enumerate %}
+        <tr>
+          <td><input type="checkbox" name="udp_enabled" value="{{ i }}"
+                     style="accent-color:var(--accent)" {{ 'checked' if u.get('enabled') }}
+                    ></td>
+          <td><input type="text" name="udp_name" value="{{ u.name }}"
+                     style="width:120px"></td>
+          <td><input type="text" name="udp_listen_ip" value="{{ u.get('listen_ip','0.0.0.0') }}"
+                     style="width:120px"></td>
+          <td><input type="number" name="udp_listen_port" value="{{ u.get('listen_port',4242) }}"
+                     min="1" max="65535" style="width:64px"></td>
+          <td><input type="text" name="udp_forward_ip" value="{{ u.get('forward_ip','255.255.255.255') }}"
+                     style="width:150px"></td>
+          <td><input type="number" name="udp_forward_port" value="{{ u.get('forward_port', u.get('listen_port',4242)) }}"
+                     min="1" max="65535" style="width:64px"></td>
+          <td><button type="button" class="btn btn-sm btn-danger"
+                      data-action="remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-sm btn-neutral mt8"
+            id="btn-add-udp">+ Add UDP Interface</button>
+  </div>
+
+  <!-- ── RNodes ──────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">RNode Interfaces — LoRa radio (USB / serial)</div>
+    <table class="admin-table" id="rnode-table">
+      <thead>
+        <tr>
+          <th style="width:32px">On</th>
+          <th>Name</th>
+          <th>Serial Port</th>
+          <th title="Frequency in Hz">Freq (Hz)</th>
+          <th title="Bandwidth in Hz">BW (Hz)</th>
+          <th title="TX Power in dBm">TX dBm</th>
+          <th title="Spreading Factor 7–12">SF</th>
+          <th title="Coding Rate 5–8">CR</th>
+          <th style="width:36px"></th>
+        </tr>
+      </thead>
+      <tbody id="rnode-body">
+        {% for i, r in (ifaces.get('rnodes') or []) | enumerate %}
+        <tr>
+          <td><input type="checkbox" name="rnode_enabled" value="{{ i }}"
+                     style="accent-color:var(--accent)" {{ 'checked' if r.get('enabled') }}
+                    ></td>
+          <td><input type="text" name="rnode_name" value="{{ r.name }}"
+                     style="width:120px"></td>
+          <td><input type="text" name="rnode_port" value="{{ r.port }}"
+                     style="width:130px" placeholder="/dev/ttyUSB0"></td>
+          <td><input type="number" name="rnode_frequency"
+                     value="{{ r.get('frequency',867500000) }}" style="width:100px"
+                    ></td>
+          <td><input type="number" name="rnode_bandwidth"
+                     value="{{ r.get('bandwidth',125000) }}" style="width:90px"
+                    ></td>
+          <td><input type="number" name="rnode_txpower"
+                     value="{{ r.get('txpower',7) }}" min="0" max="27" style="width:56px"
+                    ></td>
+          <td><input type="number" name="rnode_sf"
+                     value="{{ r.get('spreading_factor',8) }}" min="5" max="12" style="width:48px"
+                    ></td>
+          <td><input type="number" name="rnode_cr"
+                     value="{{ r.get('coding_rate',5) }}" min="5" max="8" style="width:48px"
+                    ></td>
+          <td><button type="button" class="btn btn-sm btn-danger"
+                      data-action="remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-sm btn-neutral mt8"
+            id="btn-add-rnode">+ Add RNode</button>
+    <div class="dim" style="margin-top:8px;">
+      Popular presets:
+      <a href="#" data-action="rnode-preset" data-preset="eu868" style="color:var(--accent);font-size:12px;">EU 868 MHz</a> ·
+      <a href="#" data-action="rnode-preset" data-preset="us915" style="color:var(--accent);font-size:12px;">US 915 MHz</a> ·
+      <a href="#" data-action="rnode-preset" data-preset="au915" style="color:var(--accent);font-size:12px;">AU 915 MHz</a>
+    </div>
+  </div>
+
+  <!-- ── I2P ─────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">I2P Interfaces — globally reachable addresses over I2P</div>
+    <table class="admin-table" id="i2p-table" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:32px">On</th>
+          <th style="width:130px">Name</th>
+          <th style="width:90px" title="Accept inbound connections">Connectable</th>
+          <th>Peers (comma-separated .b32.i2p addresses)</th>
+          <th style="width:36px"></th>
+        </tr>
+      </thead>
+      <tbody id="i2p-body">
+        {% for i, ip in (ifaces.get('i2p') or []) | enumerate %}
+        <tr>
+          <td><input type="checkbox" name="i2p_enabled" value="{{ i }}"
+                     style="accent-color:var(--accent)" {{ 'checked' if ip.get('enabled') }}
+                    ></td>
+          <td><input type="text" name="i2p_name" value="{{ ip.name }}"
+                     style="width:120px"></td>
+          <td style="text-align:center;">
+            <input type="checkbox" name="i2p_connectable" value="{{ i }}"
+                   style="accent-color:var(--accent)" {{ 'checked' if ip.get('connectable') }}
+                  >
+          </td>
+          <td><input type="text" name="i2p_peers"
+                     value="{{ (ip.get('peers') or []) | join(', ') }}"
+                     placeholder="abc123.b32.i2p, def456.b32.i2p"
+                     style="width:100%"></td>
+          <td><button type="button" class="btn btn-sm btn-danger"
+                      data-action="remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-sm btn-neutral mt8"
+            id="btn-add-i2p">+ Add I2P Interface</button>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
+    <button type="submit" class="btn btn-primary">Save Configuration</button>
+    <button type="button" id="btn-apply-now" class="btn btn-warn"
+            data-reload-url="{{ url_for('admin.interfaces_reload') }}"
+            data-confirm="Reload Reticulum now? All active sessions will be revoked.">Apply now</button>
+    <span id="apply-status" class="dim"></span>
+  </div>
+
+</form>
+
+
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-interfaces.js"></script>{% endblock %}

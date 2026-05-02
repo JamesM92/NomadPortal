@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}Admin{% endblock %} — NomadPortal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+<div id="admin-wrap">
+
+  <header id="admin-topbar">
+    <div class="admin-brand">
+      <a href="/">{{ app_title_html | safe }}</a>
+      <span style="color:var(--text-dim)">&#8250;</span>
+      <span>Admin</span>
+    </div>
+    <nav class="admin-nav">
+      <a href="{{ url_for('admin.dashboard') }}"  class="{{ 'active' if request.endpoint == 'admin.dashboard' }}">&#9632; Dashboard</a>
+      <a href="{{ url_for('admin.interfaces') }}" class="{{ 'active' if request.endpoint in ('admin.interfaces','admin.interfaces_save') }}">&#9675; Interfaces</a>
+      <a href="{{ url_for('admin.cache_view') }}" class="{{ 'active' if 'cache' in (request.endpoint or '') }}">&#9702; Cache</a>
+      <a href="{{ url_for('admin.users') }}"      class="{{ 'active' if 'users' in (request.endpoint or '') }}">&#9671; Users</a>
+      <a href="{{ url_for('admin.sessions') }}"   class="{{ 'active' if 'session' in (request.endpoint or '') }}">&#9678; Sessions</a>
+      <a href="{{ url_for('admin.logs_page') }}"  class="{{ 'active' if request.endpoint in ('admin.logs_page','admin.logs_stream') }}">&#9776; Logs</a>
+      <a href="{{ url_for('admin.audit_page') }}" class="{{ 'active' if 'audit' in (request.endpoint or '') }}">&#9873; Audit</a>
+      <a href="{{ url_for('admin.settings') }}"   class="{{ 'active' if request.endpoint == 'admin.settings' }}">&#9881; Settings</a>
+      <a href="{{ url_for('admin.identities') }}" class="{{ 'active' if 'identit' in (request.endpoint or '') }}">&#9670; Identities</a>
+    </nav>
+    <div class="admin-user">
+      <span>{{ user.name }}</span>
+      <a href="{{ url_for('auth.logout') }}">Logout</a>
+    </div>
+  </header>
+
+  <div class="flash-wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+  </div>
+
+  <main id="admin-content">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+<script src="/static/js/admin-base.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

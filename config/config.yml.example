@@ -1,0 +1,40 @@
+# NomadPortal optional configuration file.
+#
+# Copy this file to config/config.yml and edit to enable interfaces.
+# The application also exposes interface configuration through the
+# Admin → Settings UI, which writes back to this file.
+#
+# When this file exists, its `interfaces` block is rendered into the
+# `[interfaces]` section of config/reticulum/config on each start.
+
+interfaces:
+  # AutoInterface — zero-config local network discovery (LAN/WiFi).
+  auto:
+    enabled: false
+
+  # I2P tunnels — list of { name, b32, enabled }.
+  i2p: []
+
+  # RNode LoRa radios — list of devices (see admin UI for full schema).
+  rnodes: []
+
+  # TCP clients — connect to remote Reticulum hubs / testnet entry points.
+  tcp_clients:
+    - name: RNS Testnet Dublin
+      host: dublin.connect.reticulum.network
+      port: 4965
+      enabled: false
+    - name: RNS Testnet BetweenTheBorders
+      host: reticulum.betweentheborders.com
+      port: 4242
+      enabled: false
+
+  # TCP servers — accept incoming Reticulum connections.
+  tcp_servers: []
+
+  # UDP interfaces.
+  udp: []
+
+# Set true to act as a transport node (route traffic for other peers).
+# Only enable on always-on, stationary hosts.
+transport_mode: false

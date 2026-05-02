@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a bug or unexpected behaviour
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+        For security issues, **do not** open a public issue — see [SECURITY.md](../SECURITY.md).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect to happen?
+      placeholder: When I do X, the app does Y, but I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: e.g. v0.1.0 or commit abc1234
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker Compose (default)
+        - Docker (custom)
+        - Bare metal / direct Python
+        - Reverse proxy (nginx)
+        - Reverse proxy (Caddy)
+        - Reverse proxy (other)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Container logs from around when the issue occurred. Set `LOG_LEVEL=DEBUG` for more detail.
+        Redact any IPs, hashes, or other identifying information you don't want public.
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration (with secrets redacted)
+      description: Relevant parts of your `docker-compose.yml` or environment variables.
+      render: yaml

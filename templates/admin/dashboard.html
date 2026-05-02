@@ -1,0 +1,274 @@
+{% extends "admin/base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="section-title">Dashboard</div>
+
+<!-- Top stats -->
+<div class="stat-grid">
+  <div class="stat-box">
+    <div class="stat-label">Nodes discovered</div>
+    <div class="stat-value">{{ nodes | length }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Announces received</div>
+    <div class="stat-value">{{ rns_status.total_announces }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Cache entries</div>
+    <div class="stat-value">{{ cache_stats.live }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Uptime</div>
+    <div class="stat-value" style="font-size:16px;padding-top:6px;">
+      {% set h = uptime_s // 3600 %}{% set m = (uptime_s % 3600) // 60 %}{% set s = uptime_s % 60 %}
+      {{ "%02d:%02d:%02d" | format(h, m, s) }}
+    </div>
+  </div>
+</div>
+
+<!-- RNS interface status -->
+<div class="card">
+  <div class="card-title">Reticulum Interfaces</div>
+  {% macro fmtbytes(n) %}
+    {%- if n >= 1073741824 %}{{ (n / 1073741824) | round(2) }} GB
+    {%- elif n >= 1048576 %}{{ (n / 1048576) | round(1) }} MB
+    {%- elif n >= 1024 %}{{ (n / 1024) | round(1) }} KB
+    {%- elif n > 0 %}{{ n }} B
+    {%- else %}—{%- endif %}
+  {%- endmacro %}
+  {% if rns_status.interfaces %}
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Interface</th>
+        <th>Status</th>
+        <th title="Bytes received this session">Session RX</th>
+        <th title="Bytes sent this session">Session TX</th>
+        <th title="Bytes received across all sessions">Lifetime RX</th>
+        <th title="Bytes sent across all sessions">Lifetime TX</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for iface in rns_status.interfaces %}
+      <tr>
+        <td class="mono">{{ iface.name }}</td>
+        <td>
+          {% if iface.online is none %}
+            <span class="badge badge-off">unknown</span>
+          {% elif iface.online %}
+            <span class="badge badge-ok">online</span>
+          {% else %}
+            <span class="badge badge-off" style="color:var(--error);border-color:var(--error);">offline</span>
+          {% endif %}
+        </td>
+        <td class="dim">{{ fmtbytes(iface.rxb) }}</td>
+        <td class="dim">{{ fmtbytes(iface.txb) }}</td>
+        <td class="dim" style="color:var(--text);">{{ fmtbytes(iface.life_rxb) }}</td>
+        <td class="dim" style="color:var(--text);">{{ fmtbytes(iface.life_txb) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if rns_status.total_announces == 0 %}
+  <div class="notice">
+    No announces received yet. If interfaces show online, wait a few minutes —
+    NomadNet nodes announce every 15–30 min. If interfaces are offline or missing,
+    check your interface config and container logs.
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="dim">No interfaces loaded. Check that config.yml has at least one enabled interface and restart the container.</p>
+  {% endif %}
+</div>
+
+{% if site_info %}
+<!-- Site node (NomadNet hosting) -->
+<div class="card" style="max-width:560px;">
+  <div class="card-title">Hosted site node</div>
+  <p class="dim" style="margin-bottom:8px;">
+    Your site is announced automatically every 6 hours and on container start.
+    Click below to send an announce immediately so peers can find you faster.
+  </p>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span class="mono dim" style="font-size:12px;">{{ site_info.node_name }}</span>
+    <span class="mono" style="font-size:12px;color:var(--text);">{{ site_info.node_hash }}</span>
+    <button id="btn-site-announce" class="btn btn-sm btn-neutral"
+            style="margin-left:auto;white-space:nowrap;">Announce now</button>
+  </div>
+  <div id="site-announce-status" style="margin-top:8px;font-size:12px;color:var(--text-dim);"></div>
+</div>
+<script>
+(function () {
+  const btn  = document.getElementById('btn-site-announce');
+  const out  = document.getElementById('site-announce-status');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    out.textContent = 'Announcing…';
+    out.style.color = 'var(--text-dim)';
+    try {
+      const r = await fetch('/api/site/announce', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+        },
+        credentials: 'same-origin',
+      });
+      const data = await r.json();
+      if (data.ok) {
+        out.textContent = data.message || 'Announced.';
+        out.style.color = 'var(--accent2)';
+      } else {
+        out.textContent = data.error || 'Announce failed.';
+        out.style.color = 'var(--error)';
+      }
+    } catch (e) {
+      out.textContent = 'Announce failed: ' + e.message;
+      out.style.color = 'var(--error)';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endif %}
+
+<!-- Connect by hash -->
+<div class="card" style="max-width:560px;">
+  <div class="card-title">Connect to node by hash</div>
+  <p class="dim" style="margin-bottom:12px;">
+    If you know a node's destination hash, paste it here to browse directly
+    without waiting for an announce.
+  </p>
+  <form id="hash-form" style="display:flex;gap:8px;align-items:center;">
+    <input id="hashInput" type="text" placeholder="e.g. a1b2c3d4e5f6…"
+           style="flex:1;font-size:12px;" autocomplete="off" spellcheck="false">
+    <button class="btn btn-primary" type="submit">Browse</button>
+  </form>
+</div>
+
+<!-- Discovered nodes -->
+<div class="card">
+  <div class="card-title">Discovered Nodes ({{ nodes | length }})</div>
+  {% if nodes %}
+  <div style="overflow-x:auto;">
+  <table class="admin-table" id="node-table" style="min-width:900px;">
+    <thead>
+      <tr>
+        <th style="width:28px" title="Favorite"></th>
+        <th>Name</th>
+        <th title="Destination hash" style="width:130px">Hash</th>
+        <th title="Hops from our node — measures network distance" style="width:52px">Hops</th>
+        <th title="Announces received across all sessions" style="width:68px">Ann.</th>
+        <th title="Page fetches from our instance" style="width:52px">Views</th>
+        <th title="Total bytes received from this node" style="width:72px">RX</th>
+        <th title="Last page load time" style="width:72px">Last load</th>
+        <th title="Average page load time (EMA)" style="width:72px">Avg load</th>
+        <th title="Link establishment time — network latency proxy" style="width:90px">Ping</th>
+        <th title="Last announce received" style="width:82px">Last seen</th>
+        <th style="width:110px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(last_fav=false) %}
+      {% for node in nodes %}
+      {% set age = (now - node.last_seen) | int %}
+      {% set is_fav = node.get('favorited', false) %}
+      {% if not is_fav and ns.last_fav %}
+      <tr class="fav-divider">
+        <td colspan="12" style="padding:0;border-bottom:1px dashed var(--border);height:0;"></td>
+      </tr>
+      {% endif %}
+      {% set ns.last_fav = is_fav %}
+      <tr data-hash="{{ node.hash }}">
+        <td style="text-align:center;">
+          {% if node.get('is_hosted') %}
+          <span style="font-size:16px;color:var(--warn);" title="This node (always pinned)">★</span>
+          {% else %}
+          <button class="fav-btn" data-hash="{{ node.hash }}"
+                  data-fav="{{ 'true' if is_fav else 'false' }}"
+                  title="{{ 'Unfavorite' if is_fav else 'Favorite' }}"
+                  style="background:none;border:none;cursor:pointer;font-size:16px;
+                         color:{{ 'var(--warn)' if is_fav else 'var(--border)' }};
+                         padding:0;line-height:1;">
+            {{ '★' if is_fav else '☆' }}
+          </button>
+          {% endif %}
+        </td>
+        {% set load_ok = node.get('last_load_ok') %}
+        <td style="font-weight:{{ '600' if is_fav else 'normal' }};">
+          {% if load_ok is sameas true %}<span style="color:#4caf50;font-size:9px;margin-right:4px;" title="Last load succeeded">●</span>
+          {% elif load_ok is sameas false %}<span style="color:var(--error);font-size:9px;margin-right:4px;" title="Last load failed">●</span>
+          {% endif %}{{ node.name }}
+        </td>
+        <td class="mono dim" style="font-size:10px;" title="{{ node.hash }}">
+          {{ node.hash[:20] }}…
+        </td>
+        <td style="text-align:center;">
+          {% if node.hops is not none %}
+            <span class="badge {{ 'badge-ok' if node.hops <= 3 else 'badge-off' }}">
+              {{ node.hops }}
+            </span>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="dim" style="text-align:center;">{{ node.get('announce_count', 0) }}</td>
+        <td class="dim" style="text-align:center;">{{ node.get('view_count', 0) }}</td>
+        <td class="dim">
+          {% set rx = node.get('rx_bytes', 0) %}
+          {% if rx >= 1048576 %}{{ (rx / 1048576) | round(1) }} MB
+          {% elif rx >= 1024 %}{{ (rx / 1024) | round(1) }} KB
+          {% elif rx > 0 %}{{ rx }} B
+          {% else %}—{% endif %}
+        </td>
+        <td class="dim">
+          {% if node.get('last_load_ms') is not none %}{{ node.last_load_ms }} ms
+          {% else %}—{% endif %}
+        </td>
+        <td class="dim">
+          {% if node.get('avg_load_ms') is not none %}{{ node.avg_load_ms }} ms
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <span class="ping-result dim" style="font-size:11px;margin-right:4px;">
+            {% if node.get('last_ping_ms') is not none %}{{ node.last_ping_ms }} ms{% endif %}
+          </span>
+          <button class="ping-btn btn btn-sm btn-neutral"
+                  data-hash="{{ node.hash }}" style="font-size:11px;padding:2px 7px;">
+            ping
+          </button>
+        </td>
+        <td class="dim" style="font-size:11px;">
+          {% if age < 60 %}{{ age }}s ago
+          {% elif age < 3600 %}{{ (age // 60) }}m ago
+          {% elif age < 86400 %}{{ (age // 3600) }}h ago
+          {% else %}{{ (age // 86400) }}d ago{% endif %}
+        </td>
+        <td>
+          <a href="/?url=hash://{{ node.hash }}/index.mu"
+             class="btn btn-sm btn-neutral">Browse</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="dim">No nodes discovered yet — waiting for Reticulum announces.</p>
+  {% endif %}
+</div>
+
+<!-- Quick links -->
+<div class="card">
+  <div class="card-title">Quick Actions</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <a href="{{ url_for('admin.interfaces') }}"  class="btn btn-neutral">&#9881; Interfaces</a>
+    <a href="{{ url_for('admin.identities') }}"  class="btn btn-neutral">&#9670; Identities</a>
+    <a href="{{ url_for('admin.cache_view') }}"  class="btn btn-neutral">&#10063; Cache</a>
+    <a href="/"                                  class="btn btn-neutral">&#8592; Public Browser</a>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-dashboard.js"></script>{% endblock %}

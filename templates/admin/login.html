@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Sign in</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; overflow: auto; }
+    .login-wrap { display: flex; align-items: center; justify-content: center; flex: 1; }
+    .login-box {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 3px; padding: 36px 40px; width: 340px;
+    }
+    .login-title { color: var(--text); font-size: 16px; font-weight: bold;
+                   margin-bottom: 24px; text-align:center; }
+
+    .login-error {
+      background: #2b0d0d; border: 1px solid #7a2a2a;
+      color: #c87a7a; padding: 10px 14px; border-radius: 2px;
+      font-size: 13px; margin-bottom: 16px;
+    }
+
+    /* Local form */
+    .form-field { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; }
+    .form-field label { font-size:11px; color:var(--text-dim); }
+    .form-field input {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono); font-size:13px;
+      padding: 6px 8px; border-radius: 2px; outline: none; width: 100%;
+    }
+    .form-field input:focus { border-color: var(--accent); }
+    .btn-login {
+      width: 100%; padding: 9px;
+      background: var(--accent); color: var(--bg);
+      border: none; border-radius: 2px; cursor: pointer;
+      font-family: var(--font-mono); font-size: 14px; font-weight: bold;
+      margin-top: 4px;
+    }
+    .btn-login:hover { background: #7ec8e3; }
+
+    /* Divider */
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      color: var(--text-dim); font-size: 11px; margin: 18px 0;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; border-top: 1px solid var(--border);
+    }
+
+    /* SSO button */
+    .btn-sso {
+      display: block; width: 100%; padding: 9px; text-align: center;
+      background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 2px; cursor: pointer; font-family: var(--font-mono);
+      font-size: 13px; text-decoration: none;
+    }
+    .btn-sso:hover { border-color: var(--accent); color: var(--accent); }
+
+    .login-note { font-size: 11px; color: var(--text-dim); line-height: 1.5;
+                  margin-top: 18px; text-align: center; }
+    .login-note a { color: var(--accent); text-decoration: none; }
+    .login-note a:hover { text-decoration: underline; }
+    .login-disclaimer {
+      margin-top: 18px; padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      font-size: 10px; color: var(--text-dim); line-height: 1.6;
+      text-align: center; opacity: 0.7;
+    }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <a class="brand" href="/" style="text-decoration:none;">{{ app_title_html | safe }}</a>
+  </header>
+  <div class="login-wrap">
+  <div class="login-box">
+    <div class="login-title">Sign in</div>
+
+    {% if error %}
+      <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <!-- Local login form -->
+    <form method="post" action="{{ url_for('auth.local_login') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username"
+               autofocus required placeholder="admin">
+      </div>
+      <div class="form-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn-login">Sign in</button>
+    </form>
+
+    {% if oidc_enabled %}
+    <div class="divider">or</div>
+    <a class="btn-sso" href="{{ url_for('auth.login_start') }}">&#8594; Sign in with SSO</a>
+    {% endif %}
+
+    <div class="login-disclaimer">
+      This web interface is not a hardened or secure way to access LXMF.
+      Site administrators may have access to your messages and private information.
+      It is intended primarily to provide clearnet access to a NomadNet site.
+      For private communications, use a dedicated LXMF client directly.
+    </div>
+  </div>
+  </div>
+</body>
+</html>
