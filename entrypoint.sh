@@ -38,24 +38,28 @@ if [ ! -f "$SITE_SEED_MARKER" ]; then
   touch "$SITE_SEED_MARKER"
 fi
 
-HTTPS_PORT="${WEB_PORT_HTTPS:-8443}"
-HTTP_PORT="${WEB_PORT:-8080}"
 
-# TLS_ENABLED toggles the in-container HTTPS stack:
-#   true (default) — generate a self-signed cert if missing, run gunicorn
-#                    with --certfile/--keyfile on $HTTPS_PORT, run the
-#                    HTTP→HTTPS redirector on $HTTP_PORT.
-#   false          — no cert generation, no redirect, gunicorn binds
-#                    plain HTTP on $HTTPS_PORT. Use this when a reverse
-#                    proxy (nginx, Caddy, Traefik, NPM) terminates TLS
-#                    for you and forwards plain HTTP to the container.
-TLS_ENABLED="${TLS_ENABLED:-true}"
-case "${TLS_ENABLED,,}" in
-  true|1|yes) TLS_ENABLED="true"  ;;
-  *)          TLS_ENABLED="false" ;;
-esac
+HTTPS_PORT="${WEB_PORT_HTTPS:-}"
+HTTP_PORT="${WEB_PORT:-}"
 
-if [ "$TLS_ENABLED" = "true" ]; then
+# Port-based deployment mode — no separate TLS flag, the choice is implicit
+# in which ports you set:
+#
+#   WEB_PORT_HTTPS only       → TLS on that port. Self-signed cert generated
+#                                if /config/ssl/cert.pem doesn't exist.
+#   WEB_PORT only             → plain HTTP on that port. No cert, no redirect.
+#                                Use this behind a reverse proxy that does TLS.
+#   Both set                  → TLS on WEB_PORT_HTTPS plus an HTTP→HTTPS
+#                                redirector on WEB_PORT (the classic setup).
+#   Neither set               → falls back to defaults (HTTPS on 8443 +
+#                                redirector on 8080) so existing deployments
+#                                keep working.
+if [ -z "$HTTPS_PORT" ] && [ -z "$HTTP_PORT" ]; then
+  HTTPS_PORT="8443"
+  HTTP_PORT="8080"
+fi
+
+if [ -n "$HTTPS_PORT" ]; then
   SSL_DIR=/config/ssl
   CERT="$SSL_DIR/cert.pem"
   KEY="$SSL_DIR/key.pem"
@@ -73,8 +77,12 @@ if [ "$TLS_ENABLED" = "true" ]; then
     echo "[ssl] Certificate written to $CERT"
   fi
 
-  # HTTP → HTTPS redirect in background
-  python3 /app/redirect_http.py &
+  if [ -n "$HTTP_PORT" ]; then
+    echo "[tls] HTTPS on ${HTTPS_PORT}, HTTP→HTTPS redirector on ${HTTP_PORT}."
+    python3 /app/redirect_http.py &
+  else
+    echo "[tls] HTTPS only on ${HTTPS_PORT} (no redirector — WEB_PORT not set)."
+  fi
 
   exec gunicorn \
     --workers 1 \
@@ -86,14 +94,14 @@ if [ "$TLS_ENABLED" = "true" ]; then
     --keyfile  "$KEY" \
     "app:create_wsgi()"
 else
-  echo "[tls] TLS_ENABLED=false — binding plain HTTP on ${HTTPS_PORT}, no in-container TLS."
-  echo "[tls] If you exposed this on a public network, put a reverse proxy with a real certificate in front."
+  echo "[tls] Plain HTTP on ${HTTP_PORT} (WEB_PORT_HTTPS not set — no in-container TLS)."
+  echo "[tls] Put a reverse proxy with a real certificate in front if exposing publicly."
 
   exec gunicorn \
     --workers 1 \
     --threads 8 \
     --timeout 120 \
     --access-logfile - \
-    --bind "0.0.0.0:${HTTPS_PORT}" \
+    --bind "0.0.0.0:${HTTP_PORT}" \
     "app:create_wsgi()"
 fi

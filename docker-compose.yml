@@ -24,6 +24,11 @@ services:
       NOMADNET_CONFIG: /config/nomadnetwork
       CONFIG_YML: /config/config.yml
       WEB_HOST: 0.0.0.0
+      # Listening ports decide TLS mode by themselves:
+      #   WEB_PORT_HTTPS only  → TLS on that port (self-signed cert auto-generated)
+      #   WEB_PORT only        → plain HTTP on that port (use behind a reverse proxy)
+      #   both set             → HTTPS on WEB_PORT_HTTPS + HTTP→HTTPS redirector on WEB_PORT
+      #   both empty           → defaults (HTTPS on 8443 + redirector on 8080)
       WEB_PORT: "8080"
       WEB_PORT_HTTPS: "8443"
       CACHE_TTL: "300"
@@ -48,13 +53,6 @@ services:
       # Set to "true" when TLS is terminated by a reverse proxy and you
       # want the Flask app to redirect plain HTTP → HTTPS.
       HTTPS_REDIRECT: "false"
-      # When true (default), the entrypoint generates a self-signed cert
-      # and gunicorn serves HTTPS on WEB_PORT_HTTPS while a separate
-      # process redirects HTTP → HTTPS on WEB_PORT.
-      # When false, the entrypoint skips both — gunicorn binds plain HTTP
-      # on WEB_PORT_HTTPS, no cert, no redirect. Use this when a reverse
-      # proxy (Nginx Proxy Manager, Traefik, Caddy) terminates TLS for you.
-      TLS_ENABLED: "true"
 
       # ── Site hosting ────────────────────────────────────────────────
       # Create ./site/pages/ and ./site/files/ on the host, then set:

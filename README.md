@@ -110,7 +110,8 @@ All options are set via environment variables in `docker-compose.yml`.
 |----------|---------|-------------|
 | `TRUSTED_PROXIES` | `0` | Number of upstream proxy hops to trust for `X-Forwarded-For`. Set to `1` when behind nginx/Caddy |
 | `HTTPS_REDIRECT` | `false` | Set to `true` when TLS is terminated by a reverse proxy and you want the app to redirect HTTP → HTTPS at the application layer |
-| `TLS_ENABLED` | `true` | When `false`, the container skips self-signed cert generation and the HTTP-to-HTTPS redirector. Gunicorn binds **plain HTTP** on `WEB_PORT_HTTPS`. Use when a reverse proxy (Nginx Proxy Manager, Traefik, Caddy) terminates TLS upstream. |
+| `WEB_PORT` | `8080` | The plain-HTTP port. When `WEB_PORT_HTTPS` is also set, this port runs an HTTP→HTTPS redirector. When `WEB_PORT_HTTPS` is empty, this is the main port and gunicorn binds **plain HTTP** here (use behind a reverse proxy). |
+| `WEB_PORT_HTTPS` | `8443` | The TLS port. When set, gunicorn binds HTTPS here and the entrypoint auto-generates a self-signed cert if `/config/ssl/cert.pem` doesn't exist. Set to `""` (empty) to disable TLS and run plain HTTP only. |
 
 ### OIDC / SSO
 

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-05-02
+
+### Changed (breaking, but only against v0.9.2 which had a 1-day shelf life)
+
+- **TLS mode is now derived from which ports you set**, removing the
+  separate `TLS_ENABLED` flag introduced in v0.9.2:
+
+  | `WEB_PORT_HTTPS` | `WEB_PORT` | Behaviour |
+  |---|---|---|
+  | set | set | HTTPS on `WEB_PORT_HTTPS` + HTTP→HTTPS redirector on `WEB_PORT` |
+  | set | empty | HTTPS only on `WEB_PORT_HTTPS`, no redirector |
+  | empty | set | Plain HTTP only on `WEB_PORT`. Use behind a reverse proxy. |
+  | empty | empty | Falls back to the defaults (8443 HTTPS + 8080 redirector) |
+
+  Existing deployments that don't touch the port env vars are unchanged
+  (defaults give classic HTTPS+redirector). Operators upgrading from
+  v0.9.2 should drop `TLS_ENABLED` from their env block — it's silently
+  ignored now. To switch to plain-HTTP-behind-proxy: set `WEB_PORT` to
+  the listening port and clear `WEB_PORT_HTTPS` to `""`.
+- Healthcheck mirrors the same logic — picks `http://` or `https://`
+  based on which port var is non-empty.
+
 ## [0.9.2] — 2026-05-02
 
 ### Added
@@ -19,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP to the container. Default stays `true` for backward compatibility.
 - Healthcheck now honours `TLS_ENABLED` too — uses `http://` or `https://`
   to match the actual listening protocol.
+
+> **Superseded by v0.9.3** — the `TLS_ENABLED` flag was replaced by
+> port-based detection one day later. v0.9.2 still works but v0.9.3 is
+> recommended; `TLS_ENABLED` is silently ignored from v0.9.3 on.
 
 ## [0.9.1] — 2026-05-02
 
@@ -180,7 +206,8 @@ Initial public release.
 - Rate limiting and CSRF protection
 - Mobile-responsive layout
 
-[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/JamesM92/NomadPortal/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/JamesM92/NomadPortal/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/JamesM92/NomadPortal/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/JamesM92/NomadPortal/compare/v0.1.0...v0.9.0
