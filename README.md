@@ -8,6 +8,8 @@ A web-based browser for [NomadNet](https://github.com/markqvist/NomadNet) nodes,
 
 Built on [Reticulum](https://reticulum.network) and [LXMF](https://github.com/markqvist/LXMF).
 
+![NomadPortal](docs/screenshot-loggedin.png)
+
 ## Disclaimer
 
 This software is provided **"as is"**, without warranty of any kind, express or implied. The author accepts **no risk and no liability** for any use, misuse, or consequences arising from the use of this project. Anyone who installs, runs, hosts, or otherwise uses this software does so **entirely at their own risk and on their own responsibility** — including but not limited to compliance with applicable laws, the content accessed or transmitted through it, and any harm resulting from its operation.
