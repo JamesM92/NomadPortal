@@ -51,6 +51,8 @@ ADMIN_PASSWORD: your-strong-password-here
 FLASK_SECRET_KEY: some-random-string-here
 ```
 
+> **Pre-built image** — every tagged release is also published to the GitHub Container Registry, so you can skip the local build by replacing `build: .` in `docker-compose.yml` with `image: ghcr.io/jamesm92/nomadportal:latest` (or pin a specific version like `:v0.9.0`). `git clone` is still the easiest way to get the docker-compose file and `config/` skeleton.
+
 ### 2. Configure Reticulum interfaces
 
 ```bash
