@@ -38,34 +38,62 @@ if [ ! -f "$SITE_SEED_MARKER" ]; then
   touch "$SITE_SEED_MARKER"
 fi
 
-SSL_DIR=/config/ssl
-CERT="$SSL_DIR/cert.pem"
-KEY="$SSL_DIR/key.pem"
 HTTPS_PORT="${WEB_PORT_HTTPS:-8443}"
 HTTP_PORT="${WEB_PORT:-8080}"
 
-mkdir -p "$SSL_DIR"
+# TLS_ENABLED toggles the in-container HTTPS stack:
+#   true (default) — generate a self-signed cert if missing, run gunicorn
+#                    with --certfile/--keyfile on $HTTPS_PORT, run the
+#                    HTTP→HTTPS redirector on $HTTP_PORT.
+#   false          — no cert generation, no redirect, gunicorn binds
+#                    plain HTTP on $HTTPS_PORT. Use this when a reverse
+#                    proxy (nginx, Caddy, Traefik, NPM) terminates TLS
+#                    for you and forwards plain HTTP to the container.
+TLS_ENABLED="${TLS_ENABLED:-true}"
+case "${TLS_ENABLED,,}" in
+  true|1|yes) TLS_ENABLED="true"  ;;
+  *)          TLS_ENABLED="false" ;;
+esac
 
-if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
-  echo "[ssl] Generating self-signed certificate..."
-  openssl req -x509 -newkey rsa:2048 -nodes \
-    -keyout "$KEY" -out "$CERT" \
-    -days 3650 \
-    -subj "/CN=nomadportal" \
-    -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" \
-    2>/dev/null
-  echo "[ssl] Certificate written to $CERT"
+if [ "$TLS_ENABLED" = "true" ]; then
+  SSL_DIR=/config/ssl
+  CERT="$SSL_DIR/cert.pem"
+  KEY="$SSL_DIR/key.pem"
+
+  mkdir -p "$SSL_DIR"
+
+  if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
+    echo "[ssl] Generating self-signed certificate..."
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$KEY" -out "$CERT" \
+      -days 3650 \
+      -subj "/CN=nomadportal" \
+      -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" \
+      2>/dev/null
+    echo "[ssl] Certificate written to $CERT"
+  fi
+
+  # HTTP → HTTPS redirect in background
+  python3 /app/redirect_http.py &
+
+  exec gunicorn \
+    --workers 1 \
+    --threads 8 \
+    --timeout 120 \
+    --access-logfile - \
+    --bind "0.0.0.0:${HTTPS_PORT}" \
+    --certfile "$CERT" \
+    --keyfile  "$KEY" \
+    "app:create_wsgi()"
+else
+  echo "[tls] TLS_ENABLED=false — binding plain HTTP on ${HTTPS_PORT}, no in-container TLS."
+  echo "[tls] If you exposed this on a public network, put a reverse proxy with a real certificate in front."
+
+  exec gunicorn \
+    --workers 1 \
+    --threads 8 \
+    --timeout 120 \
+    --access-logfile - \
+    --bind "0.0.0.0:${HTTPS_PORT}" \
+    "app:create_wsgi()"
 fi
-
-# HTTP → HTTPS redirect in background
-python3 /app/redirect_http.py &
-
-exec gunicorn \
-  --workers 1 \
-  --threads 8 \
-  --timeout 120 \
-  --access-logfile - \
-  --bind "0.0.0.0:${HTTPS_PORT}" \
-  --certfile "$CERT" \
-  --keyfile  "$KEY" \
-  "app:create_wsgi()"

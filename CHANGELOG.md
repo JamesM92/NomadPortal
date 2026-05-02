@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-05-02
+
+### Added
+
+- **`TLS_ENABLED` env var** — set to `false` to disable the in-container
+  TLS stack: no self-signed cert is generated, the HTTP→HTTPS redirector
+  doesn't start, and gunicorn binds plain HTTP on `WEB_PORT_HTTPS`. This
+  is the deployment pattern for reverse proxies (Nginx Proxy Manager,
+  Traefik, Caddy) that handle TLS termination upstream and forward plain
+  HTTP to the container. Default stays `true` for backward compatibility.
+- Healthcheck now honours `TLS_ENABLED` too — uses `http://` or `https://`
+  to match the actual listening protocol.
+
 ## [0.9.1] — 2026-05-02
 
 ### Fixed
@@ -167,7 +180,8 @@ Initial public release.
 - Rate limiting and CSRF protection
 - Mobile-responsive layout
 
-[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/JamesM92/NomadPortal/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/JamesM92/NomadPortal/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/JamesM92/NomadPortal/compare/v0.1.0...v0.9.0
 [0.1.0]: https://github.com/JamesM92/NomadPortal/releases/tag/v0.1.0

@@ -56,12 +56,11 @@ ENV RNS_CONFIG_DIR=/config/reticulum \
     CACHE_TTL=300 \
     LOG_LEVEL=INFO
 
-# Healthcheck honours the WEB_PORT_HTTPS env var (set by docker-compose.yml
-# or any deployment platform). Using a hardcoded port here was a v0.9.0
-# bug — caused unhealthy/stopped containers whenever the operator changed
-# the listening port.
+# Healthcheck honours both WEB_PORT_HTTPS and TLS_ENABLED so it works for
+# the default in-container TLS setup AND for deployments where a reverse
+# proxy terminates TLS upstream and the container speaks plain HTTP.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import os, urllib.request, ssl; ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE; port=os.environ.get('WEB_PORT_HTTPS','8443'); urllib.request.urlopen(f'https://localhost:{port}/api/status', context=ctx)"
+  CMD python -c "import os, urllib.request, ssl; port=os.environ.get('WEB_PORT_HTTPS','8443'); tls=os.environ.get('TLS_ENABLED','true').lower() in ('true','1','yes'); ctx=(ssl._create_unverified_context() if tls else None); urllib.request.urlopen(f'{\"https\" if tls else \"http\"}://localhost:{port}/api/status', context=ctx, timeout=4)"
 
 USER nomadnet
 
