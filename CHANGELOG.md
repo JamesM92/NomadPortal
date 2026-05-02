@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-05-02
+
+### Fixed
+
+- **Dockerfile healthcheck honours `WEB_PORT_HTTPS`** — was hardcoded to
+  `https://localhost:8443/api/status`. Containers running on any other
+  port (Portainer-allocated, custom-mapped, behind a reverse proxy with
+  internal port reassignment) were marked unhealthy and stopped. The
+  check now reads the env var at runtime, defaults to `8443`.
+
 ## [0.9.0] — 2026-05-02
 
 First public-ready release. Core feature set complete and exercised end-to-end on a trusted-LAN deployment with Authentik OIDC. A handful of paths haven't been validated against every edge case (multi-hop LoRa-only meshes, large-scale public exposure, MeshChat and NomadPortal accessing the same site simultaneously) — hence 0.9 rather than 1.0. Once those land we'll cut 1.0.
@@ -157,6 +167,7 @@ Initial public release.
 - Rate limiting and CSRF protection
 - Mobile-responsive layout
 
-[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/JamesM92/NomadPortal/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/JamesM92/NomadPortal/compare/v0.1.0...v0.9.0
 [0.1.0]: https://github.com/JamesM92/NomadPortal/releases/tag/v0.1.0
