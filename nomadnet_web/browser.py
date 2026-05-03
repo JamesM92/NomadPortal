@@ -16,12 +16,12 @@ log = logging.getLogger(__name__)
 
 APP_NAME    = "nomadnetwork"
 NODE_ASPECT = "node"
-STALL_TIMEOUT = 15   # seconds — no-progress watchdog. If no packet arrives
+STALL_TIMEOUT = 30   # seconds — no-progress watchdog. If no packet arrives
                      # in this window, the fetch is aborted: "no response"
                      # if nothing ever arrived, otherwise "lost connection".
 PAGE_HARD_CAP = 600  # seconds — absolute upper bound per fetch (10 min).
-PATH_TIMEOUT  = 30   # seconds for RNS path discovery before link is established.
-PING_TIMEOUT  = 20   # for ping_node link establishment.
+PATH_TIMEOUT  = 60   # seconds for RNS path discovery before link is established.
+PING_TIMEOUT  = 30   # for ping_node link establishment.
 
 # RNS sentinel value meaning "hop count unknown / unreachable"
 _HOPS_UNKNOWN = 128
@@ -94,9 +94,18 @@ class NodeBrowser:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_nodes(self, user_sub: str = "") -> list:
-        """Return nodes sorted: hosted first, then favorites, then by last_seen."""
-        hosted = self._hosted_hash.lower() if self._hosted_hash else ""
+    def get_nodes(self, user_sub: str = "", default_hash: str = "") -> list:
+        """Return nodes sorted: hosted first, default second, then favorites,
+        then by last_seen.
+
+        `default_hash` is the operator-configured default node from UI
+        settings. We auto-favorite it (alongside the hosted node) for every
+        audience — guests and logged-in users alike — and synthesise a
+        placeholder if it hasn't announced yet, so visitors always see it
+        in the sidebar even before any RNS announce arrives.
+        """
+        hosted  = self._hosted_hash.lower() if self._hosted_hash else ""
+        default = (default_hash or "").lower()
         with self._lock:
             nodes = [dict(n) for n in self.nodes.values()]
             # A node is "favorited" iff (hash, "/") is bookmarked. Page-only
@@ -125,9 +134,30 @@ class NodeBrowser:
                 "favorited":      False,
             })
 
+        # Same treatment for the configured default node — placeholder so
+        # visitors see it pinned at the top of the sidebar even before any
+        # announce, even if it's never been reached over RNS yet.
+        if default and default != hosted and not any(n["hash"] == default for n in nodes):
+            nodes.append({
+                "hash":           default,
+                "name":           "Default Node",
+                "first_seen":     time.time(),
+                "last_seen":      0.0,
+                "announce_count": 0,
+                "view_count":     0,
+                "rx_bytes":       0,
+                "last_load_ms":   None,
+                "avg_load_ms":    None,
+                "last_ping_ms":   None,
+                "last_load_ok":   None,
+                "ever_load_ok":   False,
+                "favorited":      False,
+            })
+
         needs_persist = False
         for node in nodes:
-            node["is_hosted"] = node["hash"] == hosted
+            node["is_hosted"]  = node["hash"] == hosted
+            node["is_default"] = bool(default) and node["hash"] == default
             if node["is_hosted"]:
                 # Locally-hosted destinations aren't in the path table, so
                 # hops_to() returns the sentinel. Pin to 0 → renders "local".
@@ -145,7 +175,11 @@ class NodeBrowser:
                             needs_persist = True
                 else:
                     node["hops"] = node.get("last_known_hops")
-            node["favorited"] = node["is_hosted"] or node["hash"] in fav_set
+            node["favorited"] = (
+                node["is_hosted"]
+                or node["is_default"]
+                or node["hash"] in fav_set
+            )
             # Always reflect the current name for the hosted node.
             if node["is_hosted"] and self._hosted_name:
                 node["name"] = self._hosted_name
@@ -157,6 +191,7 @@ class NodeBrowser:
 
         nodes.sort(key=lambda n: (
             not n["is_hosted"],
+            not n["is_default"],
             not n["favorited"],
             -n["last_seen"],
         ))

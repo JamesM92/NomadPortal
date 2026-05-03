@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-05-03
+
+### Added
+
+- **Boot navigation falls back to the built-in node** if the configured
+  `default_node` fails to load — and falls back again to the generic
+  welcome screen if the built-in is also unreachable. Previously a
+  broken `default_node` (offline, RNS timeout, missing `index.mu`) left
+  the user staring at an error page on every visit; now the portal
+  silently lands them on its own hosted site instead. The fallback
+  applies even under lockdown — locked visitors (typically guests)
+  shouldn't be stranded on a broken-default error page when the
+  operator's hosted site is reachable. Lockdown is restored immediately
+  after the fallback navigation, so any subsequent click from the
+  visitor still hits the lock alert. Applies only to first-load
+  navigation; user-initiated clicks still surface errors directly
+  (intentional, since the user picked the destination and expects
+  feedback if it fails).
+
+- **Local admin LXMF reception is always-on.** Previously the local
+  admin's identity was created lazily on their first login, meaning
+  any message sent before that first login was dropped at the network
+  level (no delivery destination registered yet). At startup, when
+  `ADMIN_PASSWORD` is set, the entry-point now eagerly creates the
+  `local:<ADMIN_USERNAME>` identity in the IdentityStore so its LXMF
+  router comes up immediately during `setup_delivery`. Messages
+  addressed to the local admin are received whenever the container
+  is running — no login required.
+
+  No-op when `ADMIN_PASSWORD` is empty (local login disabled).
+
+### Changed
+
+- **The operator-configured `default_node` is auto-favorited** alongside
+  the hosted node, for every audience (guests included). It now shows a
+  pinned ★ in the sidebar, sorts to the top of the node list right
+  after the hosted node, and gets synthesised as a placeholder if it
+  hasn't announced yet — so visitors see it pinned even before the
+  first RNS announce arrives. Guests previously had `favorited` stripped
+  from every node except the hosted one; now they retain it for the
+  default node too. Operator intent surfaced consistently regardless of
+  RNS announce state or login status.
+
+- **Lockdown now permits the trusted-local set** (built-in node +
+  operator-configured `default_node`), not just a single lock target.
+  Both are operator-controlled, so locked visitors can move between
+  them — and the boot-time fallback from a broken default to the
+  built-in works without any lockdown-bypass dance. Following a link
+  from either trusted node to any third-party node still triggers the
+  lock alert as before — the trust is per-hash, not transitive.
+  Previously the warning popup fired whenever `default_node` differed
+  from the built-in (even when the operator had deliberately pointed
+  visitors at it), and lockdown blocked the built-in from a guest who
+  was locked to the default.
+
+- **Address bar uses MeshChat's `<node_hash>:/<path>` display format**
+  for copy-paste compatibility with MeshChat. The `hash://` scheme is
+  redundant in NomadPortal's own address bar, and the colon separator
+  (instead of a leading slash on the path) matches MeshChat's URL
+  format so addresses copied from one app paste cleanly into the other.
+  Internal state still uses the canonical `hash://<hash>/<path>` form;
+  pasting any of `hash://...`, `<hash>:/...`, `<hash>/...`, or a bare
+  `<hash>` still works — they all normalise on input.
+
+### Fixed
+
+- **Page-fetch timeouts doubled** so distant external nodes have a
+  realistic chance to respond. `PATH_TIMEOUT` (RNS path discovery)
+  bumped from 30s → 60s, `STALL_TIMEOUT` (no-progress watchdog) from
+  15s → 30s, and `PING_TIMEOUT` from 20s → 30s. Several-hop NomadNet
+  links over slow long-haul carriers were timing out at the path
+  step, surfacing as a 503 on the first visit even when the node was
+  fully reachable on a retry. Truly-unreachable nodes still fail
+  within ~60s, just not as quickly as before.
+
+- **Braille characters (U+2800–U+28FF) now render as contiguous grids**
+  instead of leaving visible gaps between adjacent characters —
+  **restoring MeshChat parity**, which is what surfaced the issue.
+  Root cause: Roboto Mono Nerd Font (the bundled monospace) has no
+  Braille glyphs at all, and the system-monospace fallback (Noto Sans
+  Symbols 2 on most Linux installs) renders Braille at ~34% of cell
+  width, leaving a visible gap between cells. Bundling another font
+  would just trade one rendering lottery for another. Fix lives in
+  Micron2HTML 1.0.5: the converter now replaces every Braille character
+  with `<span class="mu-braille" style="--mu-braille-dots:…">` whose CSS
+  paints the raised dots as `radial-gradient`s at fixed fractional
+  positions inside a `1ch`-wide inline-block. Result: glyphs always
+  render at full cell width with no gaps and no "indicator" empty dots,
+  regardless of which fonts the operator's browser has installed.
+  NomadPortal pins Micron2HTML to v1.0.5 and ships the matching
+  `.mu-braille` rule in `static/css/style.css`.
+- `redirect_http.py` no longer crashes with `ValueError` when
+  `WEB_PORT_HTTPS` is empty. Defensive port parser falls back to the
+  default with a stderr warning. (v0.9.3's entrypoint already avoids
+  starting the redirector in that case, but the script itself
+  shouldn't blow up if invoked directly with bad input.)
+
 ## [0.9.3] — 2026-05-02
 
 ### Changed (breaking, but only against v0.9.2 which had a 1-day shelf life)
@@ -206,7 +303,8 @@ Initial public release.
 - Rate limiting and CSRF protection
 - Mobile-responsive layout
 
-[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/JamesM92/NomadPortal/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/JamesM92/NomadPortal/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/JamesM92/NomadPortal/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/JamesM92/NomadPortal/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/JamesM92/NomadPortal/compare/v0.9.0...v0.9.1

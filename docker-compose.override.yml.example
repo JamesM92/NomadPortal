@@ -8,6 +8,14 @@
 
 services:
   nomadportal:
+    # ── Local development build ──────────────────────────────────────
+    # Uncomment this line if you're working from a NomadPortal checkout
+    # and want `docker compose up --build` (or start.sh --build) to
+    # rebuild the image from local source instead of pulling the
+    # published `ghcr.io/...` image. Production deployments should
+    # leave this commented out — pulling the registry image is faster.
+    # build: .
+
     environment:
       # ── Real OIDC / SSO settings (Authentik, Keycloak, Auth0, Google) ──
       # Generate the client + secret in your provider's UI; paste here.

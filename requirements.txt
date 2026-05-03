@@ -20,4 +20,4 @@ gunicorn==22.0.0
 pytest==8.0.0
 
 # Renderer — pinned by tag
-Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@v1.0.3
+Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@v1.0.5

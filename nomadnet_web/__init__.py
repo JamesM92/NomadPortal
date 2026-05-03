@@ -53,6 +53,29 @@ def create_app(
     )
     app.config["MESSAGING"] = messaging
 
+    # Pre-create the local admin's identity at startup (when local login
+    # is enabled) so its LXMF router comes up immediately during
+    # setup_delivery — messages addressed to the local admin are then
+    # received whenever the container is running, regardless of whether
+    # the admin has logged in this session, last week, or ever.
+    # Without this, the identity is created lazily on first login, so
+    # messages sent before that first login are dropped at the network
+    # level (no delivery destination registered).
+    if cfg.get("ADMIN_PASSWORD"):
+        admin_user = cfg.get("ADMIN_USERNAME", "admin")
+        admin_sub  = f"local:{admin_user}"
+        try:
+            entry = app.config["IDENTITY_STORE"].ensure_for_user(
+                admin_sub, admin_user,
+            )
+            log.info(
+                "Local admin LXMF identity ready (sub=%s, identity=%s) — "
+                "messages received whenever the container is running.",
+                admin_sub, entry["id"][:16],
+            )
+        except Exception as exc:
+            log.warning("Could not pre-create local admin identity: %s", exc)
+
     try:
         messaging.setup_delivery(app.config["IDENTITY_STORE"])
     except Exception as exc:

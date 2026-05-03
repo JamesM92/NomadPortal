@@ -3,8 +3,11 @@
    ========================================================= */
 
 /* Roboto Mono Nerd Font — bundled to match MeshChat's renderer exactly.
- * Box-drawing glyphs in this font fully span the em-box, so adjacent rows
- * touch at line-height: 1 / normal without sub-pixel gaps. */
+ * Box-drawing glyphs fully span the em-box (adjacent rows touch at
+ * line-height: 1 / normal without sub-pixel gaps), and the font's own
+ * kerning brings Braille glyphs (U+2800-28FF) flush so a row of
+ * full-dot Braille reads as a contiguous grid. Don't disable kerning
+ * on Micron content (`#page-content *`) or the Braille gap returns. */
 @font-face {
   font-family: 'Roboto Mono Nerd Font';
   src: url('/static/fonts/RobotoMonoNerdFont/RobotoMonoNerdFont-Regular.ttf') format('truetype');
@@ -397,7 +400,11 @@ body {
    * subtly widens characters and breaks monospace alignment in centered
    * lines that mix bold/non-bold spans. */
   font-synthesis-weight: none;
-  font-kerning: none;
+  /* DO NOT add `font-kerning: none` here — the bundled Roboto Mono Nerd
+   * Font uses kerning pairs to bring Braille glyphs (U+2800-28FF) flush
+   * against each other. Disabling kerning makes a row of full-dot Braille
+   * render as separated dots with visible gaps instead of a contiguous
+   * grid (MeshChat parity break). */
 }
 
 /* Fake-bold via `text-shadow`: drawing the glyph offset 0.5px to the right
@@ -407,6 +414,33 @@ body {
 #page-content strong {
   font-weight: normal;
   text-shadow: 0.5px 0 0 currentColor;
+}
+
+/* Braille rendering — fully CSS-drawn, font-independent. After Micron2HTML
+ * renders the page, app.js's `_braillify()` walks the DOM and replaces
+ * each Braille character (U+2800-28FF) with one of these spans, with the
+ * raised dots encoded as a radial-gradient list in `--mu-braille-dots`.
+ *
+ * `width: 1ch` makes the cell match the surrounding monospace cell width
+ * exactly (1ch = advance width of '0' in the inherited font), so a row
+ * of full-dot Braille reads as a contiguous grid. Empty positions are
+ * not drawn (no indicator dots), matching MeshChat's convention of only
+ * showing raised dots. */
+#page-content .mu-braille {
+  display: inline-block;
+  width: 1ch;
+  height: 1em;
+  vertical-align: baseline;
+  position: relative;
+  /* Hold a non-breaking space inside so the inline-box gets the correct
+   * line-height even on lines that are entirely Braille. */
+}
+#page-content .mu-braille::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--mu-braille-dots, transparent);
+  background-repeat: no-repeat;
 }
 
 #page-content {

@@ -43,6 +43,23 @@ NomadPortal is a single-operator application. The security boundary is between *
 - **Executable pages in `site/pages/` and packages in `site/requirements.txt` are fully trusted.** They run as the NomadPortal process. Anything in those locations is effectively code you wrote — don't accept user-uploaded `.mu` pages or `pip` packages.
 - **External NomadNet nodes are untrusted.** Their content is HTML-escaped and rendered through Micron2HTML, which has no JavaScript execution path. Field submissions to external nodes go through `_can_interact` gating.
 
+## Known trade-offs (deferred)
+
+These are conscious decisions where we picked function over hardening. Documented here so future operators know the boundary, and so the project's "as is" disclaimer covers them.
+
+- **Rendered link `href`s contain the destination `hash://` URL.** Normal in-app navigation goes through `POST /api/page/fetch` (URL in body, not query string), so the destination is invisible to upstream proxies / Cloudflare during ordinary browsing. But if a user Ctrl-clicks "Open in new tab", right-clicks "Copy link", or shares a link, the URL ends up in the browser's address bar and any GET request that follows reveals it through the request line — visible to whatever's between the browser and the origin.
+
+  *Future mitigation if the concern comes back up:* change Micron2HTML's link renderer to emit `<a href="#" data-url="hash://..."` and have `app.js`'s click handler read `data-url` instead of decoding `href`. Cost: copy-link / open-in-new-tab / share-link all break.
+
+- **File downloads from external NomadNet nodes are blocked.** Micron2HTML's `default_url_resolver` rewrites any `/file/...` link to `href="#"` so users can't accidentally pull binaries through the portal. The downside: there's no way to fetch a file at all, even when the user actually wants it (e.g. clicking what looks like a page link only to discover it's a file).
+
+  *Future mitigation if we want downloads back, with a confirmation prompt:* three coordinated changes —
+  1. **Micron2HTML (`converter.py:42-67`)**: drop the `_is_blocked` gate, or replace it with a marker class (e.g. `class="mu-link mu-file-link"`) so the frontend can still distinguish file links from page links.
+  2. **NomadPortal backend**: add a new `POST /api/file/fetch` route alongside `/api/page/fetch` ([routes.py:449](nomadnet_web/routes.py#L449)) and a `browser.fetch_file()` method alongside [browser.py:204 `fetch_page`](nomadnet_web/browser.py#L204). It establishes the RNS link the same way `fetch_page` does, calls `link.request("/file/<name>")`, and streams the bytes back (or returns base64 — page fetches are small; files may be larger, so stream).
+  3. **Frontend ([app.js:577](static/js/app.js#L577) click handler)**: detect file links (by URL pattern `/file/` or by the marker class), show `confirm("Download <filename> from <node-name>?")` before fetching. On OK, call `/api/file/fetch`, wrap the response in a `Blob`, create an object URL, and trigger a `<a download>` click to save to disk.
+
+  Trade-off: increases attack surface — a malicious node could try to push large files, exotic filenames, or content-type confusion. Mitigations to apply when implementing: cap file size server-side, sanitize the filename before passing to the browser, never auto-execute, and keep the confirm dialog mandatory (no "remember this choice" option).
+
 ## Hardening recommendations for production deployments
 
 If you're exposing NomadPortal beyond a trusted LAN:

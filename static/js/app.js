@@ -110,9 +110,18 @@ function renderNodeList() {
 
   nodeList.innerHTML = '';
 
+  // Auto-favorites: hosted node + operator-configured default node. These
+  // are surfaced in the Favorites section for every audience (guests too)
+  // — `is_hosted` / `is_default` come from the backend and survive guest
+  // stripping. Hosted always sorts before default if both exist.
+  const autoFavs = visible.filter(n => n.is_hosted || n.is_default);
+  autoFavs.sort((a, b) => (b.is_hosted ? 1 : 0) - (a.is_hosted ? 1 : 0));
+  const autoFavHashes = new Set(autoFavs.map(n => n.hash));
+
   // Mixed favorites: nodes (path "/") render via the existing node row;
   // page bookmarks render with the custom name + path subtitle.
   const showFavSection = _authState.logged_in
+    || autoFavs.length > 0
     || _favorites.some(f => f.is_hosted);
   if (showFavSection) {
     const hdr = document.createElement('li');
@@ -125,7 +134,12 @@ function renderNodeList() {
     });
     nodeList.appendChild(hdr);
     if (!_favCollapsed) {
-      if (_favorites.length === 0) {
+      // Auto-favorites first (hosted, default).
+      for (const node of autoFavs) {
+        nodeList.appendChild(makeNodeItem(node));
+      }
+      // User page bookmarks after.
+      if (autoFavs.length === 0 && _favorites.length === 0) {
         const empty = document.createElement('li');
         empty.className = 'node-placeholder';
         empty.style.cssText = 'font-size:11px;padding:4px 12px;';
@@ -133,6 +147,9 @@ function renderNodeList() {
         nodeList.appendChild(empty);
       } else {
         for (const fav of _favorites) {
+          // Skip page bookmarks that point at an auto-fav node's index —
+          // we'd be double-rendering it otherwise.
+          if ((fav.path || '/') === '/' && autoFavHashes.has(fav.hash)) continue;
           if ((fav.path || '/') === '/') {
             // Index favorite: render as a normal node row using the live node
             // data when available, otherwise a stub built from the favorite.
@@ -159,7 +176,10 @@ function renderNodeList() {
   hdr2.textContent = 'Nodes';
   nodeList.appendChild(hdr2);
 
-  const byLastSeen = [...visible].sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
+  // Main list omits auto-favorites since they're already shown above.
+  const byLastSeen = [...visible]
+    .filter(n => !autoFavHashes.has(n.hash))
+    .sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
   for (const node of byLastSeen) nodeList.appendChild(makeNodeItem(node));
 }
 
@@ -192,11 +212,13 @@ function makeNodeItem(node) {
   const right = document.createElement('div');
   right.className = 'node-right';
 
-  if (node.is_hosted) {
+  if (node.is_hosted || node.is_default) {
     const pin = document.createElement('span');
     pin.className = 'node-fav-btn fav-active';
     pin.textContent = '★';
-    pin.title = 'This node (always pinned)';
+    pin.title = node.is_hosted
+      ? 'This node (always pinned)'
+      : 'Operator-pinned default node';
     pin.style.cursor = 'default';
     right.appendChild(pin);
   } else if (_authState.logged_in) {
@@ -216,7 +238,7 @@ function makeNodeItem(node) {
   right.insertAdjacentHTML('beforeend', hopsHTML);
   li.appendChild(right);
 
-  const isLocked = _lockedHash && node.hash !== _lockedHash;
+  const isLocked = _lockedHash && !_isTrustedHash(node.hash);
   if (isLocked) li.classList.add('node-locked');
 
   li.insertAdjacentHTML('beforeend',
@@ -227,7 +249,7 @@ function makeNodeItem(node) {
   li.addEventListener('click', e => {
     if (e.target.closest('.node-fav-btn')) return;
     if (isLocked) return;
-    navigateTo(`hash://${node.hash}/index.mu`);
+    navigateTo(`hash://${node.hash}/page/index.mu`);
   });
   return li;
 }
@@ -376,10 +398,21 @@ function formatAge(ts) {
 // ---------------------------------------------------------------------------
 // Lockdown state  (set during init, read-only after that)
 // ---------------------------------------------------------------------------
-let _lockedHash  = null;   // non-null when access_mode restricts this user
+let _lockedHash  = null;   // truthy when access_mode restricts this user (value is the effective default for back-compat)
 let _hostedHash  = null;   // node hash of this server's hosted site (if any)
+let _defaultHash = null;   // operator-configured default node (may differ from _hostedHash)
 let _externalWarningAccepted = false; // logged-in users accept once per session for all external nodes
 let _allowGuestExternalBrowse = false; // set by ALLOW_GUEST_EXTERNAL_BROWSE env var at install time
+
+// Trusted-local set: built-in node + operator-configured default. Used by
+// both the lockdown check (these nodes stay reachable under lockdown) and
+// the external-warning check (no popup when navigating between them).
+function _isTrustedHash(hash) {
+  if (!hash) return false;
+  const h = hash.toLowerCase();
+  return (_hostedHash && _hostedHash.toLowerCase() === h) ||
+         (_defaultHash && _defaultHash.toLowerCase() === h);
+}
 
 function _extractNodeHash(url) {
   const m = url.match(/hash:\/\/([0-9a-f]+)\//i) ||
@@ -389,15 +422,43 @@ function _extractNodeHash(url) {
 }
 
 /**
- * Normalise an address-bar entry. If the user pasted a bare hash or a
- * "<hash>/path" without a scheme, prepend `hash://`. Inputs that already
- * carry a scheme (hash://, hash:/, nomadnetwork://) are left alone.
+ * Normalise an address-bar entry to the canonical `hash://<hash>/<path>`
+ * form used internally. Accepts:
+ *   hash://<hash>/<path>          — already canonical, returned as-is
+ *   hash:/<hash>/<path>           — single-slash variant, returned as-is
+ *   nomadnetwork://<hash>/<path>  — alternate scheme, returned as-is
+ *   <hash>:/<path>                — MeshChat-style colon separator
+ *   <hash>/<path>                 — bare hex hash with slash separator
+ *   <hash>                        — bare hex hash, no path
  */
 function _normaliseAddress(input) {
   const s = (input || '').trim();
   if (!s) return s;
   if (/^(hash:\/\/|hash:\/[0-9a-f]|nomadnetwork:\/\/)/i.test(s)) return s;
+  // MeshChat-style "<hash>:/path"
+  const colonMatch = s.match(/^([0-9a-fA-F]{2,128}):(\/.*)?$/);
+  if (colonMatch) return 'hash://' + colonMatch[1] + (colonMatch[2] || '');
+  // Slash-separated or bare hash
   if (/^[0-9a-fA-F]{2,128}(\/.*)?$/.test(s)) return 'hash://' + s;
+  return s;
+}
+
+/**
+ * Convert a canonical `hash://<hash>/<path>` URL to the MeshChat-style
+ * `<hash>:/<path>` shown in the address bar. Internal state keeps the
+ * canonical form; only the user-facing display is shortened so users
+ * can copy/paste address strings between MeshChat and NomadPortal.
+ */
+function _displayAddress(url) {
+  if (!url) return '';
+  let s = String(url)
+    .replace(/^hash:\/\//i, '')
+    .replace(/^hash:\/(?=[0-9a-f])/i, '')
+    .replace(/^nomadnetwork:\/\//i, '');
+  // "<hash>/path" → "<hash>:/path" so the colon separates hash from path.
+  // Bare "<hash>" with no path passes through unchanged.
+  const m = s.match(/^([0-9a-f]{2,128})(\/.*)$/i);
+  if (m) return m[1] + ':' + m[2];
   return s;
 }
 
@@ -405,48 +466,53 @@ function _normaliseAddress(input) {
 // Navigation
 // ---------------------------------------------------------------------------
 async function navigateTo(url, pushHistory = true, extraFields = null) {
-  if (!url) return;
+  if (!url) return false;
   url = url.trim();
 
   // External node check — warning and/or lockdown.
   // Admins are exempt entirely.
-  if ((_hostedHash || _lockedHash) && !_authState.is_admin) {
-    const refHash   = _hostedHash || _lockedHash;
+  if (!_authState.is_admin) {
     const targetHash = _extractNodeHash(url);
-    const isGuest   = !_authState.logged_in;
+    const isGuest    = !_authState.logged_in;
 
-    if (targetHash && targetHash !== refHash) {
-      if (_lockedHash && targetHash !== _lockedHash) {
-        // Locked out: always show a blocking alert for guests (nuisance by design),
-        // then prevent navigation regardless.
+    if (targetHash) {
+      // Operator-trusted nodes (built-in + configured default) are always
+      // reachable. They don't trigger the external-node warning, and they
+      // aren't blocked by lockdown — the operator deliberately surfaced
+      // them to visitors. Lockdown blocks everything outside this set.
+      const isTrusted = _isTrustedHash(targetHash);
+
+      if (_lockedHash && !isTrusted) {
         window.alert(
           'External NomadNet content is not available to guests on this site.\n\n' +
           'Sign in if you have an account, or contact the site operator.'
         );
-        return;
+        return false;
       }
 
-      // Not locked — warn before proceeding.
+      // Not locked, going somewhere outside the trusted set → warn.
       // Guests: warn every time (unless operator explicitly disabled it at install).
       // Logged-in users: warn once per session, applies to all external nodes.
-      const guestShouldWarn = isGuest && !_allowGuestExternalBrowse;
-      if (guestShouldWarn || !_externalWarningAccepted) {
-        const go = window.confirm(
-          'You are about to leave this site and browse external NomadNet content.\n\n' +
-          'External nodes are not moderated and may contain content that is ' +
-          'unsuitable, offensive, or illegal in your jurisdiction.\n\n' +
-          (isGuest
-            ? 'Continue?'
-            : 'Accepting will apply to ALL external nodes for the rest of this ' +
-              'session — you will not be warned again.\n\nContinue?')
-        );
-        if (!go) return;
-        if (!isGuest) _externalWarningAccepted = true;
+      if (!_lockedHash && !isTrusted) {
+        const guestShouldWarn = isGuest && !_allowGuestExternalBrowse;
+        if (guestShouldWarn || !_externalWarningAccepted) {
+          const go = window.confirm(
+            'You are about to leave this site and browse external NomadNet content.\n\n' +
+            'External nodes are not moderated and may contain content that is ' +
+            'unsuitable, offensive, or illegal in your jurisdiction.\n\n' +
+            (isGuest
+              ? 'Continue?'
+              : 'Accepting will apply to ALL external nodes for the rest of this ' +
+                'session — you will not be warned again.\n\nContinue?')
+          );
+          if (!go) return false;
+          if (!isGuest) _externalWarningAccepted = true;
+        }
       }
     }
   }
 
-  addrBar.value = url;
+  addrBar.value = _displayAddress(url);
 
   if (pushHistory) {
     state.history = state.history.slice(0, state.historyIndex + 1);
@@ -468,10 +534,10 @@ async function navigateTo(url, pushHistory = true, extraFields = null) {
   const lxmfMatch = url.match(/\/lxmf@([0-9a-f]+)/i);
   if (lxmfMatch) {
     _handleLxmfLink(lxmfMatch[1].toLowerCase());
-    return;
+    return false;
   }
 
-  await fetchPage(url, extraFields);
+  return await fetchPage(url, extraFields);
 }
 
 async function _handleLxmfLink(destHash) {
@@ -614,7 +680,7 @@ function renderPageContent() {
 }
 
 async function fetchPage(url, extraFields = null) {
-  if (state.loading) return;
+  if (state.loading) return false;
   state.loading = true;
   showLoading(true, 0);
   setStatus('Fetching page…', 'busy');
@@ -642,7 +708,7 @@ async function fetchPage(url, extraFields = null) {
 
     if (pageNodeName) pageNodeName.textContent = getNodeName(data.hash);
     if (pagePath)     pagePath.textContent = data.path || '/';
-    addrBar.value = url;
+    addrBar.value = _displayAddress(url);
 
     _lastPage = {
       url,
@@ -654,10 +720,12 @@ async function fetchPage(url, extraFields = null) {
     renderPageContent();
 
     setStatus(`Loaded: ${data.path}`, 'ok');
+    return true;
   } catch (e) {
     showLoading(false);
     showError(e.message);
     setStatus(humanizeError(e.message), 'error');
+    return false;
   } finally {
     state.loading = false;
   }
@@ -1881,6 +1949,14 @@ function _initDisclaimer() {
   const effectiveDefault = (uiSettings && uiSettings.default_node) ||
                            (_siteInfo && _siteInfo.node_hash) || null;
 
+  // Surface the configured default to the trusted-set check in navigateTo
+  // so navigation to / between default + built-in never triggers the
+  // external-node warning. Stored separately from _hostedHash because the
+  // two may differ (operator can point default_node at a third-party node).
+  if (uiSettings && uiSettings.default_node) {
+    _defaultHash = uiSettings.default_node;
+  }
+
   // Activate lockdown BEFORE any navigation so navigateTo() can enforce it.
   // Super admin: never locked. Otherwise pick the per-audience field.
   const _lockField =
@@ -1896,12 +1972,33 @@ function _initDisclaimer() {
   if (startUrl) {
     navigateTo(decodeURIComponent(startUrl));
   } else {
-    if (effectiveDefault) {
-      navigateTo(`hash://${effectiveDefault}/index.mu`, false);
-    } else {
-      setStatus('Ready — select a node or enter an address', 'ok');
-    }
+    await _bootDefaultNavigation(_siteInfo, effectiveDefault);
   }
 
   setInterval(pollStatus, 15000);
 })();
+
+// Boot navigation with fallback: try the configured default first, then the
+// built-in node, then surface a generic welcome state. Both nodes are in
+// the trusted set, so lockdown doesn't block either — no special-casing
+// needed here. Subsequent user clicks from the visitor are still gated by
+// the same trusted-set check (only the trusted nodes are reachable under
+// lockdown; everything else hits the lock alert).
+async function _bootDefaultNavigation(siteInfo, primaryHash) {
+  if (!primaryHash) {
+    setStatus('Ready — select a node or enter an address', 'ok');
+    return;
+  }
+
+  if (await navigateTo(`hash://${primaryHash}/page/index.mu`, false)) return;
+
+  const builtIn = siteInfo && siteInfo.node_hash;
+  if (builtIn && builtIn.toLowerCase() !== primaryHash.toLowerCase()) {
+    if (await navigateTo(`hash://${builtIn}/page/index.mu`, false)) return;
+  }
+
+  pageError.hidden = true;
+  pageContent.innerHTML = '';
+  addrBar.value = '';
+  setStatus('Ready — select a node or enter an address', 'ok');
+}

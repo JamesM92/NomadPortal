@@ -1,11 +1,32 @@
 #!/usr/bin/env python3
-"""Redirect all HTTP requests to HTTPS."""
+"""Redirect all HTTP requests to HTTPS.
+
+Started by entrypoint.sh only when both WEB_PORT and WEB_PORT_HTTPS are
+non-empty (the classic HTTPS+redirector deployment). The empty-string
+guards below are belt-and-braces in case this script is invoked directly
+with a misconfigured environment.
+"""
 import http.server
 import os
 import socketserver
+import sys
 
-HTTPS_PORT = int(os.environ.get("WEB_PORT_HTTPS", "8443"))
-HTTP_PORT  = int(os.environ.get("WEB_PORT", "8080"))
+
+def _port(name: str, default: str) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        raw = default
+    try:
+        return int(raw)
+    except ValueError:
+        sys.stderr.write(
+            f"[redirect_http] {name}={raw!r} is not a valid port; using {default}\n"
+        )
+        return int(default)
+
+
+HTTPS_PORT = _port("WEB_PORT_HTTPS", "8443")
+HTTP_PORT  = _port("WEB_PORT", "8080")
 
 
 class _Redirect(http.server.BaseHTTPRequestHandler):

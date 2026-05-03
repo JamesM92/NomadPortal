@@ -14,6 +14,10 @@ Built on [Reticulum](https://reticulum.network) and [LXMF](https://github.com/ma
 
 This software is provided **"as is"**, without warranty of any kind, express or implied. The author accepts **no risk and no liability** for any use, misuse, or consequences arising from the use of this project. Anyone who installs, runs, hosts, or otherwise uses this software does so **entirely at their own risk and on their own responsibility** — including but not limited to compliance with applicable laws, the content accessed or transmitted through it, and any harm resulting from its operation.
 
+## Project status — trial release
+
+NomadPortal is in **active trial-release development**. Features, configuration, and behaviour may shift between point releases as rough edges are smoothed out. Feedback, bug reports, and pull requests are welcome — please [open an issue](https://github.com/JamesM92/NomadPortal/issues) for anything you run into. A 1.0 release will follow once the major surfaces have settled.
+
 ## Features
 
 - Browse NomadNet pages rendered from Micron markup to HTML
@@ -51,7 +55,7 @@ ADMIN_PASSWORD: your-strong-password-here
 FLASK_SECRET_KEY: some-random-string-here
 ```
 
-> **Pre-built image** — every tagged release is also published to the GitHub Container Registry, so you can skip the local build by replacing `build: .` in `docker-compose.yml` with `image: ghcr.io/jamesm92/nomadportal:latest` (or pin a specific version like `:v0.9.0`). `git clone` is still the easiest way to get the docker-compose file and `config/` skeleton.
+> **Pre-built image** — every tagged release is also published to the GitHub Container Registry. The default `docker-compose.yml` already references `image: ghcr.io/jamesm92/nomadportal:latest`; pin a specific version like `:v0.9.4` for reproducible deployments. `git clone` is still the easiest way to get the docker-compose file and `config/` skeleton.
 
 ### 2. Configure Reticulum interfaces
 

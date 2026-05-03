@@ -269,12 +269,16 @@ def api_status():
 @bp.get("/api/nodes")
 def api_nodes():
     user_sub = current_user.id if current_user.is_authenticated else ""
-    nodes = _browser().get_nodes(user_sub=user_sub)
+    ui = current_app.config.get("UI_SETTINGS")
+    default_hash = ((ui.get_all().get("default_node") if ui else "") or "").lower()
+    nodes = _browser().get_nodes(user_sub=user_sub, default_hash=default_hash)
     if not current_user.is_authenticated:
-        # Guests see favorited/is_hosted only for the hosted node; strip it elsewhere.
+        # Guests see `favorited` only for hosted/default nodes (the operator's
+        # auto-pinned set); strip it from every other node so guests don't
+        # see other users' bookmarks via the sidebar.
         nodes = [
             {k: v for k, v in n.items()
-             if k not in ("favorited",) or n.get("is_hosted")}
+             if k not in ("favorited",) or n.get("is_hosted") or n.get("is_default")}
             for n in nodes
         ]
     return jsonify({"nodes": nodes})
