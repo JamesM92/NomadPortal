@@ -121,6 +121,7 @@ def interfaces():
         user=current_user,
         ifaces=cfg.get("interfaces", {}),
         transport_mode=bool(cfg.get("transport_mode", False)),
+        ignore_discovery_probes=bool(cfg.get("ignore_discovery_probes", False)),
         shared_instance=cfg.get("shared_instance") or {},
     )
 
@@ -186,6 +187,7 @@ def interfaces_save():
     ifaces = cfg.setdefault("interfaces", {})
 
     cfg["transport_mode"] = "transport_mode" in request.form
+    cfg["ignore_discovery_probes"] = "ignore_discovery_probes" in request.form
 
     # Shared instance — RNS [reticulum] shared-state knobs
     shared = cfg.setdefault("shared_instance", {})

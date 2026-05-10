@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-05-03
+
+### Added
+
+- **"Ignore LAN Discovery Probes" toggle** in Admin → Interfaces. Sets
+  `respond_to_probes = No` in the RNS `[reticulum]` section so this
+  portal stops replying to unsolicited Reticulum probes (the
+  reachability tests other nodes send, most commonly on multicast LANs
+  / AutoInterface). Outbound traffic on configured interfaces is
+  unchanged — only unsolicited replies are suppressed. Off by default;
+  the line is omitted from the generated config when the toggle is
+  off, so RNS continues to use its built-in default.
+
 ## [0.9.7] — 2026-05-03
 
 ### Added

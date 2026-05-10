@@ -40,6 +40,27 @@
     </label>
   </div>
 
+  <!-- ── Ignore LAN Discovery Probes ─────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Ignore LAN Discovery Probes</div>
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;">
+      <input type="checkbox" name="ignore_discovery_probes" style="accent-color:var(--accent);width:16px;height:16px;"
+             {{ 'checked' if ignore_discovery_probes }}>
+      <div>
+        <strong>Don't respond to incoming Reticulum probes</strong>
+        <div class="dim" style="margin-top:2px;">
+          Sets <code>respond_to_probes = No</code> in the RNS config. Probes are
+          short reachability tests other Reticulum nodes send to confirm a
+          destination is alive — typical on AutoInterface / multicast LANs.
+          Enable this to keep this portal from advertising its presence in
+          response to unsolicited probes. Outbound traffic on interfaces
+          you've configured below is unaffected; this only suppresses replies
+          you didn't initiate.
+        </div>
+      </div>
+    </label>
+  </div>
+
   <!-- ── Shared Instance (Reticulum core IPC) ────────────────────────── -->
   <div class="card">
     <div class="card-title">Shared Instance — RNS inter-process bridging</div>

@@ -31,9 +31,10 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
     with open(config_yml, "r", encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
 
-    transport = bool(cfg.get("transport_mode", False))
-    ifaces    = cfg.get("interfaces", {})
-    sections  = _build_interface_sections(ifaces)
+    transport       = bool(cfg.get("transport_mode", False))
+    ignore_probes   = bool(cfg.get("ignore_discovery_probes", False))
+    ifaces          = cfg.get("interfaces", {})
+    sections        = _build_interface_sections(ifaces)
 
     os.makedirs(os.path.dirname(rns_config_path), exist_ok=True)
 
@@ -45,6 +46,8 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
         text = _DEFAULT_CONFIG
 
     text = _set_transport(text, transport)
+    text = _set_reticulum_kv(text, "respond_to_probes",
+                             "No" if ignore_probes else None)
     if "shared_instance" in cfg:
         text = _apply_shared_instance(text, cfg["shared_instance"] or {})
     text = _replace_interfaces(text, sections)

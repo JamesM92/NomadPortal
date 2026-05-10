@@ -39,6 +39,12 @@ interfaces:
 # Only enable on always-on, stationary hosts.
 transport_mode: false
 
+# Set true to suppress responses to incoming Reticulum discovery probes.
+# Outbound traffic on the interfaces below is unaffected — this only
+# stops the node advertising its presence in reply to unsolicited probes
+# (most relevant on multicast LANs / AutoInterface).
+ignore_discovery_probes: false
+
 # Reticulum shared-instance knobs. When `enabled` is true (the RNS default),
 # any other RNS process reachable on the same loopback joins this instance —
 # useful for one-host setups, problematic when running multiple NomadPortals
