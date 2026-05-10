@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-05-03
+
+### Fixed
+
+- **Worker boot crashed with `NameError: name 'https_mode' is not defined`.**
+  v0.9.5 inadvertently removed the `https_mode` assignment while still
+  referencing it in the HSTS header and HTTPS-redirect blocks, which
+  prevented Gunicorn from booting on every deployment. Restored the
+  assignment.
+
 ## [0.9.5] — 2026-05-03
 
 ### Fixed

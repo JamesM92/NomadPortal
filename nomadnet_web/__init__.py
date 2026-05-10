@@ -133,6 +133,8 @@ def create_app(
     # Request size cap — prevents oversized JSON/form bodies
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB
 
+    https_mode = cfg.get("HTTPS_REDIRECT", False)
+
     # Match the Secure flag to the actual request scheme. Browsers silently
     # drop Secure cookies from HTTP responses, which would break sessions
     # (and therefore login + CSRF) on plain-HTTP deployments. request.is_secure
