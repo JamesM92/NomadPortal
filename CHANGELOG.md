@@ -7,23 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.13] — 2026-05-10
+## [0.9.14] — 2026-05-10
 
-### Fixed
+### Changed
 
-- **Quarter-block characters lost their column gaps.** v0.9.12 added
-  `font-kerning: none` and `font-feature-settings: "kern" 0, "liga" 0`
-  to suppress what looked like horizontal banding in dense ASCII-art.
-  Wrong hypothesis: those rules collapsed the *natural* sub-pixel
-  separators that Roboto Mono Nerd Font generates between adjacent
-  block / quadrant glyphs (▙ ▟ ▛ ▜ ░ ▒ etc.), making characters merge
-  into continuous fills instead of distinct cells like MeshChat shows.
+- **Reverted v0.9.13.** v0.9.13 removed the `font-kerning: none` /
+  `font-feature-settings: "kern" 0, "liga" 0` rules added in v0.9.12,
+  on the hypothesis that they were causing block-character glyphs to
+  merge into continuous fills. After a long investigation, that
+  hypothesis turned out to be wrong (the visible MeshChat rendering
+  difference is from `display: inline-block` on bg-colored spans, not
+  kerning), but the v0.9.13 revert itself had other rendering
+  side-effects. v0.9.14 restores the v0.9.12 CSS state as the working
+  baseline.
 
-  Reverted both rules. The bundled font's default kerning/features now
-  flow through unmodified, matching MeshChat's minimal CSS (which only
-  sets `font-family` and `line-height: normal` on its `<pre>`
-  container — no kerning overrides). Confirmed by reading MeshChat's
-  upstream stylesheet at `src/frontend/components/nomadnetwork/NomadNetworkPage.vue`.
+  Functionally identical to v0.9.12.
+
+## [0.9.13] — 2026-05-10 — SUPERSEDED
+
+This release introduced rendering regressions and was reverted by
+v0.9.14. Do not use.
 
 ## [0.9.12] — 2026-05-10
 
