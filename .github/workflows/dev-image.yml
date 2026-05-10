@@ -1,0 +1,54 @@
+name: Dev image
+
+# Build and publish a `:dev` image to GHCR on every push to the dev branch.
+# Lets in-progress fixes be tested with `docker compose pull` against the
+# `:dev` tag without merging to main or cutting a release.
+#
+# Tags published:
+#   - :dev               always points at the latest dev commit
+#   - :dev-<short-sha>   immutable per-commit tag for pinning / rollback
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  publish:
+    name: Publish dev image to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # GHCR repo names must be lowercase. ${{ github.repository }} preserves
+      # the original case (JamesM92/NomadPortal) which Docker rejects.
+      - name: Lowercase repo
+        id: repo
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}:dev
+            ghcr.io/${{ steps.repo.outputs.name }}:dev-${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
