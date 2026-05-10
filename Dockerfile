@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       openssl \
     && rm -rf /var/lib/apt/lists/*
 
+# python:3.12-slim only ships the interpreter at /usr/local/bin/python3.
+# User-authored .mu pages conventionally start with `#!/usr/bin/python3`,
+# so add the canonical /usr/bin path as a symlink for compatibility.
+RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+
 # Non-root user — matches UID 1000 so host volume permissions align with
 # `chown -R 1000:1000 ./config` on the host side.
 RUN groupadd -r -g 1000 nomadnet \

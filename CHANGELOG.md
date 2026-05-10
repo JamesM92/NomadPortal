@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-05-10
+
+### Fixed
+
+- **`#!/usr/bin/python3` shebang in user-authored `.mu` pages** now
+  works out of the box. The `python:3.12-slim` base image only ships
+  the interpreter at `/usr/local/bin/python3`, so the conventional
+  `/usr/bin/python3` shebang silently failed on any executable Micron
+  page. Added a symlink in the Dockerfile to provide both paths. No
+  effect on existing pages that use other shebangs (e.g. `#!/usr/bin/env python3`).
+
 ## [0.9.8] — 2026-05-03
 
 ### Added
