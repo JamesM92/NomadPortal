@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-05-03
+
+### Fixed
+
+- **Login worked on HTTPS but returned 403 on plain-HTTP deployments.** The
+  session cookie was being sent unconditionally with the `Secure` attribute,
+  which browsers silently drop on HTTP responses — leaving the next POST
+  with no session, no CSRF token, and a bare 403 from the CSRF check. The
+  session interface now sets `Secure` only when the actual request scheme
+  is HTTPS (`request.is_secure`, which respects ProxyFix's
+  `X-Forwarded-Proto`), so HTTPS deployments still get protected cookies
+  while plain-HTTP test deployments work end-to-end.
+
 ## [0.9.4] — 2026-05-03
 
 ### Added

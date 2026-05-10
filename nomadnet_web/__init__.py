@@ -2,7 +2,8 @@ import logging
 import os
 import time
 import datetime
-from flask import Flask, redirect, render_template, request, send_from_directory
+from flask import Flask, has_request_context, redirect, render_template, request, send_from_directory
+from flask.sessions import SecureCookieSessionInterface
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -132,9 +133,16 @@ def create_app(
     # Request size cap — prevents oversized JSON/form bodies
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB
 
-    # Secure session cookies — always True since Gunicorn always serves HTTPS
-    https_mode = cfg.get("HTTPS_REDIRECT", False)
-    app.config["SESSION_COOKIE_SECURE"]      = True
+    # Match the Secure flag to the actual request scheme. Browsers silently
+    # drop Secure cookies from HTTP responses, which would break sessions
+    # (and therefore login + CSRF) on plain-HTTP deployments. request.is_secure
+    # already respects ProxyFix's X-Forwarded-Proto, so HTTPS-anywhere-in-the-
+    # chain deployments still get the Secure flag.
+    class _RequestAwareSessionInterface(SecureCookieSessionInterface):
+        def get_cookie_secure(self, app):
+            return has_request_context() and request.is_secure
+
+    app.session_interface = _RequestAwareSessionInterface()
     app.config["SESSION_COOKIE_HTTPONLY"]    = True
     app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
     app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(hours=8)
