@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-05-10
+
+### Fixed
+
+- **Form-submit links with NomadNet's `*` wildcard now work.** When a
+  Micron link uses `\submit` (rendered by Micron2HTML as
+  `data-field-spec="*"`), the JS click handler was parsing each spec
+  as `key=value` and silently skipping `*` because it has no `=` sign.
+  Result: the link click was a no-op — `navigateTo` ran with empty
+  fields. The handler now special-cases `*` to merge in every input
+  on the current page via the existing `collectPageFields()` helper,
+  matching NomadNet's "submit all" semantics. Diagnosis credit: a
+  sibling AI working on a register-style `.mu` page.
+
 ## [0.9.9] — 2026-05-10
 
 ### Fixed

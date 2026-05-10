@@ -634,6 +634,16 @@ function renderPageContent() {
         const fields = {};
         if (fieldSpec) {
           fieldSpec.split('`').forEach(spec => {
+            // NomadNet wildcard: `*` means "submit every input on the
+            // current page". Used for register/login-style links that
+            // don't enumerate field names. collectPageFields() already
+            // does this — we just need to call it instead of falling
+            // through to the key=value parser, which would skip `*`
+            // entirely (no `=` sign).
+            if (spec.trim() === '*') {
+              Object.assign(fields, collectPageFields());
+              return;
+            }
             const eq = spec.indexOf('=');
             if (eq <= 0) return;
             const key = spec.slice(0, eq).trim();
