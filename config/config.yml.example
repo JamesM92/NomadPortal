@@ -38,3 +38,16 @@ interfaces:
 # Set true to act as a transport node (route traffic for other peers).
 # Only enable on always-on, stationary hosts.
 transport_mode: false
+
+# Reticulum shared-instance knobs. When `enabled` is true (the RNS default),
+# any other RNS process reachable on the same loopback joins this instance —
+# useful for one-host setups, problematic when running multiple NomadPortals
+# in the same Docker network namespace (each will see the others' state).
+# Set `enabled: false` per instance, or give each a unique `port`, to keep
+# co-located instances independent. Leave port/control_port empty to use
+# RNS defaults (37428 / 37429).
+shared_instance:
+  enabled: true
+  instance_name: default
+  port:
+  control_port:

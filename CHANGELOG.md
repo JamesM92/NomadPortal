@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-05-03
+
+### Added
+
+- **Shared-instance controls in the Interfaces tab.** Reticulum's
+  shared-instance feature lets co-located RNS processes (e.g. multiple
+  NomadPortals sharing a Docker network namespace via Gluetun) bridge
+  through a single loopback socket — convenient for one-host setups,
+  but it makes secondary instances inherit the primary's interfaces
+  and announces whether you want it or not.
+
+  A new "Shared Instance" card on **Admin → Interfaces** exposes the
+  RNS knobs:
+
+  - **Share with other processes** (`share_instance`) — uncheck on
+    secondary portals to keep them fully independent.
+  - **Instance name** (`instance_name`) — namespacing for
+    Reticulum's on-disk state.
+  - **Shared port** / **Control port** (`shared_instance_port` /
+    `instance_control_port`) — give each instance unique ports if you
+    want them isolated but still individually share-able with future
+    co-located apps.
+
+  Settings live under `shared_instance:` in `config.yml` and are
+  written into the `[reticulum]` section of `config/reticulum/config`
+  on save. Existing deployments without the block are unaffected
+  (back-compat no-op).
+
 ## [0.9.6] — 2026-05-03
 
 ### Fixed

@@ -121,6 +121,7 @@ def interfaces():
         user=current_user,
         ifaces=cfg.get("interfaces", {}),
         transport_mode=bool(cfg.get("transport_mode", False)),
+        shared_instance=cfg.get("shared_instance") or {},
     )
 
 
@@ -185,6 +186,16 @@ def interfaces_save():
     ifaces = cfg.setdefault("interfaces", {})
 
     cfg["transport_mode"] = "transport_mode" in request.form
+
+    # Shared instance — RNS [reticulum] shared-state knobs
+    shared = cfg.setdefault("shared_instance", {})
+    shared["enabled"] = "shared_instance_enabled" in request.form
+    name_raw = request.form.get("shared_instance_name", "").strip()
+    shared["instance_name"] = name_raw  # empty string → strips key in config_gen
+    port_raw = request.form.get("shared_instance_port", "").strip()
+    ctrl_raw = request.form.get("shared_instance_control_port", "").strip()
+    shared["port"]         = int(port_raw) if port_raw.isdigit() and 0 < int(port_raw) < 65536 else None
+    shared["control_port"] = int(ctrl_raw) if ctrl_raw.isdigit() and 0 < int(ctrl_raw) < 65536 else None
 
     # AutoInterface
     ifaces.setdefault("auto", {})["enabled"] = "auto_enabled" in request.form

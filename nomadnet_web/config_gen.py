@@ -1,9 +1,11 @@
 """
 Sync config.yml → Reticulum config file.
 
-Updates two things on every container start:
+Updates these things on every container start:
   1. enable_transport in the [reticulum] section
-  2. The entire [interfaces] block
+  2. share_instance / shared_instance_port / instance_control_port /
+     instance_name in the [reticulum] section
+  3. The entire [interfaces] block
 
 All other settings in the RNS config file are left untouched.
 """
@@ -43,6 +45,8 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
         text = _DEFAULT_CONFIG
 
     text = _set_transport(text, transport)
+    if "shared_instance" in cfg:
+        text = _apply_shared_instance(text, cfg["shared_instance"] or {})
     text = _replace_interfaces(text, sections)
 
     with open(rns_config_path, "w", encoding="utf-8") as fh:
@@ -181,22 +185,58 @@ def _yn(v) -> str:
 
 def _set_transport(text: str, enabled: bool) -> str:
     """Set enable_transport in the [reticulum] section."""
-    val = "True" if enabled else "False"
-    # Replace existing line
+    return _set_reticulum_kv(text, "enable_transport", "True" if enabled else "False")
+
+
+def _set_reticulum_kv(text: str, key: str, value) -> str:
+    """Set or remove a key=value line in the [reticulum] section.
+
+    Pass ``value=None`` (or empty string) to remove the key, letting Reticulum
+    fall back to its built-in default. Otherwise the value is stringified
+    verbatim.
+    """
+    if value is None or value == "":
+        # Strip the line entirely if present
+        return re.sub(
+            rf"(?m)^\s*{re.escape(key)}\s*=.*\n?",
+            "",
+            text,
+        )
+
+    val = str(value)
     patched, n = re.subn(
-        r"(?m)^(\s*enable_transport\s*=\s*).*$",
+        rf"(?m)^(\s*{re.escape(key)}\s*=\s*).*$",
         rf"\g<1>{val}",
         text,
     )
     if n:
         return patched
-    # Insert after [reticulum] header if not found
+    # Insert into [reticulum] block (after header line)
     return re.sub(
         r"(\[reticulum\][^\[]*)",
-        lambda m: m.group(0).rstrip() + f"\n  enable_transport = {val}\n",
+        lambda m: m.group(0).rstrip() + f"\n  {key} = {val}\n",
         text,
         count=1,
     )
+
+
+def _apply_shared_instance(text: str, shared: dict) -> str:
+    """Apply the [reticulum] shared-instance keys from ``shared``.
+
+    ``shared`` may contain ``enabled`` (bool, default True), ``instance_name``
+    (str), ``port`` (int → ``shared_instance_port``), and ``control_port``
+    (int → ``instance_control_port``). Empty / missing values strip the key
+    from the file so RNS uses its default.
+    """
+    enabled = shared.get("enabled", True)
+    text = _set_reticulum_kv(text, "share_instance", "Yes" if enabled else "No")
+    text = _set_reticulum_kv(text, "instance_name",
+                             (shared.get("instance_name") or "").strip() or None)
+    text = _set_reticulum_kv(text, "shared_instance_port",
+                             shared.get("port") or None)
+    text = _set_reticulum_kv(text, "instance_control_port",
+                             shared.get("control_port") or None)
+    return text
 
 
 def _replace_interfaces(text: str, sections: list[str]) -> str:
