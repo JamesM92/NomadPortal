@@ -400,11 +400,17 @@ body {
    * subtly widens characters and breaks monospace alignment in centered
    * lines that mix bold/non-bold spans. */
   font-synthesis-weight: none;
-  /* DO NOT add `font-kerning: none` here — the bundled Roboto Mono Nerd
-   * Font uses kerning pairs to bring Braille glyphs (U+2800-28FF) flush
-   * against each other. Disabling kerning makes a row of full-dot Braille
-   * render as separated dots with visible gaps instead of a contiguous
-   * grid (MeshChat parity break). */
+  /* Kerning + ligatures both off. Roboto Mono Nerd Font carries kerning
+   * pairs and a few ligatures that subtly shave fractional cell widths
+   * off adjacent glyphs — invisible on short text, but in dense
+   * box-drawing / ASCII-art content (the geomap world map, frame art,
+   * etc.) the fractions accumulate across a row and visibly offset the
+   * stacking of rows below. MeshChat renders without kerning, so this
+   * is required for parity. (The earlier Braille-glyph kerning
+   * dependency is gone — Braille is now CSS-drawn via radial-gradient
+   * dots in `.mu-braille`, fully font-independent.) */
+  font-kerning: none;
+  font-feature-settings: "kern" 0, "liga" 0;
 }
 
 /* Fake-bold via `text-shadow`: drawing the glyph offset 0.5px to the right

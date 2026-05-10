@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-05-10
+
+### Fixed
+
+- **Dense ASCII / box-drawing content (e.g. the `geomap` world map)**
+  rendered with visible horizontal banding between rows. Roboto Mono
+  Nerd Font ships with kerning pairs that shave fractional cell widths
+  off adjacent glyphs; over a 100+ character row of repeating block
+  characters the fractions accumulated and visibly offset the stacking
+  of rows below. Disabled font kerning and ligatures (`font-kerning:
+  none` + `font-feature-settings: "kern" 0, "liga" 0`) on the Micron
+  content area to match MeshChat's rendering pipeline. The earlier
+  Braille-glyph kerning dependency is gone — Braille is now CSS-drawn
+  via `.mu-braille` radial-gradient dots and fully font-independent.
+
 ## [0.9.11] — 2026-05-10
 
 ### Fixed
