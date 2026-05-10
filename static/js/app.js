@@ -633,43 +633,51 @@ function renderPageContent() {
         const fieldSpec = a.getAttribute('data-field-spec') || '';
         const fields = {};
         if (fieldSpec) {
+          // Each backtick-separated spec is a pipe-separated list of tokens.
+          // Each token is one of:
+          //   `*`           — wildcard: merge in every input on the current
+          //                   page via collectPageFields(). Used by forum
+          //                   actions like *|action=preview|board_id=1.
+          //   `key=literal` — literal pair: fields[key] = literal.
+          //   `inputname`   — input-name reference: look up an <input> with
+          //                   that name on the page and submit its current
+          //                   value as fields[inputname].
+          // Tokens are independent, order-agnostic, and all contribute to
+          // the outgoing submission. This handles the original NomadNet
+          // syntax `key=val|input1|input2` (one literal + N input refs) and
+          // the mixed wildcard form `*|key=lit|inputname` equivalently.
           fieldSpec.split('`').forEach(spec => {
-            // NomadNet wildcard: `*` means "submit every input on the
-            // current page". Used for register/login-style links that
-            // don't enumerate field names. collectPageFields() already
-            // does this — we just need to call it instead of falling
-            // through to the key=value parser, which would skip `*`
-            // entirely (no `=` sign).
-            if (spec.trim() === '*') {
-              Object.assign(fields, collectPageFields());
-              return;
-            }
-            const eq = spec.indexOf('=');
-            if (eq <= 0) return;
-            const key = spec.slice(0, eq).trim();
-            if (!key) return;
-            const pipeParts = spec.slice(eq + 1).split('|');
-            fields[key] = pipeParts[0];
-            for (let i = 1; i < pipeParts.length; i++) {
-              const inputName = pipeParts[i].trim();
-              if (!inputName) continue;
-              // For radio groups (multiple inputs sharing a name), select
-              // the *checked* one — querySelector returns only the first,
-              // which would silently drop the actual selection.
+            spec.split('|').forEach(token => {
+              const t = token.trim();
+              if (!t) return;
+              if (t === '*') {
+                Object.assign(fields, collectPageFields());
+                return;
+              }
+              const eq = t.indexOf('=');
+              if (eq > 0) {
+                const key = t.slice(0, eq).trim();
+                if (key) fields[key] = t.slice(eq + 1);
+                return;
+              }
+              // No `=` — treat as input-name reference.
               const inputs = pageContent.querySelectorAll(
-                `input[name="${CSS.escape(inputName)}"]`,
+                `input[name="${CSS.escape(t)}"]`,
               );
-              if (!inputs.length) continue;
+              if (!inputs.length) return;
               const first = inputs[0];
               if (first.type === 'radio') {
+                // For radio groups (multiple inputs sharing a name), pick
+                // the *checked* one — querySelector returns only the first,
+                // which would silently drop the actual selection.
                 const checked = Array.from(inputs).find(i => i.checked);
-                if (checked) fields[inputName] = checked.value || 'on';
+                if (checked) fields[t] = checked.value || 'on';
               } else if (first.type === 'checkbox') {
-                if (first.checked) fields[inputName] = first.value || 'on';
+                if (first.checked) fields[t] = first.value || 'on';
               } else {
-                fields[inputName] = first.value;
+                fields[t] = first.value;
               }
-            }
+            });
           });
         }
         navigateTo(inner, true, Object.keys(fields).length ? fields : null);

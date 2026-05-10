@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.11] — 2026-05-10
+
+### Fixed
+
+- **Mixed-token field-specs** like `*|action=preview|board_id=1` now
+  parse correctly. v0.9.10 only special-cased the case where the
+  *whole* spec was a literal `*`, but real-world Micron pages (forum
+  actions, edit/reply links, etc.) interleave the wildcard with
+  literal `key=value` tokens inside one pipe-separated spec.
+
+  Refactored the parser to be token-based: each backtick-separated
+  spec is split on `|`, and each token is independently classified
+  as either `*` (collect-all wildcard), `key=value` (literal pair),
+  or `inputname` (page input reference). All three contribute their
+  own fields to the outgoing submission — order-agnostic, mixable.
+
+  Backward-compatible with the original `key=value|input1|input2`
+  syntax (one literal + N input refs). Diagnosis credit: the same
+  sibling AI as v0.9.10, who caught the broader case after the
+  forum's Preview link still didn't work post-v0.9.10.
+
 ## [0.9.10] — 2026-05-10
 
 ### Fixed
