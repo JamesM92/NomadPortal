@@ -91,6 +91,20 @@ def _setup_logging() -> None:
         stream=sys.stdout,
     )
 
+    # Suppress noisy poll/healthcheck access lines from gunicorn's access
+    # log. The front-end polls `/api/page/poll` every 500ms while a page
+    # fetch is in flight and the healthcheck hits `/api/status` every
+    # 30s; both flood `docker logs` and bury everything else. Other
+    # `/api/...` traffic still logs normally, including poll *errors*
+    # (which come through a different logger).
+    class _NoisyEndpointFilter(logging.Filter):
+        _NOISY = ("/api/page/poll", "/api/status")
+        def filter(self, record):
+            msg = record.getMessage()
+            return not any(p in msg for p in self._NOISY)
+
+    logging.getLogger("gunicorn.access").addFilter(_NoisyEndpointFilter())
+
 
 def _get_or_create_secret_key(config_dir: str) -> str:
     key_file = os.path.join(config_dir, "secret.key")
