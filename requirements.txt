@@ -21,4 +21,4 @@ pytest==8.0.0
 
 # Renderer — pinned by dev SHA while the Braille dot-position fix is
 # verified. Bumps to v1.0.6 tag once confirmed working.
-Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@93cc8b640068987a21c3cc8c2ed15fadf7b41cca
+Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@3a4e54875cc629396d42b0f3cc17444594d06eb4
