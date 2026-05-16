@@ -59,6 +59,30 @@ _log = logging.getLogger(__name__)
 _app = None
 
 
+def _log_versions() -> None:
+    """Log NomadPortal + key dependency versions at startup.
+
+    Lets `docker logs` confirm which image is running without `docker
+    inspect` — particularly useful when bouncing between :latest and :dev
+    to compare behaviour.
+    """
+    from nomadnet_web import __version__ as nomadportal_version
+    try:
+        import importlib.metadata as _md
+        m2h = _md.version("Micron2HTML")
+    except Exception:
+        m2h = "unknown"
+    try:
+        import rns
+        rns_version = getattr(rns, "__version__", "unknown")
+    except Exception:
+        rns_version = "unknown"
+    _log.info(
+        "NomadPortal v%s starting (Micron2HTML %s, RNS %s)",
+        nomadportal_version, m2h, rns_version,
+    )
+
+
 def _setup_logging() -> None:
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
@@ -66,6 +90,20 @@ def _setup_logging() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         stream=sys.stdout,
     )
+
+    # Suppress noisy poll/healthcheck access lines from gunicorn's access
+    # log. The front-end polls `/api/page/poll` every 500ms while a page
+    # fetch is in flight and the healthcheck hits `/api/status` every
+    # 30s; both flood `docker logs` and bury everything else. Other
+    # `/api/...` traffic still logs normally, including poll *errors*
+    # (which come through a different logger).
+    class _NoisyEndpointFilter(logging.Filter):
+        _NOISY = ("/api/page/poll", "/api/status")
+        def filter(self, record):
+            msg = record.getMessage()
+            return not any(p in msg for p in self._NOISY)
+
+    logging.getLogger("gunicorn.access").addFilter(_NoisyEndpointFilter())
 
 
 def _get_or_create_secret_key(config_dir: str) -> str:
@@ -96,6 +134,7 @@ def create_wsgi():
         return _app
 
     _setup_logging()
+    _log_versions()
 
     config_dir = os.environ.get("RNS_CONFIG_DIR", "/config/reticulum")
     config_yml = os.environ.get("CONFIG_YML",     "/config/config.yml")

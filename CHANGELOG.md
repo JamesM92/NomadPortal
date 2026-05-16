@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] — 2026-05-16
+
+### Changed
+
+- **Bump Micron2HTML pin to `v1.0.6`.** v1.0.6 ships Braille
+  dot-position improvements: vertical edges (5/35/65/95) so adjacent
+  rows of full-dot Braille flow as a tightly-stacked grid instead of
+  separating into discrete rows; horizontal inset (27/73) so adjacent
+  Braille glyphs have a faintly perceptible cell boundary without
+  obvious gaps breaking the contiguous-grid feel.
+
+### Added
+
+- **Version logging at startup.** `docker logs` now shows a line like
+  `NomadPortal v0.9.15 starting (Micron2HTML 1.0.6, RNS 1.1.3)` right
+  after Gunicorn boots. Useful for confirming which image is running
+  without `docker inspect`, especially when bouncing between
+  `:latest` and `:dev`.
+
+- **Dev-image GHCR workflow.** Pushes to the `dev` branch now
+  auto-build a `:dev` image on GHCR (plus a `:dev-<short-sha>` for
+  pinned testing). Lets in-progress fixes be tested with
+  `docker compose pull` against `:dev` without merging to main or
+  cutting a release. The release workflow for tagged versions is
+  unchanged.
+
+### Fixed
+
+- **Suppressed access-log spam** for `/api/page/poll` and
+  `/api/status`. The front-end polls `/api/page/poll` every 500ms
+  while a page fetch is in flight, and the Docker healthcheck hits
+  `/api/status` every 30s. Both endpoints flooded `docker logs` with
+  identical lines and buried genuinely useful events. Added a
+  `gunicorn.access` logging filter that drops lines matching those
+  paths; error events and all other `/api/*` traffic continue to
+  log normally.
+
 ## [0.9.14] — 2026-05-10
 
 ### Changed

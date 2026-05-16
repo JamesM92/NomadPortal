@@ -4,6 +4,10 @@ import time
 import datetime
 from flask import Flask, has_request_context, redirect, render_template, request, send_from_directory
 from flask.sessions import SecureCookieSessionInterface
+
+# Bumped per release. Logged at startup so the running image's version is
+# visible in `docker logs` without needing `docker inspect`.
+__version__ = "0.9.15"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
