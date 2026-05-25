@@ -16,8 +16,10 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Weekly Monday 03:00 UTC — catches new CVEs against the unchanged tree.
-    - cron: '0 3 * * 1'
+    # Monthly on the 1st at 03:00 UTC — catches new CVEs against the
+    # unchanged tree. PR/push triggers still gate every dep bump, and
+    # Dependabot continues to PR upstream updates weekly.
+    - cron: '0 3 1 * *'
 
 permissions:
   contents: read

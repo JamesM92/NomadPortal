@@ -14,9 +14,10 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Weekly Tuesday 03:00 UTC — staggered from security.yml's Monday run
-    # so they don't both contend for the same shared GitHub Actions queue.
-    - cron: '0 3 * * 2'
+    # Monthly on the 15th at 03:00 UTC — staggered from security.yml's
+    # 1st-of-month run so they don't both contend for the same shared
+    # GitHub Actions queue. PR/push triggers still gate every change.
+    - cron: '0 3 15 * *'
 
 permissions:
   contents: read
