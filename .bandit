@@ -1,17 +1,19 @@
+[bandit]
 # Bandit security-linter config — paired with .github/workflows/security.yml
 #
 # Bandit's CI job runs `bandit -r . -ll` (MEDIUM+ severity only) and
 # fails the workflow on any finding. This file documents the
 # project-wide suppressions and *why* — so the next person who looks
 # at a failed scan has the rationale here, not just in commit history.
-
-skips:
-  # B104: hardcoded_bind_all_interfaces — bandit flags `host="0.0.0.0"`
-  # in `app.run()`, the gunicorn bind, and the redirect-HTTP server.
-  # All of those are intentional: NomadPortal is designed to run inside
-  # a Docker container, where the container itself provides the network
-  # boundary (port-mapping, reverse-proxy, Gluetun VPN, etc.). Binding
-  # to 0.0.0.0 is the *correct* behaviour in a container; binding to
-  # 127.0.0.1 would mean the service is unreachable from outside the
-  # container, which is not the goal.
-  - B104
+#
+# Note: bandit auto-discovers `.bandit` in INI format. YAML configs
+# need an explicit `-c <file>` flag — we use the simple form here.
+#
+# B104 — hardcoded_bind_all_interfaces. Bandit flags `host="0.0.0.0"`
+# in app.py, the gunicorn bind, and the redirect-HTTP server. All
+# intentional: NomadPortal runs in a container where the container
+# provides the network boundary (port-mapping, reverse-proxy,
+# Gluetun VPN, etc.). Binding to 0.0.0.0 is the *correct* behaviour;
+# binding to 127.0.0.1 would make the service unreachable from
+# outside the container.
+skips = B104
