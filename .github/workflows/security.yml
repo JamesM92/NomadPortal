@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pypa/gh-action-pip-audit@v1
+      - uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: requirements.txt
 

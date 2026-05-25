@@ -1,0 +1,22 @@
+# Hadolint Dockerfile-linter config — paired with .github/workflows/security.yml
+#
+# Hadolint's CI job runs against `Dockerfile` and fails on warnings.
+# This file documents the project-wide rule exclusions and *why*.
+
+ignored:
+  # DL3008: "Pin versions in apt-get install" — recommends syntax like
+  # `apt-get install gcc=4:13.2.0-7` instead of bare `apt-get install gcc`.
+  #
+  # Reasoning for ignoring: Debian's security team publishes patched
+  # versions of packages without bumping the user-visible version
+  # (security fixes flow into the `=patched` field of the existing
+  # version). Pinning to exact versions therefore *prevents* picking up
+  # those patches on `docker build`. It also causes the build to fail
+  # outright when Debian removes an older version from its archive
+  # (frequent on minor-version churn), which is a worse failure mode
+  # than rebuilding against a slightly different package version.
+  #
+  # The Trivy CI step (in the same workflow) catches CVE regressions
+  # against whatever-was-installed at build time, which is the layer
+  # that actually matters for security.
+  - DL3008
