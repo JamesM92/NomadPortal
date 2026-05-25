@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.16] — 2026-05-25
+
+### Security
+
+- **Dependency bumps for active CVEs** found by the new pip-audit
+  CI job (see "Added" below):
+
+  | Dep      | From → To       | CVEs resolved |
+  |----------|-----------------|---------------|
+  | flask    | 3.0.0  → 3.1.3  | CVE-2026-27205 (cache/session header) |
+  | authlib  | 1.3.0  → 1.6.11 | CVE-2026-27962 (CRITICAL: auth bypass), CVE-2024-37568, CVE-2025-59420, CVE-2025-61920, CVE-2026-28490, CVE-2026-28498, PYSEC-2026-25 |
+  | requests | 2.31.0 → 2.33.0 | CVE-2024-35195 (verify-persistence), CVE-2024-47081 (.netrc leak), CVE-2026-25645 (extract_zipped_paths) |
+  | pytest   | 8.0.0  → 9.0.3  | CVE-2025-71176 (tmp-dir race, dev-only dep) |
+
+  NomadPortal didn't appear to exercise any of the specific code paths
+  flagged by the CVEs, but upgrading to the fix versions is the
+  correct posture — clean baseline for future audits, avoids
+  per-scan triage on "is this a real risk for our usage".
+
+### Added
+
+- **GitHub Actions security pipeline.** Two new workflows on every
+  PR/push to main plus weekly cron:
+  - `security.yml`: pip-audit (Python deps), bandit (Python security
+    linter), hadolint (Dockerfile linter), trivy (image + library
+    vulnerability scan), gitleaks (secret detection).
+  - `codeql.yml`: GitHub-native static analysis for Python + JS,
+    with the `security-extended` query set. Results land in the repo
+    Security tab.
+
+  Both run on a weekly schedule (staggered Mon/Tue at 03:00 UTC) so
+  newly-disclosed CVEs against unchanged code surface within a week.
+
+  Configs:
+  - `.bandit` — skips B104 (`hardcoded_bind_all_interfaces`) with
+    rationale. Binding to 0.0.0.0 inside a container is correct
+    behaviour; the container is the network boundary.
+  - `.hadolint.yaml` — skips DL3008 (pin apt versions) with
+    rationale. Pinning Debian package versions prevents picking
+    up the security team's `=patched` updates that ship within
+    the same version string.
+  - `.trivyignore` — accepts CVE-2026-4878 (libcap2 TOCTOU in the
+    Debian 12 base image) with rationale. Fix is in Debian 13;
+    Dependabot will retire the entry once `python:3.12-slim`
+    rebases on trixie.
+
 ## [0.9.15] — 2026-05-16
 
 ### Changed
