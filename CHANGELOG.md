@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.17] — 2026-06-02
+
+### Changed
+
+- **Shared-instance defaults to off.** Two NomadPortal containers in the
+  same Docker network namespace (e.g. both attached to a shared Gluetun
+  container) collide on the RNS IPC socket and one boot will deadlock.
+  The default is now `share_instance = No`; existing installs that never
+  explicitly set the toggle are silently flipped. To restore the previous
+  behaviour, enable the toggle in Admin → Interfaces → Shared Instance
+  (or set `shared_instance.enabled: true` in `config.yml`).
+- **Micron2HTML now pulled from PyPI** instead of `git+https`
+  (`Micron2HTML==1.0.7`). v1.0.7 is functionally identical to v1.0.6;
+  it's the first release built through the new GitHub Actions pipeline
+  and published via Trusted Publishing. Drops `git` from the Docker
+  image's `apt` install.
+
+### Fixed
+
+- **HTTP→HTTPS redirector survives a port conflict.** Previously, if
+  the host port for `WEB_PORT` was already taken (common with two
+  co-located NomadPortal containers sharing internal ports), the
+  redirector would raise `OSError` and take the container with it.
+  Now it logs a warning and exits 0; HTTPS on `WEB_PORT_HTTPS`
+  continues unaffected.
+
 ## [0.9.16] — 2026-05-25
 
 ### Security

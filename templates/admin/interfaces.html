@@ -65,17 +65,18 @@
   <div class="card">
     <div class="card-title">Shared Instance — RNS inter-process bridging</div>
     <div class="dim" style="margin:0 0 12px;line-height:1.5;">
-      When enabled (the Reticulum default), this container shares its core RNS
-      state with any other RNS process reachable on the same loopback —
-      typically another container in the same Docker network namespace.
-      Co-located NomadPortal instances will then see each other's interfaces
-      and announces. Disable, or set unique ports per instance, to keep
-      multiple co-located NomadPortals fully independent.
+      When enabled, this container shares its core RNS state with any other
+      RNS process reachable on the same loopback — typically another
+      container in the same Docker network namespace. NomadPortal defaults
+      this <strong>off</strong>: co-located instances would otherwise collide
+      on the IPC socket and one boot will deadlock. Only turn it on if you
+      need another local RNS process (NomadNet CLI, Sideband, etc.) to share
+      this container's routing table.
     </div>
     <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;white-space:nowrap;padding-bottom:8px;">
         <input type="checkbox" name="shared_instance_enabled" style="accent-color:var(--accent);width:16px;height:16px;"
-               {{ 'checked' if shared_instance.get('enabled', True) }}>
+               {{ 'checked' if shared_instance.get('enabled', False) }}>
         Share with other processes
       </label>
       <div class="form-field" style="flex:1;min-width:160px;">

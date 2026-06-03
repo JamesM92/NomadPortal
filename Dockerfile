@@ -5,10 +5,8 @@ LABEL org.opencontainers.image.description="Web browser for NomadNet nodes with 
 LABEL org.opencontainers.image.source="https://github.com/JamesM92/NomadPortal"
 
 # System dependencies for Reticulum (cryptography / serial transports).
-# git is needed for pip to install Micron2HTML from its GitHub tag.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gcc \
-      git \
       libssl-dev \
       openssl \
     && rm -rf /var/lib/apt/lists/*

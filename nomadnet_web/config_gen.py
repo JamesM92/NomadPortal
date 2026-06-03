@@ -48,8 +48,7 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
     text = _set_transport(text, transport)
     text = _set_reticulum_kv(text, "respond_to_probes",
                              "No" if ignore_probes else None)
-    if "shared_instance" in cfg:
-        text = _apply_shared_instance(text, cfg["shared_instance"] or {})
+    text = _apply_shared_instance(text, cfg.get("shared_instance") or {})
     text = _replace_interfaces(text, sections)
 
     with open(rns_config_path, "w", encoding="utf-8") as fh:
@@ -226,12 +225,13 @@ def _set_reticulum_kv(text: str, key: str, value) -> str:
 def _apply_shared_instance(text: str, shared: dict) -> str:
     """Apply the [reticulum] shared-instance keys from ``shared``.
 
-    ``shared`` may contain ``enabled`` (bool, default True), ``instance_name``
-    (str), ``port`` (int → ``shared_instance_port``), and ``control_port``
-    (int → ``instance_control_port``). Empty / missing values strip the key
-    from the file so RNS uses its default.
+    ``shared`` may contain ``enabled`` (bool, default False — NomadPortal
+    defaults shared-instance off because co-located instances in the same
+    Docker network namespace will otherwise collide on the loopback IPC
+    socket), ``instance_name`` (str), ``port`` (int → ``shared_instance_port``),
+    and ``control_port`` (int → ``instance_control_port``).
     """
-    enabled = shared.get("enabled", True)
+    enabled = shared.get("enabled", False)
     text = _set_reticulum_kv(text, "share_instance", "Yes" if enabled else "No")
     text = _set_reticulum_kv(text, "instance_name",
                              (shared.get("instance_name") or "").strip() or None)
@@ -261,7 +261,7 @@ def _replace_interfaces(text: str, sections: list[str]) -> str:
 _DEFAULT_CONFIG = """\
 [reticulum]
   enable_transport = False
-  share_instance = Yes
+  share_instance = No
   instance_name = default
 
 [logging]

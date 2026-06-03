@@ -19,5 +19,5 @@ pyyaml==6.0.1
 gunicorn==22.0.0
 pytest==9.0.3
 
-# Renderer — pinned by tag
-Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@v1.0.6
+# Renderer — published to PyPI from v1.0.7 onwards
+Micron2HTML==1.0.7
