@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import socket
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 log = logging.getLogger(__name__)
