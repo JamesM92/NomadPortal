@@ -13,7 +13,7 @@ nomadnet==0.9.8
 # Web app stack
 flask==3.1.3
 flask-login==0.6.3
-authlib==1.6.12
+authlib==1.7.2
 requests==2.33.0
 pyyaml==6.0.1
 gunicorn==22.0.0
