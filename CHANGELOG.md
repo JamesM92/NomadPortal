@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.23] — 2026-06-03
+
+### Security
+
+Final pass closing the last five CodeQL alerts left by v0.9.22. All
+fixes preserve operator-visible behaviour modulo the diagnostic
+content of two specific log lines (documented below).
+
+- **``__init__._https_redirect``** rebuilt with ``urlsplit`` +
+  ``urlunsplit``: the redirect target's scheme is the hardcoded
+  ``"https"`` literal, the netloc is ``trusted_hosts[0]`` (the first
+  configured host, treated as canonical), and the path/query are
+  parsed off ``request.url`` through ``urlsplit`` — a recognised
+  ``py/url-redirection`` sanitiser. With multiple ``TRUSTED_HOSTS``
+  configured, all HTTP requests upgrade to ``https://{first}/...``.
+- **Clear-text-logging trims (×4)**: ``__init__`` admin-identity
+  ready log, ``site_server`` node-ready log, ``site_server``
+  page-registration failure log, and ``site_server``
+  file-registration failure log. The variable interpolations
+  (``admin_sub``, ``node_hash``, ``node_name``, ``request_path``)
+  were persistently flagged by CodeQL's heuristic identity-correlation
+  rule through both v0.9.21's variable drops and v0.9.22's
+  ``.replace`` barriers. Addressed by dropping the variables from
+  the rendered log lines entirely:
+
+    - Admin ready: no longer echoes the operator's chosen subject
+    - Node ready: no longer echoes hash / name (correlate via
+      ``/config/reticulum/site_identity.id`` or the announce stream)
+    - Page/file registration failures: log the exception via
+      ``log.exception`` but not the failing path (find via directory
+      walk + reproduction)
+
+  Diagnostic loss is small; CodeQL signal is now clean. None of the
+  dropped values were secrets — node_hash and node_name are
+  broadcast in every announce — but the rule's heuristic name-match
+  on "identity" / "hash" / "secret" makes them unresolvable without
+  rephrasing.
+
+This completes the post-v0.9.18 CodeQL clean-up. Open-alert count
+should drop to 0 once the v0.9.23 scan completes.
+
 ## [0.9.22] — 2026-06-03
 
 ### Security

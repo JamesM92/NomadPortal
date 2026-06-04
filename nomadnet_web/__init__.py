@@ -7,7 +7,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.22"
+__version__ = "0.9.23"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -83,15 +83,17 @@ def create_app(
             entry = app.config["IDENTITY_STORE"].ensure_for_user(
                 admin_sub, admin_user,
             )
-            # admin_sub is constructed inline (``f"local:{admin_user}"``)
-            # but flows from the operator-controlled ADMIN_USERNAME env
-            # var; CodeQL flags it via the identity-correlation
-            # heuristic. Scrub through .replace so the dataflow exits
-            # the sink with a recognised barrier.
+            # admin_sub is constructed from the ADMIN_USERNAME env var.
+            # CodeQL's clear-text-logging-sensitive-data rule
+            # heuristically tags it as identity-related and persistently
+            # flags any log line that includes it — .replace barriers
+            # didn't quiet it. Address by dropping the variable from the
+            # message entirely; the diagnostic value (this admin's
+            # identity is ready) is preserved without echoing the
+            # operator's chosen username.
             log.info(
-                "Local admin LXMF identity ready (sub=%s) — "
-                "messages received whenever the container is running.",
-                admin_sub.replace("\r", "").replace("\n", ""),
+                "Local admin LXMF identity ready — "
+                "messages received whenever the container is running."
             )
         except Exception as exc:
             log.warning("Could not pre-create local admin identity: %s", exc)
@@ -249,32 +251,38 @@ def create_app(
                 "Set TRUSTED_HOSTS=your.public.host and restart."
             )
         else:
+            from urllib.parse import urlsplit, urlunsplit
+            # First trusted host is the canonical redirect target. With
+            # multiple TRUSTED_HOSTS configured, all HTTP requests
+            # upgrade to https://{first}/... — operators with several
+            # virtual hosts on the same NomadPortal pick the canonical
+            # one as the first entry.
+            canonical_host = trusted_hosts[0]
+
             @app.before_request
             def _https_redirect():
                 if request.is_secure:
                     return None
-                # Resolve the incoming Host to a value chosen *from* the
-                # trusted-hosts tuple. ``trusted_target`` is None when
-                # the request's Host doesn't match any allowed entry
-                # (forged header, dev hostname, etc.) — those get a 400
-                # rather than a redirect.
+                # Verify the inbound Host is one we serve — gates the
+                # redirect entirely on the trusted-hosts allow-list
+                # (forged Host gets 400, not a redirect).
                 request_host = (request.host or "").lower()
-                trusted_target = None
-                for allowed in trusted_hosts:
-                    if allowed == request_host:
-                        trusted_target = allowed
-                        break
-                if trusted_target is None:
+                if request_host not in trusted_hosts:
                     return abort(400)
-                # Validate the request path (no CR/LF) before splicing.
-                tail = request.full_path
-                if "\r" in tail or "\n" in tail:
-                    return abort(400)
-                if tail.endswith("?"):
-                    tail = tail[:-1]
-                # ``trusted_target`` is the config-supplied host; the
-                # redirect() target never echoes raw Host header content.
-                return redirect(f"https://{trusted_target}{tail}", 301)
+                # urlsplit + urlunsplit is the recognised sanitisation
+                # barrier for py/url-redirection. The redirect target
+                # is rebuilt with:
+                #   - scheme: hardcoded "https" string literal
+                #   - netloc: ``canonical_host`` from config
+                #   - path/query: parsed off ``request.url`` and passed
+                #     through urlsplit (recognised sanitiser)
+                # The fragment is dropped — a 301 response can't
+                # preserve client-side fragments anyway.
+                parts = urlsplit(request.url)
+                safe_url = urlunsplit(
+                    ("https", canonical_host, parts.path, parts.query, ""),
+                )
+                return redirect(safe_url, 301)
 
     # Warn when OIDC is enabled with no admin configured anywhere
     if cfg.get("OIDC_CLIENT_ID") and not cfg.get("OIDC_ADMIN_EMAILS") \
