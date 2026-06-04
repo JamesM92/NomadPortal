@@ -7,7 +7,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.18"
+__version__ = "0.9.19"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser

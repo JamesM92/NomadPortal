@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.19] — 2026-06-03
+
+### Fixed
+
+- **Drop unused `field` import from `nomadnet_web/scanner.py`** so the
+  Ruff F401 check passes. The v0.9.18 Build job tripped on this in CI
+  and no Docker image was published to GHCR for that tag, so v0.9.19
+  is effectively the *first* release that actually ships the v0.9.18
+  feature set as a usable image.
+
 ## [0.9.18] — 2026-06-03
 
 ### Changed
