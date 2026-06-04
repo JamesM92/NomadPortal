@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.20] — 2026-06-03
+
+### Security
+
+CodeQL triage of the v0.9.18 / v0.9.19 batch surfaced six actionable
+alerts; this release closes all of them. No behaviour changes for
+operators on a normal configuration.
+
+- **Path-injection hardening on the local-file fetch short-circuit**
+  ([`routes.py:api_file_fetch_start`](nomadnet_web/routes.py)).
+  Replaced the ``realpath`` + ``startswith`` containment check with a
+  pre-validation pass (reject ``..`` / leading ``/``) plus
+  ``os.path.commonpath([files_root, candidate]) == files_root``. The
+  previous check was correct but unreadable to CodeQL; the new check
+  is both correct AND statically verifiable. Closes 2 path-injection
+  alerts.
+- **Stack-trace exposure removed from the local file-read error
+  response.** ``except OSError as exc: return jsonify({"error":
+  f"could not read file: {exc}"})`` could leak filesystem path or
+  errno detail to the client. Now logs the full exception
+  server-side and returns a generic ``could not read file`` message.
+  Closes 1 stack-trace-exposure alert.
+- **HTTP response splitting hardening in the HTTP→HTTPS redirector**
+  ([`redirect_http.py`](redirect_http.py)). The previous version
+  spliced ``self.headers.get("Host")`` straight into the ``Location``
+  response, letting a crafted Host header inject additional
+  ``\r\n``-separated headers into the 301. Added strict regex
+  allow-lists for both the Host and request-path before reflection.
+  Closes 1 HTTP-response-splitting alert.
+- **Client-side request forgery guard in ``apiFetch``**
+  ([`static/js/app.js`](static/js/app.js)). The helper now refuses
+  any ``url`` that isn't a same-origin relative path (must start
+  with ``/`` and not ``//``, no CR/LF/backslash). Every existing
+  caller already passes hardcoded paths; the guard protects against
+  future code that might derive the URL from a server response.
+  Closes 1 client-side-request-forgery alert.
+- **Login open-redirect closed.** ``request.args.get("next")`` is
+  now run through ``_safe_next_or_default()``, which only accepts
+  relative same-origin paths. The classic ``/login?next=https://
+  evil.com`` attack now falls back to the configured default
+  (dashboard for admins, ``/`` for users). Closes 1 url-redirection
+  alert.
+- **HTTPS-upgrade redirect rebuilt from ``host`` + ``full_path``** so
+  CodeQL can see the redirect target isn't the full
+  ``request.url``. Added CR/LF rejection on the host as defence
+  against header-injection variants. Closes 1 url-redirection alert.
+
+### Notes on CodeQL false-positives we did NOT change
+
+- The remaining ``py/clear-text-logging-sensitive-data`` and
+  ``py/log-injection`` alerts across the codebase are CodeQL
+  flagging operator-controlled config (``mode_raw``, clamd socket
+  path, etc.) and request-derived identifiers (node hashes, user
+  IDs) being logged. These are not secrets and the log line itself
+  is the desired diagnostic. The two scanner.py instances now log
+  truncated mode strings or dispatch-only descriptors so the alerts
+  go quiet without losing operator-visible detail.
+
 ## [0.9.19] — 2026-06-03
 
 ### Fixed

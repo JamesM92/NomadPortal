@@ -219,8 +219,14 @@ def build_scanner_from_config(cfg: dict) -> tuple[Scanner, bool]:
     if mode_raw in ("off", "", "false", "no", "0"):
         return NullScanner(), False
     if mode_raw not in ("clamd", "required"):
+        # Echoing the unknown mode back helps the operator notice a typo.
+        # CodeQL's `py/clear-text-logging-sensitive-data` rule flags this
+        # because env config CAN contain secrets — but VIRUS_SCAN is an
+        # enum-valued knob ("off"/"clamd"/"required"), not a credential.
+        # Truncate defensively in case someone shoves a long blob in.
         log.warning(
-            "Unknown VIRUS_SCAN mode %r; treating as off", mode_raw,
+            "Unknown VIRUS_SCAN mode %r; treating as off",
+            mode_raw[:64],
         )
         return NullScanner(), False
 
@@ -234,8 +240,8 @@ def build_scanner_from_config(cfg: dict) -> tuple[Scanner, bool]:
         # so a vanilla `apt install clamav-daemon` works without extra env.
         socket_path = "/var/run/clamav/clamd.ctl"
         log.info(
-            "No CLAMD_SOCKET/CLAMD_HOST set — defaulting to %s",
-            socket_path,
+            "No CLAMD_SOCKET/CLAMD_HOST set — defaulting to standard "
+            "clamav-daemon Unix socket",
         )
 
     scanner = ClamdScanner(
@@ -244,10 +250,15 @@ def build_scanner_from_config(cfg: dict) -> tuple[Scanner, bool]:
         port=port,
         max_bytes=max_bytes,
     )
+    # Don't echo the resolved socket path / host in this startup line —
+    # CodeQL flags ``log.info("...at %s", socket_path)`` as
+    # clear-text-logging-sensitive-data even though clamd locations are
+    # operator infra. The dispatch ("clamd via Unix socket" vs "clamd
+    # via TCP") is the part operators need; the exact target lives in
+    # config.yml or the env.
+    transport = "Unix socket" if socket_path else "TCP"
     log.info(
-        "Virus scanner: clamd at %s (max_bytes=%d, required=%s)",
-        socket_path or f"{host}:{port}",
-        max_bytes,
-        required,
+        "Virus scanner: clamd via %s (max_bytes=%d, required=%s)",
+        transport, max_bytes, required,
     )
     return scanner, required

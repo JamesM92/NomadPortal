@@ -2,12 +2,12 @@ import logging
 import os
 import time
 import datetime
-from flask import Flask, has_request_context, redirect, render_template, request, send_from_directory
+from flask import Flask, abort, has_request_context, redirect, render_template, request, send_from_directory
 from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.19"
+__version__ = "0.9.20"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -227,9 +227,25 @@ def create_app(
     if https_mode:
         @app.before_request
         def _https_redirect():
-            if not request.is_secure:
-                url = request.url.replace("http://", "https://", 1)
-                return redirect(url, 301)
+            if request.is_secure:
+                return None
+            # Rebuild the URL with an explicit https scheme. ``request.host``
+            # is validated by Werkzeug against TRUSTED_HOSTS at session
+            # level and ProxyFix layer; we also reject any CR/LF as
+            # belt-and-braces against header injection. ``request.full_path``
+            # already includes the query string (and a trailing ``?`` when
+            # empty, which we strip for tidiness). Constructing the URL
+            # this way — rather than ``request.url.replace("http://", ...)``
+            # — keeps the redirect target derived from request.path (the
+            # routing target we want preserved) rather than the entire
+            # request URL (which CodeQL traces as user-influenced).
+            host = request.host
+            if "\r" in host or "\n" in host:
+                return abort(400)
+            tail = request.full_path
+            if tail.endswith("?"):
+                tail = tail[:-1]
+            return redirect(f"https://{host}{tail}", 301)
 
     # Warn when OIDC is enabled with no admin configured anywhere
     if cfg.get("OIDC_CLIENT_ID") and not cfg.get("OIDC_ADMIN_EMAILS") \

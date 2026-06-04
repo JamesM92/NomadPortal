@@ -750,18 +750,35 @@ def api_file_fetch_start():
     is_local = site_server and site_server.node_hash() == node_hash.lower()
     if is_local:
         import os, secrets
+        # Defense in depth against path traversal in `path`:
+        #   1. Reject any path component that explicitly contains ``..`` or
+        #      a leading slash after the /file/ prefix — these are obvious
+        #      traversal attempts and never appear in legitimate file URLs.
+        #   2. Resolve the candidate with os.path.realpath() to collapse
+        #      symlinks, encoded sequences, etc.
+        #   3. Verify the resolved path is inside the files root using
+        #      ``os.path.commonpath`` — a CodeQL-trackable containment
+        #      check (it can model commonpath but loses signal on
+        #      startswith of a realpath() return value).
         files_root = os.path.realpath(site_server.files_dir())
         rel        = path[len("/file/"):].lstrip("/")
-        file_path  = os.path.realpath(os.path.join(files_root, rel))
-        if not file_path.startswith(files_root + os.sep) and file_path != files_root:
+        if not rel or ".." in rel.split("/") or rel.startswith("/"):
             abort(400, description="invalid file path")
-        if not os.path.isfile(file_path):
+        candidate = os.path.realpath(os.path.join(files_root, rel))
+        try:
+            common = os.path.commonpath([files_root, candidate])
+        except ValueError:
+            abort(400, description="invalid file path")
+        if common != files_root:
+            abort(400, description="invalid file path")
+        if not os.path.isfile(candidate):
             return jsonify({"error": "file not found on local site"}), 404
         try:
-            with open(file_path, "rb") as fh:
+            with open(candidate, "rb") as fh:
                 content = fh.read()
         except OSError as exc:
-            return jsonify({"error": f"could not read file: {exc}"}), 500
+            log.warning("Local file read failed for %s: %s", candidate, exc)
+            return jsonify({"error": "could not read file"}), 500
 
         scan_dict   = None
         local_error = None

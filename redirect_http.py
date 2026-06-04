@@ -8,6 +8,7 @@ with a misconfigured environment.
 """
 import http.server
 import os
+import re
 import socketserver
 import sys
 
@@ -28,12 +29,34 @@ def _port(name: str, default: str) -> int:
 HTTPS_PORT = _port("WEB_PORT_HTTPS", "8443")
 HTTP_PORT  = _port("WEB_PORT", "8080")
 
+# Strict hostname allow-list — letters/digits/dots/hyphens only, optionally
+# wrapped in brackets for IPv6 literals. Reflecting the Host header into
+# the Location response opens an HTTP-response-splitting / open-redirect
+# door if we don't sanitise: a client can send `Host: example.com\r\n
+# Set-Cookie: ...\r\n` and inject arbitrary headers into the 301
+# response. Reject any Host that doesn't match this pattern and fall
+# back to "localhost" so the redirect still works for legitimate clients.
+_HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$|^\[[0-9A-Fa-f:.]+\]$")
+# Request path likewise must not contain CR/LF before we splice it into
+# the Location header.
+_PATH_RE = re.compile(r"^[^\r\n]+$")
+
+
+def _safe_host(raw: str) -> str:
+    head = (raw or "").split(":", 1)[0].strip()
+    return head if _HOST_RE.match(head) else "localhost"
+
+
+def _safe_path(raw: str) -> str:
+    return raw if raw and _PATH_RE.match(raw) else "/"
+
 
 class _Redirect(http.server.BaseHTTPRequestHandler):
     def _redirect(self):
-        host = (self.headers.get("Host") or "localhost").split(":")[0]
+        host = _safe_host(self.headers.get("Host", ""))
+        path = _safe_path(self.path)
         self.send_response(301)
-        self.send_header("Location", f"https://{host}:{HTTPS_PORT}{self.path}")
+        self.send_header("Location", f"https://{host}:{HTTPS_PORT}{path}")
         self.end_headers()
 
     do_GET  = _redirect

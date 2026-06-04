@@ -62,6 +62,17 @@ const toggleRaw    = $('toggle-raw');
 const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
 async function apiFetch(url, opts = {}) {
+  // Same-origin guard: every apiFetch caller in the codebase uses a
+  // hardcoded path like '/api/...'. If `url` ever doesn't start with
+  // '/' or contains characters that could escape into a different
+  // origin (':', '//', backslash, control chars), refuse the call.
+  // Protects against future code paths that derive the URL from
+  // server responses or other partially-tainted sources, which is
+  // what CodeQL's client-side-request-forgery rule flagged.
+  if (typeof url !== 'string' || !url.startsWith('/') || url.startsWith('//')
+      || /[\\\r\n]/.test(url)) {
+    throw new Error(`apiFetch rejected non-same-origin URL: ${String(url).slice(0, 80)}`);
+  }
   const { headers: extraHeaders = {}, ...restOpts } = opts;
   const res = await fetch(url, {
     headers: {
