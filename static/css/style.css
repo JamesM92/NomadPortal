@@ -446,6 +446,29 @@ body {
   cursor: pointer;
 }
 
+/* Breadcrumb-embedded select (auto-refresh dropdown). Smaller than
+ * .bc-btn so it sits unobtrusively next to the chip row. */
+.bc-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.bc-select:focus { color: var(--text); border-color: var(--accent); outline: none; }
+
+/* When the operator picks a reading-friendly view, page content
+ * switches from `white-space: pre` (preserves ASCII art column
+ * alignment) to `pre-wrap` (long prose lines wrap inside the column).
+ * Toggle lives in the topbar Raw row. */
+#page-content.wrap-prose .mu-line,
+#page-content.wrap-prose .mu-page {
+  white-space: pre-wrap;
+}
+
 #topbar-actions {
   display: flex;
   align-items: center;

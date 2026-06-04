@@ -137,6 +137,9 @@
     </button>
   </div>
   <div id="topbar-actions">
+    <label class="raw-toggle" title="Wrap long prose lines inside the content column (off keeps ASCII art and tables column-aligned)">
+      <input type="checkbox" id="toggle-wrap"> Wrap
+    </label>
     <label class="raw-toggle">
       <input type="checkbox" id="toggle-raw"> Raw
     </label>
@@ -355,6 +358,16 @@
       <span class="bc-sep">›</span>
       <span id="page-path" class="bc-path">/</span>
       <div class="bc-spacer"></div>
+      <select id="page-autoreload" class="bc-select"
+              title="Auto-refresh interval for the current page">
+        <option value="0">Auto-refresh: off</option>
+        <option value="30">every 30 s</option>
+        <option value="60">every 1 min</option>
+        <option value="300">every 5 min</option>
+        <option value="900">every 15 min</option>
+        <option value="3600">every 1 h</option>
+      </select>
+      <span id="page-autoreload-countdown" class="bc-chip" hidden></span>
       <span id="page-diag-hops" class="bc-chip" title="Hops to this node on the Reticulum mesh" hidden></span>
       <span id="page-diag-iface" class="bc-chip" title="Outbound interface for the next packet" hidden></span>
       <span id="page-diag-ping" class="bc-chip" hidden></span>

@@ -56,6 +56,7 @@ const statusText   = $('status-text');
 const cacheInfo    = $('cache-info');
 const statusDot    = $('status-indicator');
 const toggleRaw    = $('toggle-raw');
+const toggleWrap   = $('toggle-wrap');
 
 // ---------------------------------------------------------------------------
 // Network helpers
@@ -516,6 +517,108 @@ function _displayAddress(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-page auto-refresh with form-data persistence
+// ---------------------------------------------------------------------------
+// User picks an interval from the breadcrumb dropdown. We capture all
+// <input>/<select>/<textarea> values on the current page before
+// re-navigating to the same history entry, then re-inject those values
+// after the new HTML renders. Useful for forum boards, status pages, and
+// any page that wants both auto-update AND in-flight form input.
+//
+// Timer resets on navigation — picking "every 5 min" on page A and
+// navigating to page B turns the timer off automatically (you didn't
+// ask for page B to refresh).
+
+const _autoReload = {
+  intervalSec: 0,
+  remainingSec: 0,
+  tickHandle: null,
+  pendingFormState: null,
+};
+
+function _stopAutoReload() {
+  if (_autoReload.tickHandle) {
+    clearInterval(_autoReload.tickHandle);
+    _autoReload.tickHandle = null;
+  }
+  _autoReload.intervalSec = 0;
+  _autoReload.remainingSec = 0;
+  const chip = $('page-autoreload-countdown');
+  if (chip) { chip.hidden = true; chip.textContent = ''; }
+}
+
+function _captureFormState() {
+  const out = {};
+  const root = $('page-content');
+  if (!root) return out;
+  // Index by name attribute (falls back to id, then positional) so
+  // restoration is robust even if the new render slightly reorders.
+  root.querySelectorAll('input, select, textarea').forEach((el, i) => {
+    const key = el.name || el.id || `_idx${i}`;
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      out[key] = out[key] || {};
+      out[key][el.value] = el.checked;
+    } else {
+      out[key] = el.value;
+    }
+  });
+  return out;
+}
+
+function _restoreFormState(saved) {
+  if (!saved) return;
+  const root = $('page-content');
+  if (!root) return;
+  root.querySelectorAll('input, select, textarea').forEach((el, i) => {
+    const key = el.name || el.id || `_idx${i}`;
+    const v = saved[key];
+    if (v == null) return;
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      if (typeof v === 'object' && v[el.value] != null) {
+        el.checked = !!v[el.value];
+      }
+    } else if (typeof v === 'string') {
+      el.value = v;
+    }
+  });
+}
+
+function _autoReloadTick() {
+  if (_autoReload.remainingSec <= 0) return;
+  _autoReload.remainingSec -= 1;
+  const chip = $('page-autoreload-countdown');
+  if (chip) chip.textContent = `refresh in ${_autoReload.remainingSec}s`;
+  if (_autoReload.remainingSec > 0) return;
+  // Fire the reload — capture form state, navigate to the current
+  // history entry without pushing it, then re-arm for the next cycle.
+  _autoReload.pendingFormState = _captureFormState();
+  const current = state.history[state.historyIndex];
+  if (!current) {
+    _stopAutoReload();
+    return;
+  }
+  Promise.resolve(navigateTo(current, false)).then(() => {
+    _autoReload.remainingSec = _autoReload.intervalSec;
+    if (chip && _autoReload.intervalSec) {
+      chip.textContent = `refresh in ${_autoReload.remainingSec}s`;
+    }
+  });
+}
+
+function _startAutoReload(seconds) {
+  _stopAutoReload();
+  if (!seconds || seconds < 1) return;
+  _autoReload.intervalSec  = seconds;
+  _autoReload.remainingSec = seconds;
+  const chip = $('page-autoreload-countdown');
+  if (chip) {
+    chip.hidden = false;
+    chip.textContent = `refresh in ${seconds}s`;
+  }
+  _autoReload.tickHandle = setInterval(_autoReloadTick, 1000);
+}
+
+// ---------------------------------------------------------------------------
 // Breadcrumb + per-page network diagnostics
 // ---------------------------------------------------------------------------
 // Surfaces hops + next-hop interface for the current page's destination
@@ -647,6 +750,12 @@ async function navigateTo(url, pushHistory = true, extraFields = null) {
     state.history = state.history.slice(0, state.historyIndex + 1);
     state.history.push(url);
     state.historyIndex = state.history.length - 1;
+    // Real navigation (not an auto-refresh, not back/forward) resets
+    // the per-page auto-refresh timer — the new page didn't ask to be
+    // refreshed on a schedule.
+    _stopAutoReload();
+    const dd = $('page-autoreload');
+    if (dd) dd.value = '0';
   }
   updateNavButtons();
 
@@ -920,6 +1029,13 @@ function renderPageContent() {
   }
 
   pageContent.innerHTML = _lastPage.html || '';
+  // Post-render form-state restoration for auto-refresh cycles. Cleared
+  // immediately so a regular click-navigation that lands on the same
+  // page doesn't pick up stale form values from a long-ago reload.
+  if (_autoReload.pendingFormState) {
+    _restoreFormState(_autoReload.pendingFormState);
+    _autoReload.pendingFormState = null;
+  }
   pageContent.querySelectorAll('a.mu-link, a.mu-dynamic').forEach(a => {
     a.addEventListener('click', e => {
       e.preventDefault();
@@ -1125,6 +1241,10 @@ btnRefresh.addEventListener('click', () => {
 });
 const _btnPagePing = $('btn-page-ping');
 if (_btnPagePing) _btnPagePing.addEventListener('click', _pingCurrentPage);
+const _ddAutoReload = $('page-autoreload');
+if (_ddAutoReload) _ddAutoReload.addEventListener('change', () => {
+  _startAutoReload(parseInt(_ddAutoReload.value, 10) || 0);
+});
 
 // ---------------------------------------------------------------------------
 // Address bar
@@ -1223,6 +1343,21 @@ if (nodeSort) nodeSort.addEventListener('change', renderNodeList);
 toggleRaw.addEventListener('change', () => {
   // Swap displays from the cached fetch — never re-call the node.
   if (_lastPage.url) renderPageContent();
+});
+
+// Word-wrap toggle — flips ``#page-content`` between
+// ``white-space: pre`` (default; keeps ASCII art column alignment
+// intact) and ``white-space: pre-wrap`` (wraps long prose lines
+// inside the content column). Operator-level preference, not per
+// page — the toggle state persists across navigation. No auto-
+// detection: ASCII art is the common case on NomadNet, so the
+// default stays unchanged from prior releases.
+if (toggleWrap) toggleWrap.addEventListener('change', () => {
+  if (toggleWrap.checked) {
+    pageContent.classList.add('wrap-prose');
+  } else {
+    pageContent.classList.remove('wrap-prose');
+  }
 });
 
 // ---------------------------------------------------------------------------

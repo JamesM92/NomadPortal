@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.27] — 2026-06-04
+
+### Added
+
+Second pair of rBrowser cross-pollination items from the backlog.
+
+- **Per-page auto-refresh with form-data persistence.** Dropdown in
+  the breadcrumb strip (off / 30s / 1min / 5min / 15min / 1h). When
+  set, the breadcrumb shows a live countdown chip
+  (``refresh in 27s``). On expiry the current ``<input>`` /
+  ``<select>`` / ``<textarea>`` values are captured, the page is
+  re-fetched in place (same as the toolbar Refresh button), and the
+  values are re-injected after the new HTML renders. Useful for
+  forum boards, status pages, and any page that wants both
+  auto-update AND in-flight form input.
+
+  The timer is **per-page** — navigating to a different page
+  resets it to off automatically (the new page didn't ask to be
+  refreshed). Back/forward and auto-refresh re-fetches don't reset
+  it. Manual click on the toolbar Refresh button doesn't reset it
+  either; only a navigation that pushes a new history entry does.
+- **Word-wrap toggle** in the topbar Raw row. When on, long prose
+  lines wrap inside the content column; when off (default),
+  ``white-space: pre`` keeps ASCII art and table columns aligned.
+  Operator-level preference, not per page — sticks across
+  navigation. Default unchanged from prior releases (no wrap),
+  so ASCII-heavy pages render identically.
+
+  Simplified from rBrowser's auto-detect framing: NomadPortal is
+  always monospace, so there's no "switch to text mode" — only
+  whether long lines wrap or scroll horizontally. The manual
+  toggle is enough; auto-detection adds complexity for marginal
+  gain.
+
 ## [0.9.26] — 2026-06-04
 
 ### Added
