@@ -29,13 +29,15 @@ matches our usage, every pinned dep has a Python-3.14 wheel
   request-target validation and request-smuggling hardening
   (recognised RFC 9112 §3.2.3/§3.2.4 + §6.3 work) which directly
   improves NomadPortal's front-end posture.
-- **Python base**: `python:3.12-slim → python:3.14-slim` (#5).
-  Compatibility verified by inventory: every pinned dep either
-  ships a `cp314` wheel (cryptography, pyyaml 6.0.3) or is
-  pure-python (everything else). The `python:3.14-slim` base is
-  Debian 13 / trixie, which also resolves CVE-2026-4878 (libcap2
-  TOCTOU race in Debian 12); the `.trivyignore` entry for that
-  CVE is no longer needed.
+- **Python base**: `python:3.12-slim → python:3.14-slim-trixie`
+  (#5). Compatibility verified by inventory: every pinned dep
+  either ships a `cp314` wheel (cryptography, pyyaml 6.0.3) or is
+  pure-python (everything else). The `-trixie` suffix is
+  load-bearing — `python:3.14-slim` (no suffix) still defaults to
+  the Debian 12 / bookworm base and therefore still carries
+  CVE-2026-4878 (caught by trivy on the first push of this
+  release). `python:3.14-slim-trixie` is the Debian 13 / trixie
+  variant, which ships the patched libcap2 and resolves the CVE.
 - **GitHub Actions**: bumped to current Node.js-24 versions:
   `actions/checkout 4→6` (#11), `actions/setup-python 5→6` (#4),
   `docker/login-action 3→4` (#3),
