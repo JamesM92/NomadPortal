@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.24] — 2026-06-04
+
+### Changed
+
+Consolidated batch of Dependabot bumps from May 2026. Each was
+verified compatible before applying — authlib 1.7 client API
+matches our usage, every pinned dep has a Python-3.14 wheel
+(pure-py or `cp314`), and the gunicorn 26 breaking change
+(eventlet worker removal) doesn't affect us because we use
+`gthread`.
+
+- **Reticulum stack (#6)**: `rns 1.1.3 → 1.3.1`,
+  `lxmf 0.9.4 → 0.9.9`, `nomadnet 0.9.8 → 1.2.2`. rns 1.2.5
+  brings per-interface path-request rate-limiting which should
+  reduce announce-stream pressure on our deployment.
+- **Web stack**: `authlib 1.6.12 → 1.7.2` (#13),
+  `requests 2.33.0 → 2.34.2` (#14),
+  `pyyaml 6.0.1 → 6.0.3` (#8),
+  `gunicorn 22.0.0 → 26.0.0` (#12). gunicorn 26 adds HTTP/1.1
+  request-target validation and request-smuggling hardening
+  (recognised RFC 9112 §3.2.3/§3.2.4 + §6.3 work) which directly
+  improves NomadPortal's front-end posture.
+- **Python base**: `python:3.12-slim → python:3.14-slim` (#5).
+  Compatibility verified by inventory: every pinned dep either
+  ships a `cp314` wheel (cryptography, pyyaml 6.0.3) or is
+  pure-python (everything else). The `python:3.14-slim` base is
+  Debian 13 / trixie, which also resolves CVE-2026-4878 (libcap2
+  TOCTOU race in Debian 12); the `.trivyignore` entry for that
+  CVE is no longer needed.
+- **GitHub Actions**: bumped to current Node.js-24 versions:
+  `actions/checkout 4→6` (#11), `actions/setup-python 5→6` (#4),
+  `docker/login-action 3→4` (#3),
+  `docker/build-push-action 5→7` (#2),
+  `docker/setup-buildx-action 3→4` (#1). Clears the Node 20
+  deprecation warnings CI was emitting on every run.
+
+### Removed
+
+- **`.trivyignore` entry for CVE-2026-4878** — fix lands with the
+  python:3.14-slim move (Debian 13 base includes the patched
+  libcap2). The CVE-suppress + revisit-when-base-updates pattern
+  worked as intended; the entry is retired now that the
+  revisit condition fired.
+
 ## [0.9.23] — 2026-06-03
 
 ### Security

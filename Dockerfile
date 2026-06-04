@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
+FROM python:3.14-slim@sha256:1697e8e8d39bf168e177ac6b5fdab6df86d81cfc24dae17dfb96cfc3ef76b4dd
 
 LABEL org.opencontainers.image.title="NomadPortal"
 LABEL org.opencontainers.image.description="Web browser for NomadNet nodes with LXMF messaging"
