@@ -243,6 +243,7 @@ class NodeBrowser:
         field_data: Optional[dict] = None,
         timeout: int = STALL_TIMEOUT,
         progress_cb=None,
+        sizes_cb=None,
         identify_with=None,
     ) -> tuple[Optional[bytes], Optional[str]]:
         """Fetch a page and update per-node stats (views, RX bytes, load time).
@@ -330,9 +331,43 @@ class NodeBrowser:
             last_activity[0] = time.monotonic()
 
         def _on_response(receipt):
-            result["content"] = bytes(receipt.response) if receipt.response is not None else b""
-            if receipt.response is None:
-                result["error"] = "Empty response from node"
+            # NomadNet ships three different response shapes through the
+            # same `receipt.response` slot — bytes for pages, `(name_bytes,
+            # data_bytes)` for small files, and `io.BufferedReader` for
+            # large files streamed via an RNS Resource. Treating any of
+            # them as `bytes(...)` blindly was raising TypeError on file
+            # responses; the exception killed the callback before
+            # `done.set()`, so the fetch sat waiting until the link closed
+            # — producing the misleading "Link closed before response"
+            # error even though the file had transferred successfully.
+            try:
+                resp = receipt.response
+                if resp is None:
+                    result["content"] = b""
+                    result["error"] = "Empty response from node"
+                elif isinstance(resp, tuple) and len(resp) >= 2:
+                    # (file_name_bytes, file_data_bytes) — mirrors NomadNet's
+                    # textui Browser handling at file_received().
+                    result["content"] = bytes(resp[1])
+                elif hasattr(resp, "read"):
+                    # io.BufferedReader pointing at the streamed temp file.
+                    try:
+                        resp.seek(0)
+                    except Exception:
+                        pass
+                    result["content"] = resp.read()
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+                else:
+                    # Page response (and anything else that accepts bytes()).
+                    result["content"] = bytes(resp)
+            except Exception as exc:
+                log.exception("fetch response handler raised on %s",
+                              destination_hash_hex[:16])
+                result["content"] = b""
+                result["error"] = f"Response handler error: {exc}"
             done.set()
 
         def _on_failed(receipt):
@@ -342,6 +377,28 @@ class NodeBrowser:
         def _on_progress(receipt):
             _bump()
             progress_started[0] = True
+            # Capture byte-level transfer metrics if RNS exposes them on the
+            # receipt — these are populated for both page and file requests
+            # by RNS as soon as the response size is negotiated. Lets the
+            # web UI show "12.3 MB of 4.5 MB transferred" instead of just a
+            # percentage.
+            try:
+                total = getattr(receipt, "response_size", None)
+                xfer  = getattr(receipt, "response_transfer_size", None)
+                if total is not None:
+                    result["response_size"] = int(total)
+                if xfer is not None:
+                    result["transfer_size"] = int(xfer)
+                if sizes_cb is not None and (total is not None or xfer is not None):
+                    try:
+                        sizes_cb(
+                            int(total) if total is not None else None,
+                            int(xfer)  if xfer  is not None else None,
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             if progress_cb is not None:
                 try:
                     progress_cb(float(getattr(receipt, "progress", 0.0) or 0.0))
@@ -366,8 +423,10 @@ class NodeBrowser:
                 except Exception as exc:
                     log.warning("link.identify failed: %s", exc)
             p = (path or "/").rstrip("/") or "/"
-            if p.startswith("/page/"):
-                # Path already includes the /page/ prefix from the URL
+            if p.startswith("/page/") or p.startswith("/file/"):
+                # Path already includes its resource prefix from the URL —
+                # /page/ for NomadNet pages, /file/ for binary files. Both
+                # use the same Link.request mechanism on the NomadNet side.
                 rns_path = p
             else:
                 rns_path = "/page/" + (p.lstrip("/") or "index.mu")
@@ -409,16 +468,36 @@ class NodeBrowser:
         # local watchdog at this stage would falsely abort multi-hop or
         # LoRa paths whose establishment legitimately takes 20–40 s.
         hard_deadline = time.monotonic() + PAGE_HARD_CAP
+        # Once the resource transfer reaches 100%, RNS still needs to do a
+        # final ack handshake before response_callback fires with the data.
+        # On slow/multi-hop links this finalisation can take much longer
+        # than the in-flight stall timeout — applying the regular 30s
+        # watchdog at that point falsely aborts otherwise-successful file
+        # downloads (resource arrives at 100%, callback is seconds away,
+        # we time out anyway). Use a larger timeout once we're in
+        # finalisation so we're patient enough for the conclude/teardown.
+        FINALISE_TIMEOUT = 180  # seconds — generous post-100% grace
         while not done.is_set():
             now = time.monotonic()
             if link_active[0]:
                 idle = now - last_activity[0]
-                if idle >= timeout:
-                    result["error"] = (
-                        f"Lost connection — no data for {timeout}s"
-                        if progress_started[0]
-                        else f"No response from node ({timeout}s)"
-                    )
+                # Has the transfer reached its full advertised size?
+                rsize = result.get("response_size")
+                tsize = result.get("transfer_size")
+                in_finalise = rsize is not None and tsize is not None and tsize >= rsize > 0
+                stall_cap = FINALISE_TIMEOUT if in_finalise else timeout
+                if idle >= stall_cap:
+                    if in_finalise:
+                        result["error"] = (
+                            f"Resource transfer completed but the node never "
+                            f"finalised the response within {FINALISE_TIMEOUT}s"
+                        )
+                    else:
+                        result["error"] = (
+                            f"Lost connection — no data for {timeout}s"
+                            if progress_started[0]
+                            else f"No response from node ({timeout}s)"
+                        )
                     break
             if now >= hard_deadline:
                 result["error"] = f"Page fetch exceeded hard cap ({PAGE_HARD_CAP}s)"
@@ -473,14 +552,17 @@ class NodeBrowser:
         self.cleanup_jobs()
         with self._jobs_lock:
             self._jobs[job_id] = {
-                "status":    "fetching",
-                "progress":  0.0,
-                "node_hash": destination_hash_hex.lower(),
-                "path":      path,
-                "started":   time.time(),
-                "completed": None,
-                "content":   None,
-                "error":     None,
+                "status":        "fetching",
+                "progress":      0.0,
+                "node_hash":     destination_hash_hex.lower(),
+                "path":          path,
+                "started":       time.time(),
+                "completed":     None,
+                "content":       None,
+                "error":         None,
+                "response_size": None,
+                "transfer_size": None,
+                "scan_result":   None,
             }
 
         def _set_progress(p):
@@ -488,20 +570,66 @@ class NodeBrowser:
                 if job_id in self._jobs:
                     self._jobs[job_id]["progress"] = p
 
+        def _set_sizes(response_size, transfer_size):
+            with self._jobs_lock:
+                if job_id in self._jobs:
+                    if response_size is not None:
+                        self._jobs[job_id]["response_size"] = response_size
+                    if transfer_size is not None:
+                        self._jobs[job_id]["transfer_size"] = transfer_size
+
         def _worker():
             try:
                 content, error = self.fetch_page(
                     destination_hash_hex, path, field_data,
                     progress_cb=_set_progress,
+                    sizes_cb=_set_sizes,
                     identify_with=identify_with,
                 )
+                # Move to "scanning" before running the (possibly slow)
+                # virus scanner so the polling UI can show a distinct
+                # state. Page fetches skip scanning entirely; only file
+                # fetches go through the scanner.
+                scan_dict = None
+                if content is not None and not error and path.startswith("/file/"):
+                    scanner       = getattr(self, "scanner", None)
+                    scan_required = getattr(self, "scan_required", False)
+                    if scanner is not None:
+                        with self._jobs_lock:
+                            if job_id in self._jobs:
+                                self._jobs[job_id]["status"] = "scanning"
+                        filename = path.rsplit("/", 1)[-1]
+                        try:
+                            scan = scanner.scan(content, filename)
+                        except Exception as exc:
+                            log.exception("Virus scanner raised")
+                            from .scanner import ScanResult
+                            scan = ScanResult(
+                                verdict="unavailable",
+                                engine=getattr(scanner, "engine_name", "?"),
+                                detail=f"scanner exception: {exc}",
+                            )
+                        scan_dict = scan.to_dict()
+                        if scan.blocked:
+                            error   = (
+                                f"Virus scan blocked download: "
+                                f"{scan.signature or 'malicious content detected'}"
+                            )
+                            content = None
+                        elif scan.verdict == "unavailable" and scan_required:
+                            error   = (
+                                f"Virus scanner unavailable and VIRUS_SCAN=required "
+                                f"is set: {scan.detail or 'no detail'}"
+                            )
+                            content = None
                 with self._jobs_lock:
                     if job_id in self._jobs:
-                        self._jobs[job_id]["content"]   = content
-                        self._jobs[job_id]["error"]     = error
-                        self._jobs[job_id]["status"]    = "error" if error else "done"
-                        self._jobs[job_id]["progress"]  = 1.0 if content else self._jobs[job_id]["progress"]
-                        self._jobs[job_id]["completed"] = time.time()
+                        self._jobs[job_id]["content"]     = content
+                        self._jobs[job_id]["error"]       = error
+                        self._jobs[job_id]["status"]      = "error" if error else "done"
+                        self._jobs[job_id]["progress"]    = 1.0 if content else self._jobs[job_id]["progress"]
+                        self._jobs[job_id]["completed"]   = time.time()
+                        self._jobs[job_id]["scan_result"] = scan_dict
             except Exception as exc:
                 log.exception("fetch_page_async worker crashed")
                 with self._jobs_lock:

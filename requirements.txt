@@ -11,14 +11,13 @@ lxmf==0.9.4
 nomadnet==0.9.8
 
 # Web app stack
-flask==3.0.0
+flask==3.1.3
 flask-login==0.6.3
-authlib==1.3.0
-requests==2.31.0
+authlib==1.6.12
+requests==2.33.0
 pyyaml==6.0.1
 gunicorn==22.0.0
-pytest==8.0.0
+pytest==9.0.3
 
-# Renderer — pinned by dev SHA while the Braille dot-position fix is
-# verified. Bumps to v1.0.6 tag once confirmed working.
-Micron2HTML @ git+https://github.com/JamesM92/Micron2HTML.git@ef9144a3160a11d5deb244ce42e001c052e804a7
+# Renderer — published to PyPI from v1.0.7 onwards
+Micron2HTML==1.0.7

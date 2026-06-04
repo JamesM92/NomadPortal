@@ -41,12 +41,23 @@ class SiteServer:
         pages_dir: str,
         files_dir: str,
         identity_file: str,
-        node_name: str = "NomadPortal",
+        node_name: Optional[str] = None,
+        auto_announce: bool = False,
     ):
+        # ``node_name=None`` means "auto-generate from the destination hash"
+        # in start() — produces e.g. "NomadPortal-4d" so multiple NomadPortal
+        # browsers on the same network can be told apart at a glance.
+        #
+        # ``auto_announce`` defaults False so a vanilla NomadPortal install
+        # is a *silent* host: it still serves pages to anyone who knows the
+        # hash, but it won't spam the network with broadcast announces.
+        # Operators who actually want to publish their site flip this on.
+        # Manual announces (Admin → Dashboard → "Announce now") always work.
         self._pages_dir     = pages_dir
         self._files_dir     = files_dir
         self._identity_file = identity_file
         self._node_name     = node_name
+        self._auto_announce = auto_announce
         self._dest          = None
         self._identity      = None
         self._node_hash: Optional[str] = None
@@ -83,6 +94,13 @@ class SiteServer:
 
         self._node_hash = self._dest.hexhash
 
+        # Auto-generate a unique-by-default name when the operator hasn't set
+        # one. Suffix is the last 2 hex chars of the destination hash — short
+        # enough to fit naturally in the sidebar, distinct enough that 20
+        # NomadPortals on the same network are individually addressable.
+        if not self._node_name:
+            self._node_name = f"NomadPortal-{self._node_hash[-2:]}"
+
         self._register_pages()
         self._register_files()
 
@@ -103,6 +121,9 @@ class SiteServer:
 
     def node_name(self) -> str:
         return self._node_name
+
+    def files_dir(self) -> str:
+        return self._files_dir
 
     def fetch_page(
         self,
@@ -302,12 +323,20 @@ class SiteServer:
 
     def _background_jobs(self) -> None:
         time.sleep(START_ANNOUNCE_DELAY)
-        self.announce()
+        if self._auto_announce:
+            self.announce()
+        else:
+            log.info(
+                "Site node silent (auto-announce off) — hash %s reachable "
+                "only by direct request. Flip Admin → Dashboard → "
+                "\"Announce now\" or set SITE_ANNOUNCE=true to publish.",
+                self._node_hash[:16] if self._node_hash else "?",
+            )
 
         while self._running:
             time.sleep(60)
             now = time.time()
-            if now - self._last_announce > ANNOUNCE_INTERVAL:
+            if self._auto_announce and now - self._last_announce > ANNOUNCE_INTERVAL:
                 self.announce()
             if now - self._last_rescan > RESCAN_INTERVAL:
                 self._register_pages()

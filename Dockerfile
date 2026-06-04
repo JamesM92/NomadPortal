@@ -5,10 +5,8 @@ LABEL org.opencontainers.image.description="Web browser for NomadNet nodes with 
 LABEL org.opencontainers.image.source="https://github.com/JamesM92/NomadPortal"
 
 # System dependencies for Reticulum (cryptography / serial transports).
-# git is needed for pip to install Micron2HTML from its GitHub tag.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gcc \
-      git \
       libssl-dev \
       openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -61,11 +59,12 @@ ENV RNS_CONFIG_DIR=/config/reticulum \
     CACHE_TTL=300 \
     LOG_LEVEL=INFO
 
-# Healthcheck mirrors the entrypoint's port-based selection: prefers HTTPS
-# if WEB_PORT_HTTPS is set, otherwise plain HTTP on WEB_PORT, otherwise
-# the default 8443 HTTPS bind.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import os, urllib.request, ssl; https=(os.environ.get('WEB_PORT_HTTPS') or '').strip(); http=(os.environ.get('WEB_PORT') or '').strip(); port=https or http or '8443'; tls=bool(https) or (not http); ctx=(ssl._create_unverified_context() if tls else None); urllib.request.urlopen(f'{\"https\" if tls else \"http\"}://localhost:{port}/api/status', context=ctx, timeout=4)"
+# Healthcheck hits /healthz, which returns 503 if RNS has no online
+# interfaces (different from /api/status, which only confirms gunicorn is
+# listening). start-period is generous because RNS state replay can take
+# 60+ s when destination_table has accumulated months of paths.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD python -c "import os, urllib.request, ssl; https=(os.environ.get('WEB_PORT_HTTPS') or '').strip(); http=(os.environ.get('WEB_PORT') or '').strip(); port=https or http or '8443'; tls=bool(https) or (not http); ctx=(ssl._create_unverified_context() if tls else None); urllib.request.urlopen(f'{\"https\" if tls else \"http\"}://localhost:{port}/healthz', context=ctx, timeout=4)"
 
 USER nomadnet
 

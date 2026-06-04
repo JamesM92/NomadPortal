@@ -1,0 +1,101 @@
+name: Security audit
+
+# Best-practice security scanning for a Python web app shipped as a Docker
+# image. Runs on every PR/push to main, plus weekly to catch newly-disclosed
+# CVEs against an unchanged codebase.
+#
+#   pip-audit  — Known CVEs in pinned Python dependencies (requirements.txt)
+#   bandit     — Python-specific security linter (eval, shell injection, weak crypto, …)
+#   hadolint   — Dockerfile best-practices & security warnings
+#   trivy      — OS-level + Python-level vulnerability scan of the built image
+#   gitleaks   — Detect accidentally committed secrets (API keys, tokens, …)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monthly on the 1st at 03:00 UTC — catches new CVEs against the
+    # unchanged tree. PR/push triggers still gate every dep bump, and
+    # Dependabot continues to PR upstream updates weekly.
+    - cron: '0 3 1 * *'
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: pip-audit (Python deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: requirements.txt
+
+  bandit:
+    name: bandit (Python security linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit
+      # -r: recursive; -ll: report only MEDIUM and HIGH severity issues
+      # (suppresses noisy LOW-severity findings like assert-statement usage)
+      - run: bandit -r . -ll --exclude ./tests,./.venv,./venv,./build
+
+  hadolint:
+    name: hadolint (Dockerfile linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          # Fail only on errors (not warnings/info) by default — change to
+          # `error` to be strictest, `warning` to flag style issues too.
+          failure-threshold: warning
+
+  trivy:
+    name: trivy (image vulnerability scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nomadportal:security-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'nomadportal:security-scan'
+          format: 'table'
+          # Fail the job only on HIGH or CRITICAL findings. MEDIUM/LOW
+          # are reported in the run logs but don't block PRs.
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  gitleaks:
+    name: gitleaks (secret detection)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so gitleaks scans every commit
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

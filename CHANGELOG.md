@@ -7,6 +7,205 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.18] — 2026-06-03
+
+### Changed
+
+- **Default node name is now `NomadPortal-<2 hex>`** (last two hex chars
+  of the destination hash). 20 vanilla NomadPortal installs on the same
+  network are now individually addressable in the node sidebar instead
+  of all colliding under the single name "NomadPortal". An operator
+  who's actually publishing a site can still set a custom name via
+  Admin → Settings → Site name or the `SITE_NAME` env var; those
+  override the auto-generated default.
+- **Hosted site no longer auto-announces by default.** Vanilla installs
+  run as *silent hosts*: the site is still reachable to anyone who knows
+  the destination hash, but the node won't spam the mesh with broadcast
+  announces every 6 hours. Set `SITE_ANNOUNCE=true` (or click "Announce
+  now" in Admin → Dashboard for a one-shot) to publish. Rationale: 20
+  browsers shouldn't pollute the announce stream of operators who are
+  actually running curated content.
+
+### Added
+
+- **`SITE_HOSTING=false` env var** disables the hosted-site server
+  entirely — no destination registered, no announces, pure browser mode.
+- **Reset RNS cache button** in Admin → Cache. Moves
+  `/config/reticulum/storage/` aside to a timestamped backup and
+  triggers a worker reload, which re-initialises RNS against an empty
+  state directory. Addresses the recurring failure mode where a multi-MB
+  stale `destination_table` causes RNS to hang during startup. The
+  backup is preserved so recovery is a single `mv` away if the reset
+  doesn't help.
+- **`/healthz` endpoint** that returns 503 unless at least one RNS
+  interface is online. Docker `HEALTHCHECK` now points here instead of
+  `/api/status` — a hung-RNS container no longer reports `healthy`
+  while being unable to route packets. `start-period` bumped from 15s
+  to 120s so the healthcheck doesn't fail during legitimate slow boots
+  when `destination_table` has accumulated.
+- **File downloads with confirm dialog.** Clicking a NomadNet `/file/`
+  link now shows a confirm prompt with the filename, MIME type (from
+  extension), source URL, and a warning that files aren't virus-scanned
+  by NomadPortal. On confirm, the file is fetched asynchronously
+  (progress shown in the status bar with bytes received) and the
+  browser's native save dialog opens once the transfer completes.
+  Previously every `/file/` link rendered as a dead `"#"` href because
+  Micron2HTML's `default_url_resolver` filtered them out.
+
+### Known limitations
+
+- File downloads buffer the full content in memory before serving — fine
+  for typical NomadNet files (kB–MB), wasteful for hypothetical large
+  transfers. Streaming is a future improvement.
+
+### Security
+
+- **`authlib` 1.6.11 → 1.6.12** to address PYSEC-2026-188 — an
+  unauthenticated open-redirect via the OpenID Implicit/Hybrid grant
+  authorization endpoint when an attacker submits an authorization
+  request that omits the ``openid`` scope. NomadPortal uses Authlib as
+  an OIDC *client*, not a server, so the affected endpoint isn't
+  exposed — but pip-audit surfaced the advisory and the clean baseline
+  is the right call.
+- **Pluggable virus scanning for file downloads** via a new ``Scanner``
+  abstraction in ``nomadnet_web/scanner.py``. Off by default; a
+  ``ClamdScanner`` implementation talks to an external
+  ``clamav-daemon`` over Unix socket or TCP using the INSTREAM
+  protocol (no python dep added). Enable with:
+
+      VIRUS_SCAN=clamd                     # off / clamd / required
+      CLAMD_SOCKET=/var/run/clamav/clamd.ctl   # default path
+      CLAMD_HOST=clamav-sidecar            # alternative: TCP
+      CLAMD_PORT=3310
+      VIRUS_SCAN_MAX_BYTES=104857600       # skip files > 100 MB
+
+  Behaviour:
+  - **Clean scan** → file streams straight to the user.
+  - **Infected** → backend clears the buffered content, sets the job to
+    error, ``/api/file/download`` refuses with 403, and the frontend
+    surfaces a ``Download blocked: virus scan flagged this file`` alert.
+  - **Scanner unreachable** or **file too large to scan** → backend
+    flags the job as ``unavailable`` / ``too-large``; the frontend
+    pops a *second* confirm dialog before saving so the user is
+    explicitly informed no virus scan ran. The default mode is
+    fail-open. ``VIRUS_SCAN=required`` flips to fail-closed (downloads
+    are blocked when the scanner is unreachable).
+  - **Off** (default) → no scan attempted, polling reports
+    ``verdict: skipped``, frontend confirms with "No virus scan was
+    performed on this download" before saving.
+
+  New polling status: ``scanning`` (between ``fetching`` and ``done``)
+  so the UI can show "Scanning X for viruses…" while clamd runs.
+
+## [0.9.17] — 2026-06-02
+
+### Changed
+
+- **Shared-instance defaults to off.** Two NomadPortal containers in the
+  same Docker network namespace (e.g. both attached to a shared Gluetun
+  container) collide on the RNS IPC socket and one boot will deadlock.
+  The default is now `share_instance = No`; existing installs that never
+  explicitly set the toggle are silently flipped. To restore the previous
+  behaviour, enable the toggle in Admin → Interfaces → Shared Instance
+  (or set `shared_instance.enabled: true` in `config.yml`).
+- **Micron2HTML now pulled from PyPI** instead of `git+https`
+  (`Micron2HTML==1.0.7`). v1.0.7 is functionally identical to v1.0.6;
+  it's the first release built through the new GitHub Actions pipeline
+  and published via Trusted Publishing. Drops `git` from the Docker
+  image's `apt` install.
+
+### Fixed
+
+- **HTTP→HTTPS redirector survives a port conflict.** Previously, if
+  the host port for `WEB_PORT` was already taken (common with two
+  co-located NomadPortal containers sharing internal ports), the
+  redirector would raise `OSError` and take the container with it.
+  Now it logs a warning and exits 0; HTTPS on `WEB_PORT_HTTPS`
+  continues unaffected.
+
+## [0.9.16] — 2026-05-25
+
+### Security
+
+- **Dependency bumps for active CVEs** found by the new pip-audit
+  CI job (see "Added" below):
+
+  | Dep      | From → To       | CVEs resolved |
+  |----------|-----------------|---------------|
+  | flask    | 3.0.0  → 3.1.3  | CVE-2026-27205 (cache/session header) |
+  | authlib  | 1.3.0  → 1.6.11 | CVE-2026-27962 (CRITICAL: auth bypass), CVE-2024-37568, CVE-2025-59420, CVE-2025-61920, CVE-2026-28490, CVE-2026-28498, PYSEC-2026-25 |
+  | requests | 2.31.0 → 2.33.0 | CVE-2024-35195 (verify-persistence), CVE-2024-47081 (.netrc leak), CVE-2026-25645 (extract_zipped_paths) |
+  | pytest   | 8.0.0  → 9.0.3  | CVE-2025-71176 (tmp-dir race, dev-only dep) |
+
+  NomadPortal didn't appear to exercise any of the specific code paths
+  flagged by the CVEs, but upgrading to the fix versions is the
+  correct posture — clean baseline for future audits, avoids
+  per-scan triage on "is this a real risk for our usage".
+
+### Added
+
+- **GitHub Actions security pipeline.** Two new workflows on every
+  PR/push to main plus weekly cron:
+  - `security.yml`: pip-audit (Python deps), bandit (Python security
+    linter), hadolint (Dockerfile linter), trivy (image + library
+    vulnerability scan), gitleaks (secret detection).
+  - `codeql.yml`: GitHub-native static analysis for Python + JS,
+    with the `security-extended` query set. Results land in the repo
+    Security tab.
+
+  Both run on a weekly schedule (staggered Mon/Tue at 03:00 UTC) so
+  newly-disclosed CVEs against unchanged code surface within a week.
+
+  Configs:
+  - `.bandit` — skips B104 (`hardcoded_bind_all_interfaces`) with
+    rationale. Binding to 0.0.0.0 inside a container is correct
+    behaviour; the container is the network boundary.
+  - `.hadolint.yaml` — skips DL3008 (pin apt versions) with
+    rationale. Pinning Debian package versions prevents picking
+    up the security team's `=patched` updates that ship within
+    the same version string.
+  - `.trivyignore` — accepts CVE-2026-4878 (libcap2 TOCTOU in the
+    Debian 12 base image) with rationale. Fix is in Debian 13;
+    Dependabot will retire the entry once `python:3.12-slim`
+    rebases on trixie.
+
+## [0.9.15] — 2026-05-16
+
+### Changed
+
+- **Bump Micron2HTML pin to `v1.0.6`.** v1.0.6 ships Braille
+  dot-position improvements: vertical edges (5/35/65/95) so adjacent
+  rows of full-dot Braille flow as a tightly-stacked grid instead of
+  separating into discrete rows; horizontal inset (27/73) so adjacent
+  Braille glyphs have a faintly perceptible cell boundary without
+  obvious gaps breaking the contiguous-grid feel.
+
+### Added
+
+- **Version logging at startup.** `docker logs` now shows a line like
+  `NomadPortal v0.9.15 starting (Micron2HTML 1.0.6, RNS 1.1.3)` right
+  after Gunicorn boots. Useful for confirming which image is running
+  without `docker inspect`, especially when bouncing between
+  `:latest` and `:dev`.
+
+- **Dev-image GHCR workflow.** Pushes to the `dev` branch now
+  auto-build a `:dev` image on GHCR (plus a `:dev-<short-sha>` for
+  pinned testing). Lets in-progress fixes be tested with
+  `docker compose pull` against `:dev` without merging to main or
+  cutting a release. The release workflow for tagged versions is
+  unchanged.
+
+### Fixed
+
+- **Suppressed access-log spam** for `/api/page/poll` and
+  `/api/status`. The front-end polls `/api/page/poll` every 500ms
+  while a page fetch is in flight, and the Docker healthcheck hits
+  `/api/status` every 30s. Both endpoints flooded `docker logs` with
+  identical lines and buried genuinely useful events. Added a
+  `gunicorn.access` logging filter that drops lines matching those
+  paths; error events and all other `/api/*` traffic continue to
+  log normally.
+
 ## [0.9.14] — 2026-05-10
 
 ### Changed

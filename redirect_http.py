@@ -46,5 +46,14 @@ class _Redirect(http.server.BaseHTTPRequestHandler):
 
 
 socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("0.0.0.0", HTTP_PORT), _Redirect) as srv:
+try:
+    srv = socketserver.TCPServer(("0.0.0.0", HTTP_PORT), _Redirect)
+except OSError as exc:
+    sys.stderr.write(
+        f"[redirect_http] WARNING: cannot bind 0.0.0.0:{HTTP_PORT} ({exc}). "
+        f"HTTP→HTTPS redirector will not run; HTTPS on {HTTPS_PORT} is unaffected.\n"
+    )
+    sys.exit(0)
+
+with srv:
     srv.serve_forever()

@@ -21,13 +21,26 @@ NomadPortal is in **active trial-release development**. Features, configuration,
 ## Features
 
 - Browse NomadNet pages rendered from Micron markup to HTML
+- **File downloads from NomadNet nodes** with a confirm dialog showing
+  filename, MIME type, real-time byte progress, and the source URL
+- **Optional virus scanning** for downloaded files via ClamAV (off by
+  default; flag-before-download confirm when no scan ran)
 - Send and receive LXMF messages, with per-user inboxes and per-user contact books
 - Manage RNS identities and announce to the mesh
 - Contact book with MeshChat icon support
 - Node discovery via Reticulum announces
-- HTTPS with auto-generated self-signed certificate
+- Host a NomadNet node with auto-generated unique name
+  (`NomadPortal-<2 hex>`) — silent by default so vanilla installs don't
+  pollute the announce stream; operators publishing content opt in to
+  broadcasting
+- HTTPS with auto-generated self-signed certificate, with optional
+  HTTP→HTTPS redirector that survives port conflicts
 - Local username/password login or OIDC/SSO (Keycloak, Authentik, Auth0, Google)
-- Admin panel for interface configuration, user management, and diagnostics
+- Admin panel for interface configuration, user management,
+  diagnostics, and one-click **RNS state reset** for clearing a stale
+  destination table
+- RNS-aware `/healthz` endpoint — Docker healthcheck reflects real
+  routing availability, not just "gunicorn is listening"
 - Micron-formatted application title with live preview
 - Node blocklist for operator abuse response
 - Mobile-responsive layout
@@ -264,15 +277,61 @@ For local persistence in your scripts, use `site/data/` and Python's stdlib
 
 ### Node identity
 
-The node's RNS identity (and thus its mesh address) is stored at `config/reticulum/site_identity.id` and persists across container restarts. The node announces itself to the mesh every 30 minutes and re-scans the pages/files directories every 5 minutes.
+The node's RNS identity (and thus its mesh address) is stored at `config/reticulum/site_identity.id` and persists across container restarts. The node re-scans the pages/files directories every 5 minutes. Announces are **off by default** (vanilla installs don't broadcast) — flip `SITE_ANNOUNCE=true` to publish to the mesh every 6 hours, or use Admin → Dashboard → "Announce now" for a one-shot.
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SITE_NAME` | `NomadPortal` | Display name announced to the mesh |
+| `SITE_NAME` | *(auto: `NomadPortal-<2 hex>` from hash)* | Display name announced/served. Leave empty for the auto-suffixed default so 20 installs on the same network are individually addressable. |
 | `SITE_PAGES_DIR` | `/site/pages` | Path to pages directory inside the container |
 | `SITE_FILES_DIR` | `/site/files` | Path to files directory inside the container |
+| `SITE_HOSTING` | `true` | Set `false` to disable hosting entirely (pure browser mode — no destination registered, no served pages) |
+| `SITE_ANNOUNCE` | `false` | Set `true` to broadcast the node's existence to the mesh every 6 hours. Off by default to keep readers off the announce stream. The "Announce now" button always works regardless. |
+
+### File downloads & virus scanning
+
+Clicking a `/file/` link on a NomadNet page opens a confirm dialog (filename, MIME type, source URL), then transfers the file asynchronously with byte-level progress reporting. Once the transfer completes, the browser's native save dialog opens.
+
+NomadPortal can optionally scan files through ClamAV before they reach the user. Off by default — the frontend pops a *"no virus scan was performed"* confirm before saving so users are explicitly informed. Enable by setting `VIRUS_SCAN=clamd` (or `required` for fail-closed) and pointing at a clamd instance.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VIRUS_SCAN` | `off` | `off` \| `clamd` (fail-open if scanner unreachable) \| `required` (fail-closed) |
+| `CLAMD_SOCKET` | `/var/run/clamav/clamd.ctl` | Unix socket path. Empty when using TCP. |
+| `CLAMD_HOST` | *(unset)* | clamd hostname or docker-compose service name (e.g. `clamav`). Mutually exclusive with `CLAMD_SOCKET`. |
+| `CLAMD_PORT` | `3310` | clamd TCP port |
+| `VIRUS_SCAN_MAX_BYTES` | `104857600` | Files larger than this are passed through without scanning (verdict: `too-large`); the no-scan confirm still fires |
+
+Two common deployment shapes:
+
+```yaml
+# (A) Sidecar in the same docker-compose stack — recommended.
+services:
+  clamav:
+    image: clamav/clamav:latest
+    restart: unless-stopped
+    volumes:
+      - clamav-db:/var/lib/clamav
+  nomadportal:
+    depends_on: [clamav]
+    environment:
+      VIRUS_SCAN: "clamd"
+      CLAMD_HOST: "clamav"
+      CLAMD_PORT: "3310"
+      CLAMD_SOCKET: ""    # empty → forces TCP
+volumes:
+  clamav-db:
+
+# (B) Existing host clamd via Unix-socket bind-mount.
+services:
+  nomadportal:
+    volumes:
+      - /var/run/clamav/clamd.ctl:/var/run/clamav/clamd.ctl
+    environment:
+      VIRUS_SCAN: "clamd"
+      CLAMD_SOCKET: "/var/run/clamav/clamd.ctl"
+```
 
 ## Architecture
 
@@ -296,7 +355,26 @@ pip install -r requirements.txt
 python app.py
 ```
 
+For a more turnkey native dev loop with persistent state and venv handling:
+
+```bash
+./run-local.sh                           # http://127.0.0.1:8080 with empty config
+DOCKER_VOL=/var/lib/docker/volumes/<your-vol>/_data ./run-local.sh   # seed from an existing Docker deployment
+FRESH_CONFIG=1 ./run-local.sh            # wipe and start over
+PORT=9000 LOG_LEVEL=INFO ./run-local.sh  # custom port / quieter logs
+```
+
 CI runs a Docker image build on every push and pull request — see [.github/workflows/build.yml](.github/workflows/build.yml). Tests for the Micron rendering library live in the [Micron2HTML](https://github.com/JamesM92/Micron2HTML) repository.
+
+### Operational endpoints
+
+- **`/healthz`** — returns 200 when at least one RNS interface is online, 503 otherwise. Used by the Docker `HEALTHCHECK`; a hung-RNS container reports `unhealthy` instead of false-positive `healthy`.
+- **`/api/status`** — service-level snapshot (uptime, node count, cache stats). Always 200 if gunicorn is up.
+
+### Diagnostics admin actions
+
+- **Admin → Cache → "Clear all cached pages"** — drops the in-memory `PageCache` so the next fetch re-pulls from the source node.
+- **Admin → Cache → "Reset RNS cache"** — moves `config/reticulum/storage/` aside to a timestamped backup, triggers a graceful gunicorn worker reload, and re-initialises RNS against an empty state directory. Use when RNS hangs during startup (a stale multi-megabyte `destination_table` is the usual cause).
 
 ## Data storage
 

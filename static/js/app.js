@@ -42,6 +42,7 @@ const addrBar      = $('address-bar');
 const btnGo        = $('btn-go');
 const btnBack      = $('btn-back');
 const btnFwd       = $('btn-forward');
+const btnRefresh   = $('btn-refresh-page');
 const nodeList     = $('node-list');
 const nodeFilter   = $('node-filter');
 const nodeCount    = $('node-count');
@@ -581,6 +582,185 @@ function collectPageFields() {
   return fields;
 }
 
+// Show a "no virus scan was performed" warning prompt when the file
+// wasn't given a clean bill of health by the backend scanner. Returns
+// true when the user opts to proceed, false when they cancel. A clean
+// scan ("verdict": "clean") skips the prompt entirely.
+function _confirmScanResultOrCancel(filename, scan) {
+  const verdict = scan && scan.verdict || 'skipped';
+  if (verdict === 'clean') return true;
+  let body;
+  if (verdict === 'skipped') {
+    body =
+      'No virus scan was performed on this download.\n\n' +
+      'NomadPortal is not configured with a virus scanner (VIRUS_SCAN=off). ' +
+      'Verify the source before opening this file.';
+  } else if (verdict === 'unavailable') {
+    body =
+      'The configured virus scanner was unreachable.\n\n' +
+      ((scan && scan.detail) ? `Detail: ${scan.detail}\n\n` : '') +
+      'No scan was completed on this file. Proceed only if you trust the source.';
+  } else if (verdict === 'too-large') {
+    body =
+      'File exceeds the configured maximum scan size and was NOT scanned.\n\n' +
+      ((scan && scan.detail) ? `${scan.detail}\n\n` : '') +
+      'Proceed only if you trust the source.';
+  } else {
+    body =
+      `Scanner returned verdict: ${verdict}.\n\n` +
+      ((scan && scan.detail) ? `${scan.detail}\n\n` : '') +
+      'No clean scan was confirmed. Proceed only if you trust the source.';
+  }
+  return window.confirm(`Save "${filename}"?\n\n${body}`);
+}
+
+// Human-readable byte sizes for the file-download status messages.
+function _fmtBytes(n) {
+  if (n == null) return 'unknown size';
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  if (n >= 1024)    return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+}
+
+// Start a file download with a confirm-then-fetch flow:
+//   1. Show a confirm() dialog with filename + MIME type (extension-derived)
+//   2. POST /api/file/fetch to begin an async transfer
+//   3. Poll /api/file/poll, reporting received bytes via setStatus()
+//   4. On completion, trigger the browser's native save dialog by
+//      navigating to /api/file/download?id=<job_id>
+//
+// Errors and user cancellation both restore the status indicator and
+// surface a message; the in-flight job on the server times out on its
+// own and gets reaped by cleanup_jobs() if abandoned.
+async function startFileDownload(fileUrl) {
+  // Parse the canonical URL to extract the filename for the confirm dialog.
+  const m = fileUrl.match(/^hash:\/\/[0-9a-f]+\/file\/(.*)$/i);
+  const filenameFromUrl = m ? decodeURIComponent(m[1].split('?')[0].split('/').pop()) : 'download';
+  // Cheap client-side MIME guess from extension — final type comes from
+  // the backend's mimetypes.guess_type() but we want something to show
+  // before any network call.
+  const ext = filenameFromUrl.includes('.') ? filenameFromUrl.split('.').pop().toLowerCase() : '';
+  const guessedType = ({
+    txt:  'text/plain',
+    md:   'text/markdown',
+    pdf:  'PDF document',
+    zip:  'ZIP archive',
+    tar:  'tar archive',
+    gz:   'gzip archive',
+    png:  'PNG image',
+    jpg:  'JPEG image', jpeg: 'JPEG image',
+    gif:  'GIF image',
+    svg:  'SVG image',
+    mp3:  'MP3 audio',
+    mp4:  'MP4 video',
+    json: 'JSON data',
+    csv:  'CSV data',
+  })[ext] || (ext ? `${ext.toUpperCase()} file` : 'unknown type');
+
+  // Initial confirm — no scan info yet (we don't know the verdict until
+  // after the fetch). The post-fetch scan verdict drives a second prompt
+  // when the file was NOT scanned, so the user gets a "no virus scan"
+  // flag at the moment they're actually about to receive the bytes.
+  const ok = window.confirm(
+    `Download "${filenameFromUrl}"?\n\n` +
+    `Type: ${guessedType}\n` +
+    `Source: ${fileUrl}\n\n` +
+    `Files are transferred over Reticulum and may be slow on multi-hop ` +
+    `LoRa networks. Always verify the source before opening any download.`
+  );
+  if (!ok) return;
+
+  setStatus(`Starting download of ${filenameFromUrl}…`, 'busy');
+  showLoading(true, 0);
+  let filename = filenameFromUrl;
+  try {
+    const startResp = await apiFetch('/api/file/fetch', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ url: fileUrl }),
+    });
+    const jobId = startResp.job_id;
+    filename = startResp.filename || filenameFromUrl;
+
+    // Poll for progress; the file is held in the server's job buffer
+    // until /api/file/download collects it. The loadingOver overlay
+    // duplicates the status-bar text so failures are obvious even when
+    // the topbar status indicator is out of view.
+    const interval = 750;
+    const maxWait  = 5 * 60 * 1000;   // 5 min cap for very large transfers
+    const start    = Date.now();
+    while (Date.now() - start < maxWait) {
+      const poll = await apiFetch(`/api/file/poll?id=${encodeURIComponent(jobId)}`);
+      if (poll.status === 'done') {
+        showLoading(false);
+        // Decide whether to require a second user-acknowledgement based
+        // on the scan verdict. A clean scan (clamd → OK) goes straight
+        // to the save dialog. Anything else — no scanner configured,
+        // scanner unreachable, file too large to scan — gets an explicit
+        // "no virus scan was performed" warning the user must accept.
+        if (!_confirmScanResultOrCancel(filename, poll.scan_result)) {
+          setStatus('Download cancelled.', 'idle');
+          return;
+        }
+        const verdict = (poll.scan_result && poll.scan_result.verdict) || 'skipped';
+        const verdictTxt = verdict === 'clean' ? '✓ scan clean'
+                       : verdict === 'skipped' ? '⚠ no virus scan'
+                       : `⚠ scan: ${verdict}`;
+        setStatus(
+          `${verdictTxt} — saving ${filename} (${_fmtBytes(poll.bytes_received)})…`,
+          verdict === 'clean' ? 'ok' : 'busy',
+        );
+        // Browser handles the native save dialog via Content-Disposition.
+        window.location.assign(`/api/file/download?id=${encodeURIComponent(jobId)}`);
+        return;
+      }
+      if (poll.status === 'error') {
+        throw new Error(poll.error || 'File fetch failed');
+      }
+      if (poll.status === 'scanning') {
+        const msg = `Scanning ${filename} for viruses…`;
+        setStatus(msg, 'busy');
+        showLoading(true, 100);
+        const loadingTxt = document.getElementById('loading-text');
+        if (loadingTxt) loadingTxt.textContent = msg;
+        await new Promise(r => setTimeout(r, interval));
+        continue;
+      }
+      const received = poll.bytes_received || 0;
+      const total = poll.total_size;
+      const pct = Math.round((poll.progress || 0) * 100);
+      // Compose the most informative status string we can given the
+      // signals available at this point in the transfer.
+      let msg;
+      if (pct >= 100) {
+        msg = total
+          ? `Finalising ${filename} (${_fmtBytes(total)})…`
+          : `Finalising ${filename}…`;
+      } else if (received > 0 && total) {
+        msg = `Downloading ${filename}… ${_fmtBytes(received)} of ${_fmtBytes(total)} (${pct}%)`;
+      } else if (received > 0) {
+        msg = `Downloading ${filename}… ${_fmtBytes(received)} (${pct}%)`;
+      } else if (pct > 0) {
+        msg = `Downloading ${filename}… ${pct}%`;
+      } else {
+        msg = `Connecting for ${filename}…`;
+      }
+      setStatus(msg, 'busy');
+      showLoading(true, pct);
+      const loadingTxt = document.getElementById('loading-text');
+      if (loadingTxt) loadingTxt.textContent = msg;
+      await new Promise(r => setTimeout(r, interval));
+    }
+    throw new Error('Download timed out waiting for the file');
+  } catch (err) {
+    showLoading(false);
+    const reason = err && err.message ? err.message : String(err);
+    setStatus(`Download failed: ${reason}`, 'error');
+    // Status bar is easy to miss — surface failures with an alert too.
+    window.alert(`Download failed: ${filename}\n\n${reason}`);
+  }
+}
+
 // Poll a fetch job until it completes (or errors), updating the loading
 // overlay with the % progress as the underlying RNS Resource transfers.
 async function pollFetchJob(jobId) {
@@ -681,6 +861,11 @@ function renderPageContent() {
           });
         }
         navigateTo(inner, true, Object.keys(fields).length ? fields : null);
+        return;
+      }
+      if (href.startsWith('/file?url=')) {
+        const fileUrl = decodeURIComponent(href.slice('/file?url='.length));
+        startFileDownload(fileUrl);
         return;
       }
       if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -789,6 +974,8 @@ function getNodeName(hash) {
 function updateNavButtons() {
   btnBack.disabled = state.historyIndex <= 0;
   btnFwd.disabled  = state.historyIndex >= state.history.length - 1;
+  btnRefresh.disabled =
+    state.historyIndex < 0 || !state.history[state.historyIndex];
 }
 
 btnBack.addEventListener('click', () => {
@@ -802,6 +989,10 @@ btnFwd.addEventListener('click', () => {
     state.historyIndex++;
     navigateTo(state.history[state.historyIndex], false);
   }
+});
+btnRefresh.addEventListener('click', () => {
+  const current = state.history[state.historyIndex];
+  if (current) navigateTo(current, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -1852,13 +2043,19 @@ function applyUISettings(s) {
   }
 
   // Address bar — enabled / disabled / hidden, per audience.
+  // The refresh-page button is exempt from both restrictions: a visitor who
+  // can see the page but not navigate elsewhere still needs to be able to
+  // reload it.
   const nb = $('nav-bar');
   if (nb) {
     const ab = pick(s.guests_address_bar, s.users_address_bar, s.admins_address_bar);
     if (ab === 'hidden') {
-      nb.hidden = true;
+      nb.querySelectorAll('input, button').forEach(el => {
+        if (el.id !== 'btn-refresh-page') el.hidden = true;
+      });
     } else if (ab === 'disabled') {
       nb.querySelectorAll('input, button').forEach(el => {
+        if (el.id === 'btn-refresh-page') return;
         el.disabled = true;
         el.style.opacity = '0.4';
         el.style.cursor  = 'not-allowed';

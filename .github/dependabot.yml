@@ -1,9 +1,17 @@
 version: 2
+
+# Monthly cadence across all ecosystems. The on-PR/push security
+# workflow (.github/workflows/security.yml) catches CVEs in pinned
+# deps any time the requirements change, so we don't need a tight
+# Dependabot cycle just to find them — Dependabot's job here is to
+# keep us moving forward through routine upstream releases, not to
+# be the front line for security disclosures.
+
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     groups:
       reticulum-stack:
@@ -15,9 +23,9 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly

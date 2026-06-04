@@ -176,7 +176,22 @@ def create_wsgi():
         # Site hosting
         "SITE_PAGES_DIR":         os.environ.get("SITE_PAGES_DIR", "/site/pages"),
         "SITE_FILES_DIR":         os.environ.get("SITE_FILES_DIR", "/site/files"),
-        "SITE_NAME":              os.environ.get("SITE_NAME", "NomadPortal"),
+        # SITE_NAME left blank by default so SiteServer auto-generates
+        # NomadPortal-<2 hex> from the destination hash (avoids 20
+        # vanilla installs all colliding under a single "NomadPortal"
+        # name). Set to a custom string to override.
+        "SITE_NAME":              os.environ.get("SITE_NAME", ""),
+        "SITE_HOSTING":           os.environ.get("SITE_HOSTING", "true"),
+        "SITE_ANNOUNCE":          os.environ.get("SITE_ANNOUNCE", "false"),
+        # Virus scanning for file downloads — off by default. See
+        # nomadnet_web/scanner.py for accepted values.
+        "VIRUS_SCAN":             os.environ.get("VIRUS_SCAN", "off"),
+        "CLAMD_SOCKET":           os.environ.get("CLAMD_SOCKET", ""),
+        "CLAMD_HOST":             os.environ.get("CLAMD_HOST",   ""),
+        "CLAMD_PORT":             int(os.environ.get("CLAMD_PORT", "3310")),
+        "VIRUS_SCAN_MAX_BYTES":   int(os.environ.get(
+            "VIRUS_SCAN_MAX_BYTES", str(100 * 1024 * 1024),
+        )),
         # Set ALLOW_GUEST_EXTERNAL_BROWSE=true to suppress the per-navigation
         # content warning shown to unauthenticated users when they follow links
         # to nodes other than the hosted site.  The warning exists to discourage
