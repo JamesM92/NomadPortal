@@ -19,11 +19,30 @@ updates:
           - rns
           - lxmf
           - nomadnet
+    ignore:
+      # Authlib 1.7.x is a breaking API rewrite of the OAuth/OIDC
+      # server side. NomadPortal uses Authlib only as an OIDC client,
+      # but staying on 1.6.x patch releases is the safer posture
+      # until we've evaluated the 1.7 client-side API diff.
+      # 1.6.x patches still come through; 1.7+ is suppressed.
+      - dependency-name: "authlib"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Stay on python:3.12-slim until the Reticulum stack
+      # (rns/lxmf/nomadnet) is verified against newer Python
+      # interpreters. Patch updates of 3.12 still come through;
+      # 3.13+/3.14+ are suppressed.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: github-actions
     directory: /
