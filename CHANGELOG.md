@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`build.yml` now runs on `dev` pushes** in addition to `main` /
+  `master` / PRs. Fast lint/test feedback on every dev commit
+  without waiting for a PR or merge-to-main. The slower
+  `security.yml` (pip-audit / bandit / trivy / gitleaks) and
+  `codeql.yml` workflows stay on the main + PR path — they're less
+  likely to regress per-commit and the PR-trigger catches them
+  when dev is promoted to main.
+
 ## [0.9.27] — 2026-06-04
 
 ### Added
