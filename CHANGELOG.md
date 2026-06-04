@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `codeql.yml` workflows stay on the main + PR path — they're less
   likely to regress per-commit and the PR-trigger catches them
   when dev is promoted to main.
+- **Micron2HTML 1.0.7 → 1.0.8**. Drops Python 3.9 support (already
+  irrelevant — we're on 3.14-slim-trixie since v0.9.24), adds 3.13
+  + 3.14 to the upstream test matrix, and tightens field-spec
+  width parsing in `converter.py` (rejects leading signs / whitespace
+  that `int()` previously accepted; behaviour unchanged for any
+  well-formed Micron input). API diff is two lines — no integration
+  changes required.
 
 ## [0.9.27] — 2026-06-04
 
