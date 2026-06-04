@@ -220,7 +220,7 @@ class UISettings:
                     self._data["guests_messages_panel"] = val
                     self._data["users_messages_panel"]  = val
 
-            log.debug("Loaded UI settings from %s", self._file)
+            log.debug("Loaded UI settings")
         except Exception as exc:
             log.warning("Could not load UI settings: %s", exc)
 

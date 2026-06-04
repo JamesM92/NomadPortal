@@ -72,14 +72,21 @@ class SiteServer:
         os.makedirs(self._pages_dir, exist_ok=True)
         os.makedirs(self._files_dir, exist_ok=True)
 
-        # Load or create the persistent node identity
+        # Load or create the persistent node identity. The actual path is
+        # ``self._identity_file`` (operator-controlled config); we don't
+        # echo it here because CodeQL's
+        # ``py/clear-text-logging-sensitive-data`` rule heuristically
+        # flags any variable named ``..._identity_file`` as "sensitive
+        # data" being logged. Operators who need the path can grep
+        # ``identity_file`` out of the config or run ``ls`` on
+        # ``$RNS_CONFIG_DIR``.
         if os.path.exists(self._identity_file):
             self._identity = RNS.Identity.from_file(self._identity_file)
-            log.info("Loaded site identity from %s", self._identity_file)
+            log.info("Loaded site identity from disk")
         else:
             self._identity = RNS.Identity()
             self._identity.to_file(self._identity_file)
-            log.info("Created new site identity → %s", self._identity_file)
+            log.info("Created and persisted a new site identity")
 
         # Register the nomadnetwork.node destination
         self._dest = RNS.Destination(
@@ -237,7 +244,7 @@ class SiteServer:
                 log.debug("Could not register page %s: %s", request_path, exc)
 
         self._last_rescan = time.time()
-        log.debug("Registered %d page(s) from %s", len(pages), self._pages_dir)
+        log.debug("Registered %d page(s)", len(pages))
 
     def _register_files(self) -> None:
         if self._dest is None:
@@ -259,7 +266,7 @@ class SiteServer:
             except Exception as exc:
                 log.debug("Could not register file %s: %s", request_path, exc)
 
-        log.debug("Registered %d file(s) from %s", len(files), self._files_dir)
+        log.debug("Registered %d file(s)", len(files))
 
     def _scan_dir(self, base: str, result: list) -> None:
         if not os.path.isdir(base):

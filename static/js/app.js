@@ -62,19 +62,29 @@ const toggleRaw    = $('toggle-raw');
 const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
 async function apiFetch(url, opts = {}) {
-  // Same-origin guard: every apiFetch caller in the codebase uses a
-  // hardcoded path like '/api/...'. If `url` ever doesn't start with
-  // '/' or contains characters that could escape into a different
-  // origin (':', '//', backslash, control chars), refuse the call.
-  // Protects against future code paths that derive the URL from
-  // server responses or other partially-tainted sources, which is
-  // what CodeQL's client-side-request-forgery rule flagged.
-  if (typeof url !== 'string' || !url.startsWith('/') || url.startsWith('//')
-      || /[\\\r\n]/.test(url)) {
-    throw new Error(`apiFetch rejected non-same-origin URL: ${String(url).slice(0, 80)}`);
+  if (typeof url !== 'string') {
+    throw new Error('apiFetch: url must be a string');
   }
+  // Same-origin guard: parse the candidate URL with an explicit base
+  // (window.location.origin) so any absolute URL pointing elsewhere
+  // is detected as cross-origin, then reconstruct the request target
+  // strictly from the parsed pathname/search/hash. CodeQL recognises
+  // `new URL(...).pathname` reconstruction as a sanitisation barrier
+  // for the js/client-side-request-forgery rule — the fetch call
+  // downstream sees a value derived solely from parsed components,
+  // not the raw caller input.
+  let parsed;
+  try {
+    parsed = new URL(url, window.location.origin);
+  } catch (_) {
+    throw new Error('apiFetch: invalid URL');
+  }
+  if (parsed.origin !== window.location.origin) {
+    throw new Error(`apiFetch: cross-origin URL rejected (${parsed.origin})`);
+  }
+  const safeUrl = parsed.pathname + parsed.search + parsed.hash;
   const { headers: extraHeaders = {}, ...restOpts } = opts;
-  const res = await fetch(url, {
+  const res = await fetch(safeUrl, {
     headers: {
       'Accept': 'application/json',
       'X-CSRF-Token': _csrfToken,
@@ -1321,15 +1331,27 @@ async function loadIdentities() {
 // ---------------------------------------------------------------------------
 // User icon (FIELD_ICON_APPEARANCE — glyph + 2 colors)
 // ---------------------------------------------------------------------------
+// Strict #RRGGBB validator — CodeQL's js/xss-through-dom rule sees
+// `fg`/`bg` flowing into innerHTML and warns. Constraining the values
+// to a regex-validated hex colour collapses the dataflow to a known
+// safe shape before splicing into the SVG attribute. Anything that
+// isn't ``#`` + 6 hex chars falls back to a neutral default.
+const _HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+function _safeHexColor(value, fallback) {
+  return (typeof value === 'string' && _HEX_COLOR_RE.test(value)) ? value : fallback;
+}
+
 function _iconSvg(glyph, fg, bg, size = 28) {
   const g = (glyph || '?').slice(0, 2).toUpperCase();
   const fontSize = size * 0.55;
+  const safeFg = _safeHexColor(fg, '#ffffff');
+  const safeBg = _safeHexColor(bg, '#5ba3c9');
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ' +
     `width="${size}" height="${size}">` +
-    `<circle cx="16" cy="16" r="16" fill="${bg}"/>` +
+    `<circle cx="16" cy="16" r="16" fill="${safeBg}"/>` +
     `<text x="16" y="22" text-anchor="middle" font-size="${fontSize * 32 / size}" ` +
-    `font-family="sans-serif" font-weight="bold" fill="${fg}">${esc(g)}</text>` +
+    `font-family="sans-serif" font-weight="bold" fill="${safeFg}">${esc(g)}</text>` +
     '</svg>'
   );
 }

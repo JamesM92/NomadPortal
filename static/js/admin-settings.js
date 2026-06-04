@@ -162,7 +162,17 @@
 
   // ---- Blocklist ----
   function esc(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Escape every char that has special meaning in HTML attribute or
+    // text contexts: &<>"'  — only escaping &<> leaves attribute-quote
+    // breakouts open (CodeQL's incomplete-html-attribute-sanitization
+    // rule flags exactly that). Quote pair both forms because the
+    // template literals around this function mix " and ' delimiters.
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   async function loadBlocklist() {

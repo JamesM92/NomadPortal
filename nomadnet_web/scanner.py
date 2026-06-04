@@ -219,14 +219,12 @@ def build_scanner_from_config(cfg: dict) -> tuple[Scanner, bool]:
     if mode_raw in ("off", "", "false", "no", "0"):
         return NullScanner(), False
     if mode_raw not in ("clamd", "required"):
-        # Echoing the unknown mode back helps the operator notice a typo.
-        # CodeQL's `py/clear-text-logging-sensitive-data` rule flags this
-        # because env config CAN contain secrets — but VIRUS_SCAN is an
-        # enum-valued knob ("off"/"clamd"/"required"), not a credential.
-        # Truncate defensively in case someone shoves a long blob in.
+        # Don't echo the raw value back — CodeQL flags any env-derived
+        # value being logged as potentially-sensitive. Operators with a
+        # typo can verify by re-reading VIRUS_SCAN from their config.
         log.warning(
-            "Unknown VIRUS_SCAN mode %r; treating as off",
-            mode_raw[:64],
+            "Unknown VIRUS_SCAN mode (expected off | clamd | required); "
+            "treating as off"
         )
         return NullScanner(), False
 

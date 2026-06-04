@@ -297,8 +297,13 @@ def healthz():
 
     try:
         status = browser.get_status()
-    except Exception as exc:
-        return jsonify({"status": "error", "reason": str(exc)}), 503
+    except Exception:
+        # Log the exception server-side; return only the high-level
+        # status string to the client so an unauthenticated /healthz
+        # probe can't lift exception text out of the JSON body.
+        log.exception("healthz: browser.get_status() raised")
+        return jsonify({"status": "error",
+                        "reason": "interface status unavailable"}), 503
 
     interfaces = status.get("interfaces") or []
     if not interfaces:
@@ -750,26 +755,20 @@ def api_file_fetch_start():
     is_local = site_server and site_server.node_hash() == node_hash.lower()
     if is_local:
         import os, secrets
-        # Defense in depth against path traversal in `path`:
-        #   1. Reject any path component that explicitly contains ``..`` or
-        #      a leading slash after the /file/ prefix — these are obvious
-        #      traversal attempts and never appear in legitimate file URLs.
-        #   2. Resolve the candidate with os.path.realpath() to collapse
-        #      symlinks, encoded sequences, etc.
-        #   3. Verify the resolved path is inside the files root using
-        #      ``os.path.commonpath`` — a CodeQL-trackable containment
-        #      check (it can model commonpath but loses signal on
-        #      startswith of a realpath() return value).
-        files_root = os.path.realpath(site_server.files_dir())
+        from werkzeug.utils import safe_join
+        # Use Werkzeug's ``safe_join`` for path traversal containment.
+        # It rejects any input that escapes ``files_root`` (absolute
+        # paths, ``..`` segments, NUL bytes, etc.) by returning None,
+        # and CodeQL recognises it as a path-traversal sanitiser so the
+        # py/path-injection rule no longer flags downstream uses of
+        # the result. Belt-and-braces: also pre-reject obvious traversal
+        # patterns so the audit log captures a useful 400 reason.
+        files_root = site_server.files_dir()
         rel        = path[len("/file/"):].lstrip("/")
         if not rel or ".." in rel.split("/") or rel.startswith("/"):
             abort(400, description="invalid file path")
-        candidate = os.path.realpath(os.path.join(files_root, rel))
-        try:
-            common = os.path.commonpath([files_root, candidate])
-        except ValueError:
-            abort(400, description="invalid file path")
-        if common != files_root:
+        candidate = safe_join(files_root, rel)
+        if candidate is None:
             abort(400, description="invalid file path")
         if not os.path.isfile(candidate):
             return jsonify({"error": "file not found on local site"}), 404
@@ -1345,9 +1344,10 @@ def api_site_announce():
             "ok": True,
             "message": f"Site node announced ({server.node_hash()[:16]})",
         })
-    except Exception as exc:
-        log.warning("Site announce failed: %s", exc)
-        return jsonify({"ok": False, "error": str(exc)}), 500
+    except Exception:
+        log.exception("Site announce failed")
+        return jsonify({"ok": False,
+                        "error": "announce failed (see server log)"}), 500
 
 
 @bp.get("/api/ui/settings")

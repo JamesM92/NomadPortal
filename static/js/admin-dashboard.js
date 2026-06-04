@@ -1,11 +1,20 @@
 // Hash navigation
 (function () {
+  // RNS truncated hashes are 16 hex chars; full hashes are up to 64.
+  // Validating against this regex collapses the DOM-sourced input to a
+  // known-safe shape before splicing into the location, which keeps
+  // CodeQL's js/xss-through-dom rule from flagging the navigation.
+  var HASH_RE = /^[0-9a-fA-F]{8,64}$/;
   var form = document.getElementById('hash-form');
   if (form) {
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var h = document.getElementById('hashInput').value.trim();
-      if (h) window.location = '/?url=hash://' + h + '/index.mu';
+      if (!HASH_RE.test(h)) {
+        alert('Invalid node hash — expected 8 to 64 hex characters.');
+        return;
+      }
+      window.location = '/?url=hash://' + h + '/index.mu';
     });
   }
 

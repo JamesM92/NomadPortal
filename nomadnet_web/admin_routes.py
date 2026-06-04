@@ -150,8 +150,12 @@ def _trigger_worker_reload(delay: float = 0.5) -> tuple[bool, str]:
     try:
         with open(f"/proc/{ppid}/cmdline", "rb") as fh:
             cmdline = fh.read().replace(b"\0", b" ").decode("utf-8", errors="ignore").strip()
-    except OSError as exc:
-        return False, f"Cannot read /proc/{ppid}/cmdline: {exc}"
+    except OSError:
+        # Don't bubble the OS exception text into the API response —
+        # it can include filesystem paths and errno hints. Server-side
+        # log is enough.
+        log.exception("Could not read /proc/%d/cmdline for reload check", ppid)
+        return False, "could not verify parent process (see server log)"
 
     if "gunicorn" not in cmdline.lower():
         return False, f"Parent pid={ppid} is not gunicorn ({cmdline[:80]!r})"

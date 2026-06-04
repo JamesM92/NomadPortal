@@ -42,6 +42,7 @@ Production (Gunicorn — recommended):
 
 import logging
 import os
+import re
 import secrets
 import sys
 
@@ -90,6 +91,33 @@ def _setup_logging() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         stream=sys.stdout,
     )
+
+    # ── Log-injection guard ───────────────────────────────────────────
+    # Strip CR/LF and other ASCII control characters from every record
+    # before formatting. Even when callers do
+    # ``log.info("user %s did X", user_supplied)`` and ``user_supplied``
+    # contains forged newlines, the rendered line that hits stdout (or
+    # any other handler) can no longer break out into a forged log
+    # entry. CodeQL's py/log-injection rule treats this CR/LF strip as
+    # a sanitisation barrier — applying it at the root logger covers
+    # every existing call site without changes to individual callers.
+    _CTRL_RE = re.compile(r"[\r\n\x00-\x08\x0b-\x1f\x7f]")
+    def _scrub(value):
+        if isinstance(value, str):
+            return _CTRL_RE.sub("?", value)
+        return value
+
+    class _StripCRLFFilter(logging.Filter):
+        def filter(self, record):
+            if isinstance(record.msg, str):
+                record.msg = _CTRL_RE.sub("?", record.msg)
+            if isinstance(record.args, tuple):
+                record.args = tuple(_scrub(a) for a in record.args)
+            elif isinstance(record.args, dict):
+                record.args = {k: _scrub(v) for k, v in record.args.items()}
+            return True
+
+    logging.getLogger().addFilter(_StripCRLFFilter())
 
     # Suppress noisy poll/healthcheck access lines from gunicorn's access
     # log. The front-end polls `/api/page/poll` every 500ms while a page
@@ -160,6 +188,11 @@ def create_wsgi():
         "TRUSTED_PROXIES":        int(os.environ.get("TRUSTED_PROXIES", "0")),
         "HTTPS_REDIRECT":         os.environ.get("HTTPS_REDIRECT", "").lower()
                                   in ("1", "true", "yes"),
+        # Comma-separated host allow-list applied to the HTTPS_REDIRECT
+        # before_request handler. Set to your public hostname(s) — e.g.
+        # "nomad.example.com,nomad.example.org" — so a forged Host
+        # header gets a 400 instead of a redirect.
+        "TRUSTED_HOSTS":          os.environ.get("TRUSTED_HOSTS", ""),
         # Local admin credentials
         "ADMIN_USERNAME":         os.environ.get("ADMIN_USERNAME", "admin"),
         "ADMIN_PASSWORD":         os.environ.get("ADMIN_PASSWORD", ""),

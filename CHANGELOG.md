@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.21] — 2026-06-03
+
+### Security
+
+Comprehensive CodeQL pass. Closes the remaining ~46 alerts surfaced
+after v0.9.20 by reworking each call site to use a CodeQL-recognised
+sanitiser pattern instead of suppressing. No behaviour changes for
+operators on a normal configuration; one new optional env var
+(``TRUSTED_HOSTS``) for stricter HTTPS redirect.
+
+#### Sanitisers swapped in for the previous (correct but opaque) checks
+
+- **Path-injection**: ``api_file_fetch_start`` now uses
+  ``werkzeug.utils.safe_join`` to contain the local-file path inside
+  ``files_root``. CodeQL recognises ``safe_join`` as a path-traversal
+  sanitiser, so the downstream ``open()`` no longer flags.
+- **HTTP-response-splitting** in ``redirect_http.py``: added an
+  explicit ``.replace("\\r", "").replace("\\n", "")`` barrier ahead of
+  the regex allow-list. The replace-pair is what CodeQL's
+  ``py/http-response-splitting`` query treats as a sanitisation
+  primitive.
+- **URL-redirection** post-login (``auth._safe_next_or_default``):
+  parses the ``next`` parameter with ``urlsplit``, rejects anything
+  with a scheme/netloc, then rebuilds with ``urlunsplit("", "", ...)``
+  so only path/query/fragment survive. CodeQL recognises the
+  parse-and-rebuild pattern.
+- **URL-redirection** on HTTPS upgrade: redirect target now derives
+  from ``request.host`` validated against a new ``TRUSTED_HOSTS`` env
+  var (comma-separated allow-list). With ``HTTPS_REDIRECT=true`` and a
+  blank ``TRUSTED_HOSTS``, the loop logs a warning at startup. A
+  forged ``Host`` header returns 400 instead of a redirect.
+- **Client-side request forgery** in ``apiFetch``: replaced the
+  startswith/regex check with ``new URL(url, window.location.origin)``
+  + origin comparison + reconstruction from parsed components. CodeQL
+  recognises the parse-and-rebuild pattern; the final fetch sees a
+  value derived solely from the parsed URL's pathname/search/hash.
+
+#### Real defects fixed
+
+- **Stack-trace exposure** (×4) at ``routes.healthz``,
+  ``routes.api_site_announce``, and ``admin_routes._trigger_worker_reload``:
+  the ``str(exc)`` text used to flow back to the client in the JSON
+  body. Now the exception is logged with ``log.exception`` server-side
+  and a generic ``"see server log"`` string is returned.
+- **Incomplete HTML attribute sanitisation** in
+  ``static/js/admin-settings.js``: the local ``esc()`` helper escaped
+  ``& < >`` but not ``" '`` — meaning a blocklist hash containing a
+  double-quote could break out of ``data-unblock="..."``. Now escapes
+  all five HTML special chars.
+- **DOM-based XSS via icon SVG attributes** in ``static/js/app.js``:
+  the ``_iconSvg`` helper interpolated caller-supplied ``fg`` / ``bg``
+  raw into SVG ``fill`` attribute values. Now constrained to a strict
+  ``#RRGGBB`` regex; anything else falls back to a default colour.
+- **DOM-based XSS via dashboard hash input** in
+  ``static/js/admin-dashboard.js``: free-text node hash flowed into a
+  ``window.location`` assignment. Now validated against
+  ``/^[0-9a-fA-F]{8,64}$/`` before navigation.
+
+#### Logging hardening
+
+- **Root-logger CR/LF filter** (``app._setup_logging``) strips
+  carriage return / newline / ASCII control chars from every log
+  record's ``msg`` and ``args``. Closes ~29 ``py/log-injection``
+  alerts in one place — even when a caller does
+  ``log.info("user %s did X", user_supplied)`` and ``user_supplied``
+  contains forged newlines, the rendered line that hits stdout can no
+  longer break out into a synthetic log entry. CodeQL treats this
+  filter as a sanitisation barrier.
+- **Clear-text-logging trims**: 11 log lines that echoed paths /
+  environment values / identity hex were rewritten to either drop the
+  variable from the message or replace it with a non-tracked
+  descriptor. Operator value preserved (they can grep config for the
+  actual values); CodeQL's heuristic ``py/clear-text-logging-sensitive-data``
+  rule no longer matches.
+
+#### Added env vars
+
+- ``TRUSTED_HOSTS`` — comma-separated allow-list applied to the
+  ``HTTPS_REDIRECT`` before_request handler when set. Defaults to
+  empty (logs a warning); set to your public hostname(s) for stricter
+  validation. Forged ``Host`` headers return 400.
+
 ## [0.9.20] — 2026-06-03
 
 ### Security

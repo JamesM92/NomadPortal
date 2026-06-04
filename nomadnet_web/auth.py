@@ -59,24 +59,34 @@ def _safe_next_or_default(candidate: str, default: str) -> str:
 
     Protects the post-login redirect against the classic open-redirect
     attack — ``/login?next=https://evil.com`` shouldn't punt the user
-    off-domain after a successful login. We require:
+    off-domain after a successful login.
 
-      - non-empty string
-      - starts with ``/`` (relative path)
-      - does NOT start with ``//`` (which would be a protocol-relative
-        URL targeting a different host)
-      - contains no CR/LF (header-injection hardening, even though Flask
-        validates this further down the stack)
+    Implementation: parse the candidate with ``urlsplit``, ensure it
+    has no scheme or netloc, then reconstruct via ``urlunsplit`` with
+    those fields forced to empty strings. CodeQL recognises this
+    ``urlsplit + reset + urlunsplit`` pattern as a url-redirection
+    sanitiser, so the value returned can flow into ``redirect()``
+    without tripping the py/url-redirection rule.
 
     Any deviation falls back to ``default`` (typically the dashboard).
     """
+    from urllib.parse import urlsplit, urlunsplit
     if not isinstance(candidate, str) or not candidate:
-        return default
-    if not candidate.startswith("/") or candidate.startswith("//"):
         return default
     if "\r" in candidate or "\n" in candidate:
         return default
-    return candidate
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return default
+    # Reject anything with a scheme or netloc — those are the open-redirect
+    # vectors. Also reject paths that aren't absolute-on-the-current-host.
+    if parts.scheme or parts.netloc or not parts.path.startswith("/"):
+        return default
+    # Reconstruct with empty scheme/netloc to neutralise any user-supplied
+    # host. ``urlunsplit("", "", path, query, fragment)`` returns a clean
+    # ``/path?query#fragment`` string.
+    return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
 
 
 def _record_session(user, ip: str) -> None:

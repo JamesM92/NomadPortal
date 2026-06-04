@@ -42,13 +42,25 @@ _HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$|^\[[0-9A-Fa-f:.]+\]$")
 _PATH_RE = re.compile(r"^[^\r\n]+$")
 
 
+def _strip_crlf(raw: str) -> str:
+    """Explicit CR/LF strip — CodeQL's py/http-response-splitting query
+    recognises ``.replace("\\r", "")``/``.replace("\\n", "")`` as a
+    sanitisation barrier, and this is what the rule expects to see on
+    any value spliced into a response header. The regex allow-lists
+    below are belt-and-braces (a value that's not ``[A-Za-z0-9.\\-]+``
+    falls through to a safe default), but the CR/LF strip is what
+    makes the dataflow analysis green."""
+    return raw.replace("\r", "").replace("\n", "")
+
+
 def _safe_host(raw: str) -> str:
-    head = (raw or "").split(":", 1)[0].strip()
+    head = _strip_crlf((raw or "").split(":", 1)[0]).strip()
     return head if _HOST_RE.match(head) else "localhost"
 
 
 def _safe_path(raw: str) -> str:
-    return raw if raw and _PATH_RE.match(raw) else "/"
+    candidate = _strip_crlf(raw or "")
+    return candidate if candidate and _PATH_RE.match(candidate) else "/"
 
 
 class _Redirect(http.server.BaseHTTPRequestHandler):
