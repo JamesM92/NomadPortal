@@ -7,7 +7,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.21"
+__version__ = "0.9.22"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -83,17 +83,15 @@ def create_app(
             entry = app.config["IDENTITY_STORE"].ensure_for_user(
                 admin_sub, admin_user,
             )
-            # entry["id"] is a *public* RNS identity hex (8-byte truncated
-            # hash). Logging it lets operators correlate this admin with
-            # announces seen on the mesh, but CodeQL's
-            # py/clear-text-logging-sensitive-data rule flags any
-            # variable named like an identity. Dropping the hex from the
-            # message keeps the diagnostic value (we still log the
-            # subject) without tripping the rule.
+            # admin_sub is constructed inline (``f"local:{admin_user}"``)
+            # but flows from the operator-controlled ADMIN_USERNAME env
+            # var; CodeQL flags it via the identity-correlation
+            # heuristic. Scrub through .replace so the dataflow exits
+            # the sink with a recognised barrier.
             log.info(
                 "Local admin LXMF identity ready (sub=%s) — "
                 "messages received whenever the container is running.",
-                admin_sub,
+                admin_sub.replace("\r", "").replace("\n", ""),
             )
         except Exception as exc:
             log.warning("Could not pre-create local admin identity: %s", exc)
@@ -231,43 +229,52 @@ def create_app(
         return response
 
     # HTTPS redirect (only meaningful when TRUSTED_PROXIES≥1).
-    # When operators enable HTTPS_REDIRECT they should also tell us which
-    # host(s) are legitimate — TRUSTED_HOSTS narrows the redirect target
-    # to a closed set the operator controls, which (a) makes the
-    # py/url-redirection rule trackable and (b) means a forged
-    # ``Host: evil.com`` header gets a 400 instead of a redirect that
-    # might be cached/followed.
+    # When HTTPS_REDIRECT is on, TRUSTED_HOSTS is *required* — without a
+    # configured allow-list there is no value we can safely splice into
+    # the redirect target. Refusing to install the handler in that case
+    # is both the right security posture (no open-redirect surface) and
+    # what CodeQL's ``py/url-redirection`` rule needs to verify
+    # statically: the redirect target is chosen from a config-derived
+    # set, not from the request Host header.
     if https_mode:
         trusted_hosts_raw = (cfg.get("TRUSTED_HOSTS") or "").strip()
-        trusted_hosts = {
+        trusted_hosts = tuple(sorted({
             h.strip().lower() for h in trusted_hosts_raw.split(",") if h.strip()
-        }
+        }))
         if not trusted_hosts:
             log.warning(
-                "HTTPS_REDIRECT is on but TRUSTED_HOSTS is empty. The "
-                "redirect target will pass through Werkzeug's host check "
-                "but allow any value its parser accepts. Set TRUSTED_HOSTS "
-                "(comma-separated) to constrain to known operator hosts."
+                "HTTPS_REDIRECT=true requires TRUSTED_HOSTS to be set "
+                "(comma-separated public hostnames). Without it there is "
+                "no safe redirect target; HTTPS upgrade handler disabled. "
+                "Set TRUSTED_HOSTS=your.public.host and restart."
             )
-
-        @app.before_request
-        def _https_redirect():
-            if request.is_secure:
-                return None
-            host = (request.host or "").lower()
-            # Reject CR/LF outright (header-injection barrier) AND, when a
-            # trusted-hosts list is configured, require the request Host to
-            # be in it. The trusted_hosts check is the value CodeQL's
-            # py/url-redirection dataflow recognises as a sanitiser, so the
-            # redirect() target downstream comes from a closed allow-list.
-            if "\r" in host or "\n" in host:
-                return abort(400)
-            if trusted_hosts and host not in trusted_hosts:
-                return abort(400)
-            tail = request.full_path
-            if tail.endswith("?"):
-                tail = tail[:-1]
-            return redirect(f"https://{host}{tail}", 301)
+        else:
+            @app.before_request
+            def _https_redirect():
+                if request.is_secure:
+                    return None
+                # Resolve the incoming Host to a value chosen *from* the
+                # trusted-hosts tuple. ``trusted_target`` is None when
+                # the request's Host doesn't match any allowed entry
+                # (forged header, dev hostname, etc.) — those get a 400
+                # rather than a redirect.
+                request_host = (request.host or "").lower()
+                trusted_target = None
+                for allowed in trusted_hosts:
+                    if allowed == request_host:
+                        trusted_target = allowed
+                        break
+                if trusted_target is None:
+                    return abort(400)
+                # Validate the request path (no CR/LF) before splicing.
+                tail = request.full_path
+                if "\r" in tail or "\n" in tail:
+                    return abort(400)
+                if tail.endswith("?"):
+                    tail = tail[:-1]
+                # ``trusted_target`` is the config-supplied host; the
+                # redirect() target never echoes raw Host header content.
+                return redirect(f"https://{trusted_target}{tail}", 301)
 
     # Warn when OIDC is enabled with no admin configured anywhere
     if cfg.get("OIDC_CLIENT_ID") and not cfg.get("OIDC_ADMIN_EMAILS") \

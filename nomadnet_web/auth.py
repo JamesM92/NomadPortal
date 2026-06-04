@@ -365,12 +365,15 @@ def local_login():
 
     # IP-level rate limit (20 attempts per 5 min regardless of username)
     if not rate_limit.check(f"login:{ip}", 20, 300):
-        log.warning("Login rate limit exceeded from %s", ip)
+        log.warning("Login rate limit exceeded from %s",
+                    ip.replace("\r", "").replace("\n", ""))
         return _fail("Too many requests — try again later.", 429)
 
     # Per-(IP, username) lockout after repeated failures
     if _is_locked_out(ip, username):
-        log.warning("Login locked out: ip=%s username=%s", ip, username)
+        log.warning("Login locked out: ip=%s username=%s",
+                    ip.replace("\r", "").replace("\n", ""),
+                    username.replace("\r", "").replace("\n", ""))
         return _fail("Too many failed attempts — try again in a few minutes.", 429)
 
     expected_user = current_app.config.get("ADMIN_USERNAME", "admin")
@@ -400,7 +403,9 @@ def local_login():
             if messaging:
                 messaging.setup_user(user.id)
             user_store.register_or_update(record["sub"], "", record["name"])
-            log.info("Local user login: %s from %s", username, ip)
+            log.info("Local user login: %s from %s",
+                     username.replace("\r", "").replace("\n", ""),
+                     ip.replace("\r", "").replace("\n", ""))
             return redirect(url_for("admin.dashboard") if user.is_admin else "/")
 
     if user_ok and pass_ok:
@@ -414,11 +419,15 @@ def local_login():
         messaging = current_app.config.get("MESSAGING")
         if messaging:
             messaging.setup_user(user.id)
-        log.info("Local login: %s from %s", username, ip)
+        log.info("Local login: %s from %s",
+                 username.replace("\r", "").replace("\n", ""),
+                 ip.replace("\r", "").replace("\n", ""))
         return redirect(url_for("admin.dashboard") if user.is_admin else "/")
 
     _record_failure(ip, username)
-    log.warning("Failed local login: username=%s ip=%s", username, ip)
+    log.warning("Failed local login: username=%s ip=%s",
+                username.replace("\r", "").replace("\n", ""),
+                ip.replace("\r", "").replace("\n", ""))
     return _fail("Invalid username or password.")
 
 

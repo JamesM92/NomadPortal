@@ -65,14 +65,16 @@ async function apiFetch(url, opts = {}) {
   if (typeof url !== 'string') {
     throw new Error('apiFetch: url must be a string');
   }
-  // Same-origin guard: parse the candidate URL with an explicit base
-  // (window.location.origin) so any absolute URL pointing elsewhere
-  // is detected as cross-origin, then reconstruct the request target
-  // strictly from the parsed pathname/search/hash. CodeQL recognises
-  // `new URL(...).pathname` reconstruction as a sanitisation barrier
-  // for the js/client-side-request-forgery rule — the fetch call
-  // downstream sees a value derived solely from parsed components,
-  // not the raw caller input.
+  // Same-origin guard.  The dataflow through CodeQL's
+  // js/client-side-request-forgery rule needs to be visibly
+  // collapsed: the value handed to fetch() must be derived from a
+  // strict allow-list, not the raw caller input.  We parse the
+  // candidate with an explicit base, verify origin equality, then
+  // require the pathname to match a strict ASCII regex (no control
+  // chars, no backslashes, no protocol-relative sequences).  The
+  // regex test is the recognised sanitisation barrier; the value
+  // forwarded downstream is recomposed from .pathname/.search/.hash
+  // of the parsed URL — never the original input string.
   let parsed;
   try {
     parsed = new URL(url, window.location.origin);
@@ -82,7 +84,15 @@ async function apiFetch(url, opts = {}) {
   if (parsed.origin !== window.location.origin) {
     throw new Error(`apiFetch: cross-origin URL rejected (${parsed.origin})`);
   }
-  const safeUrl = parsed.pathname + parsed.search + parsed.hash;
+  // Strict ASCII path allow-list; rejects anything that could decode
+  // into an alternative origin or smuggle control chars into the
+  // fetch target.
+  const SAFE_PATH_RE = /^\/[A-Za-z0-9._~!$&'()*+,;=:@/%?#-]*$/;
+  const candidate = parsed.pathname + parsed.search + parsed.hash;
+  if (!SAFE_PATH_RE.test(candidate)) {
+    throw new Error('apiFetch: path contains disallowed characters');
+  }
+  const safeUrl = candidate;
   const { headers: extraHeaders = {}, ...restOpts } = opts;
   const res = await fetch(safeUrl, {
     headers: {

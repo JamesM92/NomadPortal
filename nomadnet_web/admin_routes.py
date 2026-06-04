@@ -29,6 +29,23 @@ from . import csrf as csrf_mod
 log   = logging.getLogger(__name__)
 _audit = logging.getLogger("nomadnet.audit")
 
+
+def _audit_warn(template: str, *args) -> None:
+    """``_audit.warning`` with CR/LF/NUL-stripped string args.
+
+    Inlines a ``.replace("\\r","").replace("\\n","").replace("\\x00","")``
+    chain on each string argument before forwarding to the real audit
+    logger. CodeQL's ``py/log-injection`` query recognises the chained
+    ``.replace`` as a sanitiser barrier, so all call sites that funnel
+    user-controlled values (actor names, IPs, form input) through this
+    wrapper come out clean."""
+    safe = tuple(
+        (a.replace("\r", "").replace("\n", "").replace("\x00", ""))
+        if isinstance(a, str) else a
+        for a in args
+    )
+    _audit.warning(template, *safe)
+
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin",
                      template_folder="../templates")
 
@@ -176,7 +193,7 @@ def _trigger_worker_reload(delay: float = 0.5) -> tuple[bool, str]:
 def interfaces_reload():
     """Trigger a graceful gunicorn reload to apply interface changes."""
     ok, reason = _trigger_worker_reload()
-    _audit.warning("interfaces_reload: actor=%s ip=%s ok=%s reason=%s",
+    _audit_warn("interfaces_reload: actor=%s ip=%s ok=%s reason=%s",
                    getattr(current_user, "name", "?"), request.remote_addr,
                    ok, reason)
     if not ok:
@@ -329,7 +346,7 @@ def interfaces_save():
     ifaces["i2p"] = i2p_list
 
     _save_config(cfg)
-    _audit.warning("interfaces_save: actor=%s ip=%s",
+    _audit_warn("interfaces_save: actor=%s ip=%s",
                    getattr(current_user, "name", "?"),
                    request.remote_addr)
     flash("Configuration saved. Restart the container to apply changes.", "ok")
@@ -391,7 +408,7 @@ def identity_reset(identity_id: str):
     old_entry = _id_store().get(identity_id)
     new_entry = _id_store().reset(identity_id)
     if new_entry:
-        _audit.warning("identity_reset: old=%s new=%s actor=%s ip=%s",
+        _audit_warn("identity_reset: old=%s new=%s actor=%s ip=%s",
                        identity_id[:16], new_entry["id"][:16],
                        getattr(current_user, "name", "?"), request.remote_addr)
         # Drop the cached router so it is rebuilt with the new keypair.
@@ -439,7 +456,7 @@ def cache_view():
 @admin_required
 def cache_clear():
     _cache().clear()
-    _audit.warning("cache_clear: actor=%s ip=%s",
+    _audit_warn("cache_clear: actor=%s ip=%s",
                    getattr(current_user, "name", "?"), request.remote_addr)
     flash("Cache cleared.", "ok")
     return redirect(url_for("admin.cache_view"))
@@ -487,7 +504,7 @@ def cache_reset_rns():
     actor   = getattr(current_user, "name", "?")
     if not os.path.isdir(storage):
         flash("RNS storage directory not found — nothing to reset.", "warn")
-        _audit.warning("rns_reset: actor=%s ip=%s ok=no reason=missing",
+        _audit_warn("rns_reset: actor=%s ip=%s ok=no reason=missing",
                        actor, request.remote_addr)
         return redirect(url_for("admin.cache_view"))
 
@@ -498,12 +515,12 @@ def cache_reset_rns():
     except OSError as exc:
         log.exception("rns_reset: failed to swap storage")
         flash(f"Reset failed: {exc}", "err")
-        _audit.warning("rns_reset: actor=%s ip=%s ok=no reason=%s",
+        _audit_warn("rns_reset: actor=%s ip=%s ok=no reason=%s",
                        actor, request.remote_addr, exc)
         return redirect(url_for("admin.cache_view"))
 
     ok, reason = _trigger_worker_reload()
-    _audit.warning("rns_reset: actor=%s ip=%s backup=%s reload=%s reason=%s",
+    _audit_warn("rns_reset: actor=%s ip=%s backup=%s reload=%s reason=%s",
                    actor, request.remote_addr, backup, ok, reason)
     if ok:
         flash(
@@ -559,7 +576,7 @@ def users():
 def user_enable(sub: str):
     store = _user_store()
     if store and store.set_enabled(sub, True):
-        _audit.warning("user_enable: sub=%s actor=%s ip=%s",
+        _audit_warn("user_enable: sub=%s actor=%s ip=%s",
                        sub[:16], getattr(current_user, "name", "?"), request.remote_addr)
         flash("Account enabled.", "ok")
     else:
@@ -572,7 +589,7 @@ def user_enable(sub: str):
 def user_disable(sub: str):
     store = _user_store()
     if store and store.set_enabled(sub, False):
-        _audit.warning("user_disable: sub=%s actor=%s ip=%s",
+        _audit_warn("user_disable: sub=%s actor=%s ip=%s",
                        sub[:16], getattr(current_user, "name", "?"), request.remote_addr)
         flash("Account disabled.", "ok")
     else:
@@ -606,7 +623,7 @@ def user_create():
     if err:
         flash(f"Could not create user: {err}", "error")
     else:
-        _audit.warning("user_create: name=%s admin=%s actor=%s ip=%s",
+        _audit_warn("user_create: name=%s admin=%s actor=%s ip=%s",
                        username, is_admin, getattr(current_user, "name", "?"), request.remote_addr)
         flash(f"User '{username}' created.", "ok")
     return redirect(url_for("admin.users"))
@@ -618,7 +635,7 @@ def user_set_admin(sub: str):
     store = _user_store()
     is_admin = request.form.get("is_admin") == "1"
     if store and store.set_admin(sub, is_admin):
-        _audit.warning("user_set_admin: sub=%s is_admin=%s actor=%s ip=%s",
+        _audit_warn("user_set_admin: sub=%s is_admin=%s actor=%s ip=%s",
                        sub[:16], is_admin, getattr(current_user, "name", "?"), request.remote_addr)
         flash("Admin status updated.", "ok")
     else:
@@ -634,7 +651,7 @@ def user_delete(sub: str):
         flash("You cannot delete your own account.", "error")
         return redirect(url_for("admin.users"))
     if store and store.delete_user(sub):
-        _audit.warning("user_delete: sub=%s actor=%s ip=%s",
+        _audit_warn("user_delete: sub=%s actor=%s ip=%s",
                        sub[:16], getattr(current_user, "name", "?"), request.remote_addr)
         flash("User deleted.", "ok")
     else:
@@ -663,7 +680,7 @@ def sessions():
 def session_revoke(sub: str):
     from .auth import revoke_session
     if revoke_session(sub):
-        _audit.warning("session_revoke: sub=%s actor=%s ip=%s",
+        _audit_warn("session_revoke: sub=%s actor=%s ip=%s",
                        sub[:16], getattr(current_user, "name", "?"), request.remote_addr)
         flash("Session revoked.", "ok")
     else:
@@ -676,7 +693,7 @@ def session_revoke(sub: str):
 def sessions_revoke():
     from .auth import revoke_all_sessions
     count = revoke_all_sessions()
-    _audit.warning("sessions_revoke: %d sessions cleared by %s ip=%s",
+    _audit_warn("sessions_revoke: %d sessions cleared by %s ip=%s",
                    count, getattr(current_user, "name", "?"), request.remote_addr)
     flash(f"Revoked {count} active session(s). All users must log in again.", "ok")
     return redirect(url_for("admin.sessions"))
@@ -735,7 +752,7 @@ def api_ui_settings_save():
     if not getattr(current_user, "super_admin", False):
         gated = ADMIN_GATED_FIELDS & patch.keys()
         if gated:
-            _audit.warning(
+            _audit_warn(
                 "ui_settings_save: dropped admin-gated fields actor=%s ip=%s fields=%s",
                 getattr(current_user, "name", "?"), request.remote_addr, sorted(gated),
             )
@@ -763,7 +780,7 @@ def api_ui_settings_save():
             browser._hosted_name = new_name
         site_server.announce()
 
-    _audit.warning("ui_settings_save: actor=%s ip=%s patch=%s",
+    _audit_warn("ui_settings_save: actor=%s ip=%s patch=%s",
                    getattr(current_user, "name", "?"), request.remote_addr, patch)
     return jsonify({"ok": True, "settings": ui.get_all()})
 
@@ -899,7 +916,7 @@ def backup_download():
 
     buf.seek(0)
     fname = f"nomadportal-backup-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
-    _audit.warning("backup_download: actor=%s ip=%s size=%d",
+    _audit_warn("backup_download: actor=%s ip=%s size=%d",
                    getattr(current_user, "name", "?"), request.remote_addr,
                    buf.getbuffer().nbytes)
     return Response(

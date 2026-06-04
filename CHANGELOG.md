@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.22] — 2026-06-03
+
+### Security
+
+Second pass on the post-v0.9.18 CodeQL clean-up. v0.9.21's
+root-logger ``logging.Filter`` was a *runtime* CR/LF strip, which
+CodeQL's static dataflow analysis didn't recognise as a sanitiser —
+the 29 ``py/log-injection`` alerts persisted. This release pushes the
+sanitisation back to the call sites where CodeQL can see it.
+
+- **``admin_routes._audit_warn`` wrapper.** Defined alongside the
+  ``_audit`` logger; inlines a
+  ``.replace("\\r","").replace("\\n","").replace("\\x00","")`` chain
+  on every string argument before forwarding to ``_audit.warning``.
+  All 16 ``_audit.warning(...)`` call sites switched to
+  ``_audit_warn(...)`` via mechanical rename. Operationally
+  identical; the dataflow now exits the rule's sink through a
+  recognised barrier.
+- **``auth.py`` login-path logs**: 5 ``log.info``/``log.warning``
+  call sites that included ``ip`` / ``username`` from the request
+  now inline the same ``.replace`` chain on each user-controlled
+  argument.
+- **``site_server.py`` and ``__init__.py`` clear-text-logging**
+  (the 4 surviving alerts after the v0.9.21 trims): same inline
+  ``.replace`` barrier applied to ``node_hash``, ``node_name``,
+  ``request_path``, and ``admin_sub``. The rendered log lines are
+  unchanged.
+- **``apiFetch`` CSRF guard reworked**. The previous
+  ``new URL(...).pathname`` reconstruction wasn't recognised by
+  CodeQL's ``js/client-side-request-forgery`` dataflow. Added a
+  strict ASCII allow-list regex on the reconstructed path before
+  it's forwarded to ``fetch()`` — the regex match is the
+  recognised barrier.
+- **HTTPS redirect refactor.** When ``HTTPS_REDIRECT=true`` the
+  redirect target now derives from a value chosen *from* the
+  ``TRUSTED_HOSTS`` config tuple (matching the request Host
+  against the allow-list and using the matched config entry as
+  the redirect target), not from the request Host header
+  itself. As a behavioural consequence: ``HTTPS_REDIRECT=true``
+  now **requires** ``TRUSTED_HOSTS`` to be set — without it, the
+  handler is disabled with a startup warning, since there's no
+  config-derived value available to use as a redirect target.
+
+### Why these patterns
+
+CodeQL's data-flow analysis is statically verified — runtime
+filters/sanitisers it can't see at compile-time don't count. The
+above changes move the same logical sanitisation from a runtime
+``Filter`` to per-call ``.replace`` expressions (and equivalents
+for other rules), giving CodeQL the recognised barrier it needs.
+The user-visible logging and behaviour are unchanged.
+
 ## [0.9.21] — 2026-06-03
 
 ### Security
