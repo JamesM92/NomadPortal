@@ -80,7 +80,11 @@ def create_app(
         admin_user = cfg.get("ADMIN_USERNAME", "admin")
         admin_sub  = f"local:{admin_user}"
         try:
-            entry = app.config["IDENTITY_STORE"].ensure_for_user(
+            # Side-effect call: ensure_for_user creates the identity if
+            # absent. We don't need the returned record any more — v0.9.23
+            # dropped admin_sub / entry["id"] from the log line below to
+            # quiet a CodeQL false-positive on identity logging.
+            app.config["IDENTITY_STORE"].ensure_for_user(
                 admin_sub, admin_user,
             )
             # admin_sub is constructed from the ADMIN_USERNAME env var.
