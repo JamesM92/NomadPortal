@@ -852,6 +852,68 @@ class NodeBrowser:
         except Exception:
             return None
 
+    def get_diagnostics(self, hash_hex: str) -> dict:
+        """Network-routing snapshot for a single destination.
+
+        Returns a dict with the fields the dashboard / node-info popup
+        can render in one round trip:
+
+          * ``hops``           — integer hop count, or None if no route
+          * ``has_path``       — bool, True if RNS.Transport has a path entry
+          * ``next_hop_iface`` — name of the interface the first packet
+                                 would leave through, or None
+          * ``is_local``       — True when the destination is hosted in
+                                 this process (no transit needed)
+
+        All errors swallow to ``None`` for the field they affect — this
+        is best-effort introspection, never throws.
+        """
+        RNS = self._rns
+        out = {
+            "hops":           None,
+            "has_path":       False,
+            "next_hop_iface": None,
+            "is_local":       False,
+        }
+        try:
+            dest_hash = bytes.fromhex(hash_hex)
+        except ValueError:
+            return out
+
+        try:
+            for d in RNS.Transport.destinations:
+                if getattr(d, "hash", None) == dest_hash:
+                    out["is_local"] = True
+                    out["hops"]     = 0
+                    out["has_path"] = True
+                    return out
+        except Exception:
+            pass
+
+        try:
+            out["has_path"] = bool(RNS.Transport.has_path(dest_hash))
+        except Exception:
+            pass
+
+        try:
+            hops = RNS.Transport.hops_to(dest_hash)
+            if hops is not None and hops < _HOPS_UNKNOWN:
+                out["hops"] = int(hops)
+        except Exception:
+            pass
+
+        # next_hop_interface returns the RNS.Interface instance the
+        # first packet would leave through. We only surface its .name
+        # (display string) — the object itself isn't JSON-friendly.
+        try:
+            iface = RNS.Transport.next_hop_interface(dest_hash)
+            if iface is not None:
+                out["next_hop_iface"] = getattr(iface, "name", str(iface))
+        except Exception:
+            pass
+
+        return out
+
     def _register_node(self, destination_hash: bytes, app_data: Optional[bytes]):
         hash_hex = destination_hash.hex()
         name = "Unnamed Node"

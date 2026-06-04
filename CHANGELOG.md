@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.25] — 2026-06-04
+
+### Added
+
+Tier-1 cross-pollination from
+[fr33n0w/rBrowser](https://github.com/fr33n0w/rBrowser) — three
+small additive UX wins, no architectural disruption.
+
+- **Per-page network diagnostics strip** above the rendered Micron
+  content. Shows the destination's:
+  - hop count (already known by the sidebar, now repeated where the
+    user's actually looking),
+  - next-hop interface name (e.g. ``MichMesh``, ``LoRa``) so it's
+    obvious which interface the traffic leaves through,
+  - **"Ping" button** for an on-demand link-establishment latency
+    measurement (login-gated, rate-limited at 30/min per IP).
+- **Sidebar sort dropdown** alongside the existing filter input:
+  Recent first (default, was the only behaviour previously) /
+  A → Z / Closest first / Most announced. Pure client-side sort
+  over the existing node list.
+- **Breadcrumb strip** above ``#page-content`` showing
+  ``Node name > /page/path``. Was implicit in the address bar and
+  topbar before; this surfaces it more visibly without competing
+  with the page for attention.
+
+### Endpoints
+
+- ``GET /api/nodes/<hash>/diagnostics`` (public read) —
+  ``{hops, has_path, next_hop_iface, is_local}``. No network round
+  trip; cheap to call from the breadcrumb on every navigation.
+- ``POST /api/nodes/<hash>/ping`` (login-required, rate-limited
+  30/min/IP) — moved out of ``/admin/...`` so non-admin users can
+  use the breadcrumb Ping button while keeping the packet emission
+  behind authentication.
+
 ## [0.9.24] — 2026-06-04
 
 ### Changed

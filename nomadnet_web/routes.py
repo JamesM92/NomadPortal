@@ -356,6 +356,31 @@ def api_node(hash_hex: str):
     return jsonify(node)
 
 
+@bp.get("/api/nodes/<hash_hex>/diagnostics")
+def api_node_diagnostics(hash_hex: str):
+    """Snapshot RNS routing state for a node — hops, has-path, next-hop
+    interface, is-local. Cheap, no network round-trip. Public read so
+    the node-info popup works for guests too; the live-ping endpoint
+    (which DOES emit packets) stays behind login."""
+    diag = _browser().get_diagnostics(hash_hex)
+    return jsonify(diag)
+
+
+@bp.post("/api/nodes/<hash_hex>/ping")
+@login_required
+def api_node_ping(hash_hex: str):
+    """Live link-establishment latency measurement. Requires login —
+    it sends actual packets on the mesh, so unauthenticated callers
+    could be used to amplify probing of arbitrary destinations."""
+    ip = request.remote_addr or "unknown"
+    if not rate_limit.check(f"ping:{ip}", 30, 60):
+        return jsonify({"error": "Rate limit exceeded — slow down"}), 429
+    ms, error = _browser().ping_node(hash_hex)
+    if error:
+        return jsonify({"error": error}), 503
+    return jsonify({"ms": ms})
+
+
 # ---------------------------------------------------------------------------
 # Page fetching & rendering
 # ---------------------------------------------------------------------------

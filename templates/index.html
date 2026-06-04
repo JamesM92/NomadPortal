@@ -189,6 +189,12 @@
       </div>
       <div id="node-filter-wrap">
         <input id="node-filter" type="text" placeholder="Filter nodes…">
+        <select id="node-sort" title="Sort discovered nodes">
+          <option value="last_seen">Recent first</option>
+          <option value="name">A → Z</option>
+          <option value="hops">Closest first</option>
+          <option value="announces">Most announced</option>
+        </select>
       </div>
       <ul id="node-list">
         <li class="node-placeholder">Waiting for announces…</li>
@@ -341,6 +347,19 @@
 
   <!-- Content area -->
   <section id="content-wrap">
+
+    <!-- Breadcrumb + per-page diagnostics. Hidden on the welcome
+         screen, surfaced once a page is loaded. -->
+    <div id="page-breadcrumb" hidden>
+      <span id="page-node-name" class="bc-node"></span>
+      <span class="bc-sep">›</span>
+      <span id="page-path" class="bc-path">/</span>
+      <div class="bc-spacer"></div>
+      <span id="page-diag-hops" class="bc-chip" title="Hops to this node on the Reticulum mesh" hidden></span>
+      <span id="page-diag-iface" class="bc-chip" title="Outbound interface for the next packet" hidden></span>
+      <span id="page-diag-ping" class="bc-chip" hidden></span>
+      <button id="btn-page-ping" class="bc-btn" title="Measure round-trip latency" hidden>Ping</button>
+    </div>
 
     <div id="page-content">
       <div id="welcome">

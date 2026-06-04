@@ -377,6 +377,75 @@ body {
   position: relative;
 }
 
+/* Breadcrumb + diagnostics strip above #page-content. Inconspicuous
+ * by design — it should give "where am I, what's the network state"
+ * info without competing with the page itself for attention. */
+#page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+#page-breadcrumb[hidden] { display: none; }
+.bc-node {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.bc-sep { color: var(--text-dim); opacity: 0.5; }
+.bc-path {
+  font-family: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.bc-spacer { flex: 1; }
+.bc-chip {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.bc-chip[hidden] { display: none; }
+.bc-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.bc-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.bc-btn:disabled { opacity: 0.4; cursor: default; }
+.bc-btn[hidden] { display: none; }
+
+#node-sort {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+  margin-top: 4px;
+  width: 100%;
+  cursor: pointer;
+}
+
 #topbar-actions {
   display: flex;
   align-items: center;

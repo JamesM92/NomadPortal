@@ -45,6 +45,7 @@ const btnFwd       = $('btn-forward');
 const btnRefresh   = $('btn-refresh-page');
 const nodeList     = $('node-list');
 const nodeFilter   = $('node-filter');
+const nodeSort     = $('node-sort');
 const nodeCount    = $('node-count');
 const pageContent  = $('page-content');
 const pageError    = $('page-error');
@@ -208,11 +209,31 @@ function renderNodeList() {
   hdr2.textContent = 'Nodes';
   nodeList.appendChild(hdr2);
 
-  // Main list omits auto-favorites since they're already shown above.
-  const byLastSeen = [...visible]
-    .filter(n => !autoFavHashes.has(n.hash))
-    .sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
-  for (const node of byLastSeen) nodeList.appendChild(makeNodeItem(node));
+  // Sort key selected via the sidebar dropdown. Defaults to "last_seen"
+  // (descending = most-recent first) so existing users see no change
+  // until they pick a different option.
+  //
+  // - "last_seen":   newest announce first (existing behaviour)
+  // - "name":        case-insensitive A → Z by node name
+  // - "hops":        closest first (unknown hops sink to the end)
+  // - "announces":   most-active first (RNS counter via total_announces)
+  const sortKey = (nodeSort && nodeSort.value) || 'last_seen';
+  const sortedNodes = [...visible].filter(n => !autoFavHashes.has(n.hash));
+  if (sortKey === 'name') {
+    sortedNodes.sort((a, b) =>
+      (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
+  } else if (sortKey === 'hops') {
+    sortedNodes.sort((a, b) => {
+      const ah = a.hops == null ? Infinity : a.hops;
+      const bh = b.hops == null ? Infinity : b.hops;
+      return ah - bh;
+    });
+  } else if (sortKey === 'announces') {
+    sortedNodes.sort((a, b) => (b.announce_count || 0) - (a.announce_count || 0));
+  } else {
+    sortedNodes.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
+  }
+  for (const node of sortedNodes) nodeList.appendChild(makeNodeItem(node));
 }
 
 function makeNodeItem(node) {
@@ -492,6 +513,82 @@ function _displayAddress(url) {
   const m = s.match(/^([0-9a-f]{2,128})(\/.*)$/i);
   if (m) return m[1] + ':' + m[2];
   return s;
+}
+
+// ---------------------------------------------------------------------------
+// Breadcrumb + per-page network diagnostics
+// ---------------------------------------------------------------------------
+// Surfaces hops + next-hop interface for the current page's destination
+// in the breadcrumb strip above #page-content. The ping button issues a
+// live link-establishment latency measurement on demand (requires login;
+// rate-limited server-side).
+
+const _bc = {
+  el:   () => $('page-breadcrumb'),
+  hops: () => $('page-diag-hops'),
+  iface:() => $('page-diag-iface'),
+  ping: () => $('page-diag-ping'),
+  btn:  () => $('btn-page-ping'),
+};
+
+function _hopsLabel(hops) {
+  if (hops == null) return 'no route';
+  if (hops === 0)  return 'local';
+  return hops === 1 ? '1 hop' : `${hops} hops`;
+}
+
+async function _updateBreadcrumb(hash) {
+  const bar = _bc.el();
+  if (!bar) return;
+  bar.hidden = false;
+  // Always reset the ping chip on a page change; the btn-page-ping
+  // dataset.hash gets re-stamped so the next click measures the right
+  // destination.
+  const pingChip = _bc.ping(); if (pingChip) { pingChip.hidden = true; pingChip.textContent = ''; }
+  const btn = _bc.btn();
+  if (btn) {
+    btn.hidden  = !hash;
+    btn.disabled = false;
+    btn.dataset.hash = hash || '';
+  }
+  if (!hash) return;
+  try {
+    const diag = await apiFetch(`/api/nodes/${hash}/diagnostics`);
+    const hopsChip = _bc.hops();
+    if (hopsChip) {
+      hopsChip.textContent = _hopsLabel(diag.hops);
+      hopsChip.hidden = false;
+    }
+    const ifaceChip = _bc.iface();
+    if (ifaceChip) {
+      if (diag.next_hop_iface) {
+        ifaceChip.textContent = `via ${diag.next_hop_iface}`;
+        ifaceChip.hidden = false;
+      } else {
+        ifaceChip.hidden = true;
+      }
+    }
+  } catch (_) {
+    // Diagnostics are decorative — silent on failure.
+  }
+}
+
+async function _pingCurrentPage() {
+  const btn = _bc.btn();
+  if (!btn || btn.disabled) return;
+  const hash = btn.dataset.hash;
+  if (!hash) return;
+  btn.disabled = true;
+  const chip = _bc.ping();
+  if (chip) { chip.hidden = false; chip.textContent = 'pinging…'; }
+  try {
+    const res = await apiFetch(`/api/nodes/${hash}/ping`, { method: 'POST' });
+    if (chip) chip.textContent = `${res.ms} ms`;
+  } catch (e) {
+    if (chip) chip.textContent = `ping failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -942,6 +1039,7 @@ async function fetchPage(url, extraFields = null) {
 
     if (pageNodeName) pageNodeName.textContent = getNodeName(data.hash);
     if (pagePath)     pagePath.textContent = data.path || '/';
+    _updateBreadcrumb(data.hash);
     addrBar.value = _displayAddress(url);
 
     _lastPage = {
@@ -1025,6 +1123,8 @@ btnRefresh.addEventListener('click', () => {
   const current = state.history[state.historyIndex];
   if (current) navigateTo(current, false);
 });
+const _btnPagePing = $('btn-page-ping');
+if (_btnPagePing) _btnPagePing.addEventListener('click', _pingCurrentPage);
 
 // ---------------------------------------------------------------------------
 // Address bar
@@ -1084,6 +1184,7 @@ document.addEventListener('keydown', e => {
 // Node filter
 // ---------------------------------------------------------------------------
 nodeFilter.addEventListener('input', renderNodeList);
+if (nodeSort) nodeSort.addEventListener('change', renderNodeList);
 
 // ---------------------------------------------------------------------------
 // Raw toggle
