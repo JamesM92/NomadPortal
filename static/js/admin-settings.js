@@ -136,6 +136,17 @@
       payload.site_name     = document.getElementById('s-site-name').value.trim();
       payload.default_node  = document.getElementById('s-default-node').value.trim().toLowerCase();
       payload.abuse_contact = document.getElementById('s-abuse-contact').value.trim();
+      // Site-hosting tri-state. Empty string from the dropdown means
+      // "fall through to env var" — send as null so the server keeps
+      // the legacy SITE_HOSTING / SITE_ANNOUNCE env defaults.
+      function _triState(id) {
+        var raw = document.getElementById(id).value;
+        if (raw === 'true') return true;
+        if (raw === 'false') return false;
+        return null;
+      }
+      payload.hosting_enabled = _triState('s-hosting-enabled');
+      payload.auto_announce   = _triState('s-auto-announce');
       var res = await fetch('/admin/api/ui/settings', {
         method: 'POST',
         headers: {

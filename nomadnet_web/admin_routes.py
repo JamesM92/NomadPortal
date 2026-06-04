@@ -742,6 +742,8 @@ def api_ui_settings_save():
         "app_title", "site_name", "default_node",
         "access_mode", "lockdown_node",  # presets / backwards-compat alias
         "abuse_contact",
+        # Site-server toggles (None = "fall through to env var")
+        "hosting_enabled", "auto_announce",
     )
     patch = {k: data[k] for k in allowed if k in data}
 
@@ -779,6 +781,21 @@ def api_ui_settings_save():
         if browser:
             browser._hosted_name = new_name
         site_server.announce()
+
+    # Apply auto-announce toggle immediately when the live SiteServer is up.
+    # Background loop in site_server._background_jobs() reads
+    # self._auto_announce per iteration, so flipping it propagates without
+    # any extra signalling. The hosting_enabled toggle is documented as
+    # "restart required" — disabling the SiteServer mid-flight would tear
+    # down registered destinations and leave the in-process state weird.
+    if site_server is not None and "auto_announce" in patch:
+        new_ann = patch["auto_announce"]
+        if new_ann is not None:
+            site_server._auto_announce = bool(new_ann)
+            if new_ann:
+                # First flip-on — fire an immediate announce so the network
+                # sees us right away instead of waiting up to 6h.
+                site_server.announce()
 
     _audit_warn("ui_settings_save: actor=%s ip=%s patch=%s",
                    getattr(current_user, "name", "?"), request.remote_addr, patch)

@@ -1143,6 +1143,9 @@ addrBar.addEventListener('keydown', e => {
 // Global keyboard shortcuts
 //   /          focus the address bar (skipped when typing in another input)
 //   Ctrl+L     focus the address bar (browser-style)
+//   Alt+R      refresh current page (re-fetch the active history entry)
+//   Alt+F      toggle favorite on the current page (requires login)
+//   Alt+B      back (mirrors the topbar Back button)
 //   Esc        close any open modal, then blur the address bar
 // ---------------------------------------------------------------------------
 function _isTypingTarget(el) {
@@ -1165,6 +1168,34 @@ document.addEventListener('keydown', e => {
     addrBar.focus();
     addrBar.select();
     return;
+  }
+  // Alt-prefixed power-user shortcuts. Alt+letter combos don't have a
+  // browser-default meaning we'd clobber, so we don't gate them on
+  // "is the user typing in an input" — useful for, e.g., refreshing a
+  // page while a form field is focused. We still skip when no key is
+  // truthy (e.g., a stray Alt press) and when both Ctrl/Meta are held
+  // (those are the browser-shortcut namespace).
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      const current = state.history[state.historyIndex];
+      if (current) navigateTo(current, false);
+      return;
+    }
+    if (e.key === 'b' || e.key === 'B') {
+      e.preventDefault();
+      if (state.historyIndex > 0) {
+        state.historyIndex--;
+        navigateTo(state.history[state.historyIndex], false);
+      }
+      return;
+    }
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      const btn = $('btn-fav-page');
+      if (btn && !btn.hidden) btn.click();
+      return;
+    }
   }
   // Esc → close any visible modal; then blur the address bar
   if (e.key === 'Escape') {

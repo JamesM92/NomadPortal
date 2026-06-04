@@ -56,6 +56,39 @@
   </div>
 
   <div class="form-field" style="margin-bottom:18px;">
+    <label>Site hosting</label>
+    <select id="s-hosting-enabled" style="max-width:260px;">
+      <option value=""     {% if settings.hosting_enabled is none %}selected{% endif %}>Use env var (SITE_HOSTING)</option>
+      <option value="true" {% if settings.hosting_enabled == True %}selected{% endif %}>Enabled — host a NomadNet node</option>
+      <option value="false"{% if settings.hosting_enabled == False %}selected{% endif %}>Disabled — pure browser mode</option>
+    </select>
+    <span class="dim" style="margin-top:4px;">
+      Whether this container hosts its own NomadNet node. Disabling means
+      pages aren't served and no destination is registered — pure browser
+      mode. Changing this <strong>requires a container restart</strong>;
+      the SiteServer can't be torn down mid-flight without leaving
+      orphaned destinations.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Auto-announce</label>
+    <select id="s-auto-announce" style="max-width:260px;">
+      <option value=""     {% if settings.auto_announce is none %}selected{% endif %}>Use env var (SITE_ANNOUNCE)</option>
+      <option value="true" {% if settings.auto_announce == True %}selected{% endif %}>On — broadcast every 6 hours</option>
+      <option value="false"{% if settings.auto_announce == False %}selected{% endif %}>Off — silent host</option>
+    </select>
+    <span class="dim" style="margin-top:4px;">
+      When on, the node broadcasts its presence to the mesh every 6 hours.
+      When off, the site is reachable to anyone who knows the destination
+      hash but the node is invisible to passive announce listeners.
+      Saving takes effect immediately and (when flipping on) sends a
+      fresh announce. The <em>"Announce now"</em> button on the dashboard
+      always works regardless of this setting.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
     <label>Default node (loaded on startup)</label>
     <input type="text" id="s-default-node" value="{{ settings.default_node | e }}"
            style="max-width:480px;font-size:12px;" maxlength="128"

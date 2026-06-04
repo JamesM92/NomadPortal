@@ -7,7 +7,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.25"
+__version__ = "0.9.26"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -120,27 +120,42 @@ def create_app(
     app.config["USER_STORE"]  = UserStore(users_yml)
     app.config["UI_SETTINGS"] = UISettings(config_dir)   # must be before site server
 
-    # Site hosting — start node server unless explicitly disabled. Operators
-    # running NomadPortal as a pure browser (no hosted content, minimal
-    # network footprint) set SITE_HOSTING=false.
+    # Site hosting — start node server unless explicitly disabled. The
+    # operator can configure this at two layers:
+    #   1. Admin → Settings UI (persisted to ui_settings.json) — wins
+    #      when set explicitly (True/False)
+    #   2. SITE_HOSTING / SITE_ANNOUNCE env vars — used when the UI
+    #      value is unset (None)
+    # The UI-over-env precedence lets ops toggle without editing
+    # docker-compose and restarting the host; the env var still works
+    # for fresh installs that haven't visited the admin page yet.
     pages_dir = cfg.get("SITE_PAGES_DIR", "/site/pages")
     files_dir = cfg.get("SITE_FILES_DIR", "/site/files")
-    hosting_raw = str(cfg.get("SITE_HOSTING", "true")).strip().lower()
-    hosting_enabled = hosting_raw not in ("0", "false", "no", "off", "")
+    ui_all    = app.config["UI_SETTINGS"].get_all()
+
+    ui_hosting = ui_all.get("hosting_enabled")
+    if ui_hosting is None:
+        hosting_raw     = str(cfg.get("SITE_HOSTING", "true")).strip().lower()
+        hosting_enabled = hosting_raw not in ("0", "false", "no", "off", "")
+    else:
+        hosting_enabled = bool(ui_hosting)
+
+    ui_announce = ui_all.get("auto_announce")
+    if ui_announce is None:
+        announce_raw  = str(cfg.get("SITE_ANNOUNCE", "false")).strip().lower()
+        auto_announce = announce_raw in ("1", "true", "yes", "on")
+    else:
+        auto_announce = bool(ui_announce)
+
     if not hosting_enabled:
-        log.info("Site hosting disabled via SITE_HOSTING env var")
+        log.info("Site hosting disabled (UI/env config)")
         app.config["SITE_SERVER"] = None
     elif os.path.isdir(pages_dir):
         from .site_server import SiteServer
         identity_file = os.path.join(rns_dir, "site_identity.id")
-        saved_name    = app.config["UI_SETTINGS"].get_all().get("site_name", "")
+        saved_name    = ui_all.get("site_name", "")
         # node_name=None → SiteServer auto-generates "NomadPortal-<2 hex>"
         # from the destination hash so co-located instances stay distinct.
-        # auto_announce=False by default — vanilla NomadPortal installs are
-        # silent hosts. Operators who actually publish a site flip
-        # SITE_ANNOUNCE=true (or use the saved UI setting once that lands).
-        announce_raw = str(cfg.get("SITE_ANNOUNCE", "false")).strip().lower()
-        auto_announce = announce_raw in ("1", "true", "yes", "on")
         site_server   = SiteServer(
             pages_dir=pages_dir,
             files_dir=files_dir,

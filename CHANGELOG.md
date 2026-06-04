@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.26] — 2026-06-04
+
+### Added
+
+Two small UX wins working through the deferred-features backlog
+(see memory: future-features-backlog).
+
+- **Admin → Settings toggles for site hosting + auto-announce**, in
+  addition to the existing ``SITE_HOSTING`` / ``SITE_ANNOUNCE`` env
+  vars. Tri-state: "Use env var" (default — unchanged behaviour),
+  "Enabled / On", "Disabled / Off". UI values, when set explicitly,
+  win over the env var so operators can flip the toggles without
+  editing docker-compose and restarting the host.
+  - ``auto_announce`` takes effect immediately — flipping on fires a
+    fresh announce; flipping off stops the 6-hourly broadcast on the
+    next iteration of the background loop. The dashboard
+    "Announce now" button always works regardless.
+  - ``hosting_enabled`` is **restart-required** — disabling the
+    SiteServer mid-flight would tear down registered destinations
+    and leave the in-process state inconsistent. The UI shows the
+    persisted setting; a restart applies it.
+- **Keyboard shortcuts** for power users:
+  - ``Alt+R`` — refresh the current page (re-fetches the active
+    history entry, same as the toolbar refresh button)
+  - ``Alt+B`` — back (mirrors the toolbar Back button)
+  - ``Alt+F`` — toggle favourite on the current page (requires
+    login; no-op when the fav button is hidden)
+
+  Alt-prefixed bindings don't fire while a Ctrl / Meta / Shift
+  modifier is held — those are the browser-shortcut namespace. They
+  do fire while a form field is focused (useful for refreshing
+  mid-form-fill).
+
+### Declined
+
+- **Link-href URL leak** — re-evaluated and decided against fixing.
+  The "leak" (right-click → copy link shows the
+  ``/page?url=hash%3A//...`` destination) is also what makes
+  share-link work usefully on NomadPortal: a recipient on the same
+  portal lands on the right node. The privacy threat model is narrow
+  (someone reading your clipboard learns which Reticulum nodes
+  you're browsing), and fixing via ``href="#" + data-url="..."``
+  would break that working UX for a marginal gain. Stays as
+  documented behaviour in [SECURITY.md](SECURITY.md).
+
 ## [0.9.25] — 2026-06-04
 
 ### Added

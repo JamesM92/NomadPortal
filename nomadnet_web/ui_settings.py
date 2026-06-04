@@ -99,6 +99,12 @@ class UISettings:
         "site_name":           "",
         "default_node":        "",
         "abuse_contact":       "",
+        # Site-server toggles (None = "fall through to env var"; True/False
+        # = explicit override). Operators can flip these via Admin →
+        # Settings without rewriting docker-compose; existing env-var
+        # config still wins when the UI value is None.
+        "hosting_enabled":     None,
+        "auto_announce":       None,
         # Access controls (defaults seeded from the "locked" preset — safe
         # default for fresh installs; operator can relax via Admin → Settings)
         **_PRESETS["locked"],
@@ -150,6 +156,15 @@ class UISettings:
                 self._data["app_title"] = str(patch["app_title"]).strip()[:128] or "`F4af■ NomadPortal`f"
             if "site_name" in patch:
                 self._data["site_name"] = str(patch["site_name"]).strip()[:64]
+            # Tri-state: None means "use env-var" (the default); True/False
+            # explicitly overrides. Empty string from a form posts as None.
+            for k in ("hosting_enabled", "auto_announce"):
+                if k in patch:
+                    raw = patch[k]
+                    if raw in (None, ""):
+                        self._data[k] = None
+                    else:
+                        self._data[k] = bool(raw)
             if "default_node" in patch:
                 v = str(patch["default_node"]).strip().lower()
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
