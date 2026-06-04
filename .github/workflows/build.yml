@@ -2,7 +2,12 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
+    # `dev` included so in-progress lint/test feedback runs on every
+    # dev push, not just at PR / merge-to-main time. The heavier
+    # security.yml and codeql.yml workflows stay on the main + PR
+    # path — they're slower and less likely to regress per-commit;
+    # the PR-trigger covers them when dev is promoted.
+    branches: [main, master, dev]
   pull_request:
     branches: [main, master]
 
