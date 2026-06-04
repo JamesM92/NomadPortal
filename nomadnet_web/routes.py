@@ -60,8 +60,25 @@ def _validate_field_data(field_data):
 
 
 def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
-    """Wrap canonical NomadNet URLs in this app's /page?url= route."""
+    """Wrap canonical NomadNet URLs in this app's /page?url= route.
+
+    File-link special case: Micron2HTML's default resolver returns ``"#"``
+    for any URL containing ``/file/`` so external binaries don't render
+    as live links. NomadPortal handles file downloads through a separate
+    confirm-then-fetch flow (see /api/file/fetch), so we cheat by
+    re-running canonicalisation with ``/file/`` rewritten to ``/page/``
+    to bypass the block, then swapping back. Avoids re-implementing the
+    URL canonicalisation logic locally.
+    """
     canonical = default_url_resolver(url, node_hash, base_path)
+    if canonical == "#" and "/file/" in url:
+        unblocked = default_url_resolver(
+            url.replace("/file/", "/page/", 1),
+            node_hash, base_path,
+        )
+        if unblocked.startswith("hash://"):
+            file_canonical = unblocked.replace("/page/", "/file/", 1)
+            return f"/file?url={urllib.parse.quote(file_canonical, safe='')}"
     if canonical.startswith("hash://"):
         return f"/page?url={urllib.parse.quote(canonical, safe='')}"
     return canonical
@@ -259,6 +276,48 @@ def api_status():
         "cache": cache.stats(),
         "uptime": time.time() - current_app.config["START_TIME"],
         "read_only": True,
+    })
+
+
+@bp.get("/healthz")
+def healthz():
+    """Operational healthcheck — verifies RNS routing is functional, not
+    just that gunicorn is listening.
+
+    A container with broken RNS would otherwise report `healthy` (because
+    `/api/status` returns 200) while being unable to actually serve any
+    NomadNet content. Returns 200 only when at least one configured
+    interface is online; 503 otherwise so Docker's healthcheck reflects
+    real availability.
+    """
+    browser = current_app.config.get("BROWSER")
+    if browser is None:
+        return jsonify({"status": "starting",
+                        "reason": "browser not initialised"}), 503
+
+    try:
+        status = browser.get_status()
+    except Exception as exc:
+        return jsonify({"status": "error", "reason": str(exc)}), 503
+
+    interfaces = status.get("interfaces") or []
+    if not interfaces:
+        return jsonify({"status": "degraded",
+                        "reason": "no interfaces configured",
+                        "interfaces": []}), 503
+
+    online = [i for i in interfaces if i.get("online")]
+    if not online:
+        return jsonify({"status": "degraded",
+                        "reason": "no interfaces online",
+                        "interfaces": interfaces}), 503
+
+    return jsonify({
+        "status": "ok",
+        "interfaces_online": len(online),
+        "interfaces_total":  len(interfaces),
+        "nodes_discovered":  status.get("nodes_discovered", 0),
+        "uptime":            time.time() - current_app.config["START_TIME"],
     })
 
 
@@ -613,6 +672,253 @@ def api_page_poll():
         authenticated=_can_interact(node_hash),
     )
     return jsonify({**base, "html": html_body, "micron": micron_text})
+
+
+# ---------------------------------------------------------------------------
+# File downloads
+# ---------------------------------------------------------------------------
+# File transfers reuse the page-fetch job infrastructure in browser.py — the
+# only difference at the transport layer is the /file/ vs /page/ path prefix
+# on the NomadNet side. JS calls /api/file/fetch to start a job, polls
+# /api/file/poll for progress, then triggers the browser save dialog by
+# navigating to /api/file/download?id=<job_id>. The result is served with
+# Content-Disposition: attachment so users see the native download UI.
+#
+# Confirm-dialog rationale: file fetches over Reticulum can be slow (LoRa
+# multi-hop networks measure throughput in kbps) and may pull arbitrary
+# binaries from untrusted nodes. The frontend shows a confirm dialog with
+# the filename + MIME type before initiating the fetch; size is reported
+# during the fetch as bytes accumulate.
+
+import mimetypes
+
+
+@bp.post("/api/file/fetch")
+def api_file_fetch_start():
+    """Kick off a background file fetch and return a job_id.
+
+    Body (JSON):
+        url    — full nomadnet URL with /file/ prefix
+                 (e.g. hash://<node_hash>/file/foo.zip)
+        hash   — node destination hash (alternative to full URL)
+        path   — file path within the node, starting with /file/
+
+    Returns: {"job_id": str, "filename": str, "mime_type": str}.
+    `filename` and `mime_type` are derived from the URL path; the actual
+    transferred bytes are not inspected until the fetch completes.
+    """
+    ip = request.remote_addr or "unknown"
+    if not rate_limit.check(f"file:{ip}", 20, 60):
+        return jsonify({"error": "Rate limit exceeded — slow down"}), 429
+
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "")
+    node_hash = data.get("hash", "")
+    path = data.get("path", "")
+
+    if url:
+        node_hash, path = _parse_nomadnet_url(url)
+    if not node_hash:
+        abort(400, description="node hash required")
+    if "/file/" not in path:
+        abort(400, description="path must contain /file/")
+
+    if not _can_browse(node_hash):
+        if not current_user.is_authenticated:
+            return jsonify({"error": "Login required to fetch files from external nodes"}), 401
+        return jsonify({"error": "Fetching from external nodes is restricted by the administrator"}), 403
+
+    if _browser().is_blocked(node_hash):
+        return jsonify({"error": "This node has been blocked by the administrator."}), 403
+
+    # Derive filename and MIME type from the URL for the confirm dialog.
+    # NomadNet doesn't transmit Content-Type — extension is the only signal
+    # we have without inspecting the bytes after fetch.
+    filename = path.rsplit("/", 1)[-1] or "download"
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    # Local-site short-circuit. RNS loopback links to our own destination
+    # don't reliably complete (the link.request never sees a response
+    # callback when both sides are in this process), so fetch the bytes
+    # straight off disk through site_server.files_dir() instead. Mirrors
+    # the local short-circuit in api_page_fetch_start. The scan still
+    # runs — local files are scanned identically to remote ones so the
+    # admin can test the scan UX without needing a remote node.
+    site_server = current_app.config.get("SITE_SERVER")
+    is_local = site_server and site_server.node_hash() == node_hash.lower()
+    if is_local:
+        import os, secrets
+        files_root = os.path.realpath(site_server.files_dir())
+        rel        = path[len("/file/"):].lstrip("/")
+        file_path  = os.path.realpath(os.path.join(files_root, rel))
+        if not file_path.startswith(files_root + os.sep) and file_path != files_root:
+            abort(400, description="invalid file path")
+        if not os.path.isfile(file_path):
+            return jsonify({"error": "file not found on local site"}), 404
+        try:
+            with open(file_path, "rb") as fh:
+                content = fh.read()
+        except OSError as exc:
+            return jsonify({"error": f"could not read file: {exc}"}), 500
+
+        scan_dict   = None
+        local_error = None
+        scanner     = getattr(_browser(), "scanner", None)
+        scan_required = getattr(_browser(), "scan_required", False)
+        if scanner is not None:
+            try:
+                scan = scanner.scan(content, filename)
+            except Exception as exc:
+                log.exception("Local-site scanner raised")
+                from .scanner import ScanResult
+                scan = ScanResult(
+                    verdict="unavailable",
+                    engine=getattr(scanner, "engine_name", "?"),
+                    detail=f"scanner exception: {exc}",
+                )
+            scan_dict = scan.to_dict()
+            if scan.blocked:
+                local_error = (
+                    f"Virus scan blocked download: "
+                    f"{scan.signature or 'malicious content detected'}"
+                )
+                content = None
+            elif scan.verdict == "unavailable" and scan_required:
+                local_error = (
+                    f"Virus scanner unavailable and VIRUS_SCAN=required "
+                    f"is set: {scan.detail or 'no detail'}"
+                )
+                content = None
+
+        job_id = secrets.token_hex(8)
+        with _browser()._jobs_lock:
+            _browser()._jobs[job_id] = {
+                "status":        "error" if local_error else "done",
+                "progress":      1.0,
+                "node_hash":     node_hash.lower(),
+                "path":          path,
+                "started":       time.time(),
+                "completed":     time.time(),
+                "content":       content,
+                "error":         local_error,
+                "response_size": len(content) if content is not None else 0,
+                "transfer_size": len(content) if content is not None else 0,
+                "scan_result":   scan_dict,
+            }
+        return jsonify({
+            "job_id":    job_id,
+            "filename":  filename,
+            "mime_type": mime_type,
+        })
+
+    # Remote — go through the normal async RNS fetch.
+    job_id = _browser().fetch_page_async(
+        node_hash, path,
+        identify_with=_identity_for_fetch(node_hash),
+    )
+    return jsonify({
+        "job_id":    job_id,
+        "filename":  filename,
+        "mime_type": mime_type,
+    })
+
+
+@bp.get("/api/file/poll")
+def api_file_poll():
+    """Poll a file-fetch job. Returns {status, progress, bytes_received}.
+
+    Distinct from /api/page/poll because the "done" payload here is a
+    *handoff* to /api/file/download rather than inline HTML — the
+    binary content is held in the job entry until /api/file/download
+    consumes it. Drop-on-error matches the page-poll semantics so
+    failed jobs don't accumulate.
+    """
+    job_id = request.args.get("id", "")
+    if not job_id:
+        return jsonify({"error": "id required"}), 400
+
+    job = _browser().get_job(job_id)
+    if not job:
+        return jsonify({"error": "unknown or expired job"}), 404
+
+    content = job.get("content")
+    # Once the response has been fully assembled, bytes_received matches
+    # len(content). While the resource is in flight, bytes_received tracks
+    # the RNS-reported `response_transfer_size` so the UI can show real
+    # progress instead of "0 B" the whole way down.
+    if content is not None:
+        bytes_received = len(content)
+    else:
+        bytes_received = int(job.get("transfer_size") or 0)
+    base = {
+        "status":         job["status"],
+        "progress":       round(job.get("progress", 0.0), 3),
+        "bytes_received": bytes_received,
+        "total_size":     int(job["response_size"]) if job.get("response_size") else None,
+        "scan_result":    job.get("scan_result"),
+    }
+
+    if job["status"] == "error":
+        err = job.get("error", "Unknown error")
+        _browser().drop_job(job_id)
+        return jsonify({**base, "error": err}), 503
+
+    return jsonify(base)
+
+
+@bp.get("/api/file/download")
+def api_file_download():
+    """Stream a completed file-fetch job as an attachment, then drop it.
+
+    The job is dropped after a successful read so the in-memory content
+    buffer doesn't linger past its useful life. If the client never hits
+    this endpoint, the periodic cleanup_jobs() sweep evicts the entry.
+
+    Defense in depth: even though the fetch worker clears `content` and
+    sets status=error on an infected scan result, double-check the scan
+    verdict here so a manually-crafted GET against a stale done-job ID
+    can't bypass the scanner.
+    """
+    from flask import Response
+    job_id = request.args.get("id", "")
+    if not job_id:
+        return jsonify({"error": "id required"}), 400
+
+    job = _browser().get_job(job_id)
+    if not job:
+        return jsonify({"error": "unknown or expired job"}), 404
+    if job["status"] != "done":
+        return jsonify({"error": f"job not ready (status={job['status']})"}), 409
+
+    scan = job.get("scan_result") or {}
+    if scan.get("verdict") == "infected":
+        _browser().drop_job(job_id)
+        return jsonify({
+            "error":     "Download blocked: virus scan flagged this file",
+            "signature": scan.get("signature", ""),
+        }), 403
+
+    content = job.get("content") or b""
+    path = job.get("path", "/")
+    filename = path.rsplit("/", 1)[-1] or "download"
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    _browser().drop_job(job_id)
+
+    resp = Response(content, mimetype=mime_type)
+    # RFC 5987 encoding for the filename — keeps non-ASCII names intact
+    # without breaking older browsers that ignore filename*.
+    safe_ascii = filename.encode("ascii", "replace").decode("ascii")
+    quoted_utf8 = urllib.parse.quote(filename, safe="")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="{safe_ascii}"; filename*=UTF-8\'\'{quoted_utf8}'
+    )
+    resp.headers["Content-Length"] = str(len(content))
+    return resp
 
 
 # ---------------------------------------------------------------------------

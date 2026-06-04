@@ -55,11 +55,80 @@ services:
       HTTPS_REDIRECT: "false"
 
       # ── Site hosting ────────────────────────────────────────────────
-      # Create ./site/pages/ and ./site/files/ on the host, then set:
-      SITE_NAME: "NomadPortal"
+      # Create ./site/pages/ and ./site/files/ on the host. Without any
+      # of the options below, the container hosts a *silent* NomadNet
+      # node — pages are served to anyone who knows the destination
+      # hash, but the node does not broadcast announces and its default
+      # name is "NomadPortal-<2 hex>" (last 2 chars of its hash) so
+      # multiple installs on the same network don't collide on a single
+      # generic name.
       SITE_PAGES_DIR: /site/pages
       SITE_FILES_DIR: /site/files
-      
+      #
+      # Uncomment SITE_NAME to override the auto-generated suffixed
+      # name with something descriptive — operators publishing curated
+      # content should set this. Leave it commented for the auto-suffix
+      # default. Visible to anyone who receives an announce from this
+      # node, and shown in other peers' node sidebars.
+      # SITE_NAME: "MyCoolSite"
+      #
+      # Set SITE_HOSTING=false to skip the hosted node entirely. The
+      # container then runs as a pure browser — no destination
+      # registered, no announces, no served pages. Useful for read-only
+      # NomadPortal deployments (you only browse other people's sites).
+      # SITE_HOSTING: "true"
+      #
+      # Set SITE_ANNOUNCE=true to broadcast a node announce every 6
+      # hours (the NomadNet default). Off by default to avoid 20
+      # vanilla NomadPortal installs spamming the announce stream of
+      # operators running curated content. Operators who actually
+      # publish a site should turn this on; readers should leave it
+      # off. The "Announce now" button in Admin → Dashboard always
+      # works regardless of this setting (one-shot, user-triggered).
+      # SITE_ANNOUNCE: "false"
+
+      # ── Virus scanning (file downloads) ─────────────────────────────
+      # File downloads from external NomadNet nodes can be scanned with
+      # ClamAV (clamd) before they reach the user. Off by default — the
+      # frontend pops a "no virus scan was performed" confirm before
+      # saving any file. To turn scanning on:
+      #
+      #   1. Run clamd somewhere NomadPortal can reach. The two common
+      #      patterns:
+      #
+      #      (a) Sidecar in this same compose stack — add a service
+      #          using clamav/clamav:latest, then set CLAMD_HOST to that
+      #          service's name (e.g. CLAMD_HOST=clamav) and leave
+      #          CLAMD_SOCKET empty. Reach over the internal Docker
+      #          network on port 3310. The image listens on TCP by
+      #          default, so no extra clamd.conf edits are needed.
+      #
+      #      (b) clamd running on the Docker host (apt install
+      #          clamav-daemon). Either bind-mount the Unix socket into
+      #          this container (volumes: - /var/run/clamav/clamd.ctl:
+      #          /var/run/clamav/clamd.ctl) and set CLAMD_SOCKET to that
+      #          path, OR enable clamd's TCP listener in
+      #          /etc/clamav/clamd.conf (TCPSocket 3310 + TCPAddr) and
+      #          point CLAMD_HOST at host.docker.internal.
+      #
+      #   2. Set VIRUS_SCAN=clamd to use it fail-open (downloads proceed
+      #      with a warning if the scanner is unreachable), or
+      #      VIRUS_SCAN=required to fail-closed (downloads blocked if
+      #      the scanner is unreachable).
+      #
+      #   3. Optionally cap the per-file size that gets scanned with
+      #      VIRUS_SCAN_MAX_BYTES (default 100 MB — anything larger is
+      #      passed through with a "too-large" verdict so the user still
+      #      gets the no-scan confirm).
+      #
+      # Enable by uncommenting the lines below and adjusting CLAMD_HOST
+      # or CLAMD_SOCKET. Leave CLAMD_SOCKET empty when using TCP.
+      #
+      # VIRUS_SCAN: "off"                            # off | clamd | required
+      # CLAMD_SOCKET: "/var/run/clamav/clamd.ctl"    # Unix socket (mutually exclusive with CLAMD_HOST)
+      # CLAMD_HOST: "clamav"                         # docker-compose service name, or hostname
+      # CLAMD_PORT: "3310"                           # clamd default
+      # VIRUS_SCAN_MAX_BYTES: "104857600"            # 100 MB; files above this are not scanned
 
       # ── OIDC / SSO ──────────────────────────────────────────────────
       # Leave empty to disable OIDC entirely (local admin login still works).

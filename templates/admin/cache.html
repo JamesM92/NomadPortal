@@ -28,4 +28,49 @@
     fetch from the node on next visit.
   </p>
 </div>
+
+<div class="section-title mt24">Reticulum Persistent State</div>
+
+<div class="stat-grid">
+  <div class="stat-box">
+    <div class="stat-label">Files on disk</div>
+    <div class="stat-value">{{ rns_storage.files }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Storage size</div>
+    <div class="stat-value">
+      {% set b = rns_storage.bytes %}
+      {% if b >= 1048576 %}{{ '%.1f' % (b / 1048576) }} MB
+      {% elif b >= 1024 %}{{ '%.1f' % (b / 1024) }} KB
+      {% else %}{{ b }} B{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Reset RNS state</div>
+  <p class="dim" style="margin:0 0 12px;line-height:1.5;">
+    Moves <code>{{ rns_storage.path }}</code> aside to a timestamped
+    backup and re-initialises RNS with empty state. Use when RNS startup
+    hangs (large stale <code>destination_table</code> /
+    <code>known_destinations</code>) or path tables have drifted out of
+    sync with the network. The portal will be briefly unavailable while
+    the worker reloads; node and announce data will rebuild as new
+    announces arrive.
+  </p>
+  {% if rns_storage.present %}
+  <form method="post" action="{{ url_for('admin.cache_reset_rns') }}"
+        data-confirm="Move RNS state aside and reload the worker? The portal will be briefly unavailable.">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Reset RNS cache</button>
+  </form>
+  {% else %}
+  <p class="dim"><em>Storage directory not present — nothing to reset.</em></p>
+  {% endif %}
+  <p class="dim mt8" style="font-size:11px;">
+    Backups are kept as <code>storage.bak.&lt;unix-ts&gt;</code> alongside
+    the live directory. Delete them manually once you've confirmed RNS
+    is healthy.
+  </p>
+</div>
 {% endblock %}

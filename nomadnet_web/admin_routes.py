@@ -427,7 +427,8 @@ def node_ping(hash_hex: str):
 @admin_required
 def cache_view():
     return render_template("admin/cache.html", user=current_user,
-                           stats=_cache().stats())
+                           stats=_cache().stats(),
+                           rns_storage=_rns_storage_stats())
 
 
 @admin_bp.post("/cache/clear")
@@ -437,6 +438,83 @@ def cache_clear():
     _audit.warning("cache_clear: actor=%s ip=%s",
                    getattr(current_user, "name", "?"), request.remote_addr)
     flash("Cache cleared.", "ok")
+    return redirect(url_for("admin.cache_view"))
+
+
+def _rns_storage_stats() -> dict:
+    """Summarise size + entry count of RNS persistent state (`/config/reticulum/storage`).
+
+    Returned for display on the cache admin page. Numbers come from the
+    files on disk, not from RNS itself — so they remain meaningful even
+    when RNS is hung mid-startup.
+    """
+    storage = os.path.join(_rns_dir(), "storage")
+    total = 0
+    files = 0
+    try:
+        for entry in os.scandir(storage):
+            if entry.is_file():
+                files += 1
+                try:
+                    total += entry.stat().st_size
+                except OSError:
+                    pass
+    except FileNotFoundError:
+        return {"present": False, "files": 0, "bytes": 0, "path": storage}
+    except OSError as exc:
+        return {"present": False, "files": 0, "bytes": 0, "path": storage,
+                "error": str(exc)}
+    return {"present": True, "files": files, "bytes": total, "path": storage}
+
+
+@admin_bp.post("/cache/reset-rns")
+@admin_required
+def cache_reset_rns():
+    """Move /config/reticulum/storage/ aside and trigger a worker reload.
+
+    Backs up the current state to `storage.bak.<unix-ts>` rather than
+    deleting it outright — recovery is then a single `mv` away if the
+    reset doesn't help. Worker reload re-imports the app, which
+    re-initialises RNS against the now-empty storage directory.
+    """
+    import shutil
+
+    storage = os.path.join(_rns_dir(), "storage")
+    actor   = getattr(current_user, "name", "?")
+    if not os.path.isdir(storage):
+        flash("RNS storage directory not found — nothing to reset.", "warn")
+        _audit.warning("rns_reset: actor=%s ip=%s ok=no reason=missing",
+                       actor, request.remote_addr)
+        return redirect(url_for("admin.cache_view"))
+
+    backup = f"{storage}.bak.{int(time.time())}"
+    try:
+        shutil.move(storage, backup)
+        os.makedirs(storage, exist_ok=True)
+    except OSError as exc:
+        log.exception("rns_reset: failed to swap storage")
+        flash(f"Reset failed: {exc}", "err")
+        _audit.warning("rns_reset: actor=%s ip=%s ok=no reason=%s",
+                       actor, request.remote_addr, exc)
+        return redirect(url_for("admin.cache_view"))
+
+    ok, reason = _trigger_worker_reload()
+    _audit.warning("rns_reset: actor=%s ip=%s backup=%s reload=%s reason=%s",
+                   actor, request.remote_addr, backup, ok, reason)
+    if ok:
+        flash(
+            f"RNS state cleared and backed up to {os.path.basename(backup)}. "
+            f"Worker is reloading — new RNS will rebuild path tables from "
+            f"incoming announces.",
+            "ok",
+        )
+    else:
+        flash(
+            f"RNS state cleared (backup: {os.path.basename(backup)}), but "
+            f"worker reload could not be scheduled: {reason}. "
+            f"Restart the container to apply.",
+            "warn",
+        )
     return redirect(url_for("admin.cache_view"))
 
 

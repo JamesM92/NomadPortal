@@ -7,7 +7,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "0.9.17"
+__version__ = "0.9.18"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -42,6 +42,16 @@ def create_app(
     app.config["BROWSER"]    = browser
     app.config["CACHE"]      = cache or PageCache()
     app.config["START_TIME"] = time.time()
+
+    # Virus scanner — pluggable, defaults to off. Attaches to the browser
+    # so the async fetch worker can call into it without a Flask
+    # current_app reference (it runs outside the request context).
+    from .scanner import build_scanner_from_config
+    scanner, scan_required = build_scanner_from_config(cfg)
+    app.config["VIRUS_SCANNER"]          = scanner
+    app.config["VIRUS_SCAN_REQUIRED"]    = scan_required
+    browser.scanner          = scanner
+    browser.scan_required    = scan_required
 
     config_dir = cfg.get("CONFIG_DIR", "/config")
     rns_dir    = cfg.get("RNS_CONFIG_DIR", "/config/reticulum")
@@ -99,18 +109,33 @@ def create_app(
     app.config["USER_STORE"]  = UserStore(users_yml)
     app.config["UI_SETTINGS"] = UISettings(config_dir)   # must be before site server
 
-    # Site hosting — start node server if the pages directory exists
+    # Site hosting — start node server unless explicitly disabled. Operators
+    # running NomadPortal as a pure browser (no hosted content, minimal
+    # network footprint) set SITE_HOSTING=false.
     pages_dir = cfg.get("SITE_PAGES_DIR", "/site/pages")
     files_dir = cfg.get("SITE_FILES_DIR", "/site/files")
-    if os.path.isdir(pages_dir):
+    hosting_raw = str(cfg.get("SITE_HOSTING", "true")).strip().lower()
+    hosting_enabled = hosting_raw not in ("0", "false", "no", "off", "")
+    if not hosting_enabled:
+        log.info("Site hosting disabled (SITE_HOSTING=%s)", hosting_raw)
+        app.config["SITE_SERVER"] = None
+    elif os.path.isdir(pages_dir):
         from .site_server import SiteServer
         identity_file = os.path.join(rns_dir, "site_identity.id")
         saved_name    = app.config["UI_SETTINGS"].get_all().get("site_name", "")
+        # node_name=None → SiteServer auto-generates "NomadPortal-<2 hex>"
+        # from the destination hash so co-located instances stay distinct.
+        # auto_announce=False by default — vanilla NomadPortal installs are
+        # silent hosts. Operators who actually publish a site flip
+        # SITE_ANNOUNCE=true (or use the saved UI setting once that lands).
+        announce_raw = str(cfg.get("SITE_ANNOUNCE", "false")).strip().lower()
+        auto_announce = announce_raw in ("1", "true", "yes", "on")
         site_server   = SiteServer(
             pages_dir=pages_dir,
             files_dir=files_dir,
             identity_file=identity_file,
-            node_name=saved_name or cfg.get("SITE_NAME", "NomadPortal"),
+            node_name=saved_name or cfg.get("SITE_NAME") or None,
+            auto_announce=auto_announce,
         )
         try:
             site_server.start()

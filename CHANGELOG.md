@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.18] — 2026-06-03
+
+### Changed
+
+- **Default node name is now `NomadPortal-<2 hex>`** (last two hex chars
+  of the destination hash). 20 vanilla NomadPortal installs on the same
+  network are now individually addressable in the node sidebar instead
+  of all colliding under the single name "NomadPortal". An operator
+  who's actually publishing a site can still set a custom name via
+  Admin → Settings → Site name or the `SITE_NAME` env var; those
+  override the auto-generated default.
+- **Hosted site no longer auto-announces by default.** Vanilla installs
+  run as *silent hosts*: the site is still reachable to anyone who knows
+  the destination hash, but the node won't spam the mesh with broadcast
+  announces every 6 hours. Set `SITE_ANNOUNCE=true` (or click "Announce
+  now" in Admin → Dashboard for a one-shot) to publish. Rationale: 20
+  browsers shouldn't pollute the announce stream of operators who are
+  actually running curated content.
+
+### Added
+
+- **`SITE_HOSTING=false` env var** disables the hosted-site server
+  entirely — no destination registered, no announces, pure browser mode.
+- **Reset RNS cache button** in Admin → Cache. Moves
+  `/config/reticulum/storage/` aside to a timestamped backup and
+  triggers a worker reload, which re-initialises RNS against an empty
+  state directory. Addresses the recurring failure mode where a multi-MB
+  stale `destination_table` causes RNS to hang during startup. The
+  backup is preserved so recovery is a single `mv` away if the reset
+  doesn't help.
+- **`/healthz` endpoint** that returns 503 unless at least one RNS
+  interface is online. Docker `HEALTHCHECK` now points here instead of
+  `/api/status` — a hung-RNS container no longer reports `healthy`
+  while being unable to route packets. `start-period` bumped from 15s
+  to 120s so the healthcheck doesn't fail during legitimate slow boots
+  when `destination_table` has accumulated.
+- **File downloads with confirm dialog.** Clicking a NomadNet `/file/`
+  link now shows a confirm prompt with the filename, MIME type (from
+  extension), source URL, and a warning that files aren't virus-scanned
+  by NomadPortal. On confirm, the file is fetched asynchronously
+  (progress shown in the status bar with bytes received) and the
+  browser's native save dialog opens once the transfer completes.
+  Previously every `/file/` link rendered as a dead `"#"` href because
+  Micron2HTML's `default_url_resolver` filtered them out.
+
+### Known limitations
+
+- File downloads buffer the full content in memory before serving — fine
+  for typical NomadNet files (kB–MB), wasteful for hypothetical large
+  transfers. Streaming is a future improvement.
+
+### Security
+
+- **`authlib` 1.6.11 → 1.6.12** to address PYSEC-2026-188 — an
+  unauthenticated open-redirect via the OpenID Implicit/Hybrid grant
+  authorization endpoint when an attacker submits an authorization
+  request that omits the ``openid`` scope. NomadPortal uses Authlib as
+  an OIDC *client*, not a server, so the affected endpoint isn't
+  exposed — but pip-audit surfaced the advisory and the clean baseline
+  is the right call.
+- **Pluggable virus scanning for file downloads** via a new ``Scanner``
+  abstraction in ``nomadnet_web/scanner.py``. Off by default; a
+  ``ClamdScanner`` implementation talks to an external
+  ``clamav-daemon`` over Unix socket or TCP using the INSTREAM
+  protocol (no python dep added). Enable with:
+
+      VIRUS_SCAN=clamd                     # off / clamd / required
+      CLAMD_SOCKET=/var/run/clamav/clamd.ctl   # default path
+      CLAMD_HOST=clamav-sidecar            # alternative: TCP
+      CLAMD_PORT=3310
+      VIRUS_SCAN_MAX_BYTES=104857600       # skip files > 100 MB
+
+  Behaviour:
+  - **Clean scan** → file streams straight to the user.
+  - **Infected** → backend clears the buffered content, sets the job to
+    error, ``/api/file/download`` refuses with 403, and the frontend
+    surfaces a ``Download blocked: virus scan flagged this file`` alert.
+  - **Scanner unreachable** or **file too large to scan** → backend
+    flags the job as ``unavailable`` / ``too-large``; the frontend
+    pops a *second* confirm dialog before saving so the user is
+    explicitly informed no virus scan ran. The default mode is
+    fail-open. ``VIRUS_SCAN=required`` flips to fail-closed (downloads
+    are blocked when the scanner is unreachable).
+  - **Off** (default) → no scan attempted, polling reports
+    ``verdict: skipped``, frontend confirms with "No virus scan was
+    performed on this download" before saving.
+
+  New polling status: ``scanning`` (between ``fetching`` and ``done``)
+  so the UI can show "Scanning X for viruses…" while clamd runs.
+
 ## [0.9.17] — 2026-06-02
 
 ### Changed

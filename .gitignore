@@ -15,6 +15,20 @@ site/data/
 site/requirements.txt
 
 # ---------------------------------------------------------------------------
+# Native dev deploy (run-local.sh) — operator-private state and per-instance
+# site content live in mirrored local-config/ and local-site/ directories
+# so they survive across runs without ending up in the repo.
+# ---------------------------------------------------------------------------
+local-config/
+local-site/
+
+# Atomic-write tempfiles (nodes.json / lxmf_peers.json save through
+# <file>.<pid>.<tid>.tmp and rename). If the process is killed mid-save
+# these stragglers can linger; never commit them.
+config/*.tmp
+config/**/*.tmp
+
+# ---------------------------------------------------------------------------
 # Local-only Docker Compose override — secrets, real hostnames, etc.
 # Auto-merged on `docker compose up`. NEVER commit this file.
 # ---------------------------------------------------------------------------
