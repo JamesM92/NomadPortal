@@ -1345,24 +1345,48 @@ def api_blocklist_remove(hash_hex: str):
 
 @bp.get("/api/site/info")
 def api_site_info():
-    """Return home-node info if this instance is hosting a NomadNet site."""
+    """Return home-node info if this instance is hosting a NomadNet site.
+
+    ``auto_announce`` is included so the dashboard / sidebar can
+    disable the "Announce now" button when the node is in silent
+    mode — manual announces are refused in that state.
+    """
     server = current_app.config.get("SITE_SERVER")
     if server and server.node_hash():
         return jsonify({
-            "enabled":   True,
-            "node_hash": server.node_hash(),
-            "node_name": server.node_name(),
+            "enabled":       True,
+            "node_hash":     server.node_hash(),
+            "node_name":     server.node_name(),
+            "auto_announce": bool(getattr(server, "_auto_announce", False)),
         })
-    return jsonify({"enabled": False, "node_hash": None, "node_name": None})
+    return jsonify({
+        "enabled":       False,
+        "node_hash":     None,
+        "node_name":     None,
+        "auto_announce": False,
+    })
 
 
 @bp.post("/api/site/announce")
 @login_required
 def api_site_announce():
-    """Force the site node to send an announce on the mesh."""
+    """Force the site node to send an announce on the mesh.
+
+    Refuses when the node is configured as a silent host
+    (``auto_announce=False``). Silent means silent — no manual escape
+    hatch; the operator should flip Admin → Settings → Auto-announce
+    → On if they actually want to publish. Defense in depth alongside
+    the frontend disabling the button.
+    """
     server = current_app.config.get("SITE_SERVER")
     if not server or not server.node_hash():
         return jsonify({"ok": False, "error": "Site server not running"}), 404
+    if not getattr(server, "_auto_announce", False):
+        return jsonify({
+            "ok": False,
+            "error": "Node is in silent mode — enable Auto-announce in "
+                     "Admin → Settings before publishing.",
+        }), 409
     try:
         server.announce()
         return jsonify({

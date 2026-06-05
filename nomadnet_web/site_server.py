@@ -354,8 +354,10 @@ class SiteServer:
         else:
             log.info(
                 "Site node silent (auto-announce off) — hash %s reachable "
-                "only by direct request. Flip Admin → Dashboard → "
-                "\"Announce now\" or set SITE_ANNOUNCE=true to publish.",
+                "only by direct request. Flip Admin → Settings → "
+                "Auto-announce to On (or set SITE_ANNOUNCE=true) to publish; "
+                "the dashboard \"Announce now\" button is disabled while "
+                "silent.",
                 self._node_hash[:16] if self._node_hash else "?",
             )
 
