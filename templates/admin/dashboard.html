@@ -86,15 +86,34 @@
 <!-- Site node (NomadNet hosting) -->
 <div class="card" style="max-width:560px;">
   <div class="card-title">Hosted site node</div>
+  {% if site_info.auto_announce %}
   <p class="dim" style="margin-bottom:8px;">
-    Your site is announced automatically every 6 hours and on container start.
-    Click below to send an announce immediately so peers can find you faster.
+    Auto-announce is <strong>on</strong> — your site is broadcast every
+    6 hours automatically. Click below to send an extra announce
+    immediately so peers can find you faster.
   </p>
+  {% else %}
+  <p class="dim" style="margin-bottom:8px;color:#c8a84a;">
+    &#9888; Auto-announce is <strong>off</strong> — your node is a
+    <em>silent host</em>. It serves pages to anyone who knows the
+    destination hash but doesn't broadcast its existence. Manual
+    announces are also disabled while silent: flip
+    <a href="{{ url_for('admin.settings') }}#s-auto-announce"
+       style="color:var(--accent);">Admin&nbsp;&rarr;&nbsp;Settings&nbsp;&rarr;&nbsp;Auto-announce</a>
+    to On if you want to publish.
+  </p>
+  {% endif %}
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     <span class="mono dim" style="font-size:12px;">{{ site_info.node_name }}</span>
     <span class="mono" style="font-size:12px;color:var(--text);">{{ site_info.node_hash }}</span>
     <button id="btn-site-announce" class="btn btn-sm btn-neutral"
-            style="margin-left:auto;white-space:nowrap;">Announce now</button>
+            style="margin-left:auto;white-space:nowrap;"
+            {% if not site_info.auto_announce %}
+              disabled
+              title="Disabled while the node is in silent mode. Enable Auto-announce in Admin → Settings first."
+            {% endif %}>
+      Announce now
+    </button>
   </div>
   <div id="site-announce-status" style="margin-top:8px;font-size:12px;color:var(--text-dim);"></div>
 </div>

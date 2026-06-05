@@ -108,8 +108,9 @@ def dashboard():
     site_info = None
     if site_server and site_server.node_hash():
         site_info = {
-            "node_hash": site_server.node_hash(),
-            "node_name": site_server.node_name(),
+            "node_hash":     site_server.node_hash(),
+            "node_name":     site_server.node_name(),
+            "auto_announce": bool(getattr(site_server, "_auto_announce", False)),
         }
     return render_template(
         "admin/dashboard.html",

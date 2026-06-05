@@ -23,6 +23,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that `int()` previously accepted; behaviour unchanged for any
   well-formed Micron input). API diff is two lines — no integration
   changes required.
+- **"Announce now" button disabled in silent mode.** When
+  ``auto_announce`` is off (silent host), the Admin → Dashboard
+  "Announce now" button is now disabled with a tooltip pointing at
+  Admin → Settings → Auto-announce. The previous behaviour
+  ("button works regardless of the auto-announce setting") was a
+  manual escape hatch that contradicted the "silent means silent"
+  intent — operators who actually want a one-shot announce should
+  flip the setting first.
+
+  - Server-side: ``/api/site/announce`` returns 409 when the
+    SiteServer is in silent mode (defense in depth — the disabled
+    button is the user-facing block, the API check stops a forged
+    POST from bypassing it).
+  - Frontend: dashboard renders a warning banner above the button
+    explaining silent-host status, with a deep-link to Admin →
+    Settings → Auto-announce.
+  - ``/api/site/info`` now also returns ``auto_announce`` so any
+    future caller can render the same state.
+  - SiteServer's silent-mode startup log line updated to point at
+    Admin → Settings (not "Announce now") as the way to publish.
 
 ## [0.9.27] — 2026-06-04
 
