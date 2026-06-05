@@ -20,10 +20,6 @@ interfaces:
 
   # TCP clients — connect to remote Reticulum hubs / testnet entry points.
   tcp_clients:
-    - name: RNS Testnet Amsterdam
-      host: amsterdam.connect.reticulum.network
-      port: 4965
-      enabled: false
     - name: RNS Testnet Dublin
       host: dublin.connect.reticulum.network
       port: 4965
