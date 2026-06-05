@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Session-cookie collision between co-located NomadPortal instances.**
+  When two NomadPortal containers were accessed from the same browser
+  host on different ports (e.g. ``<ip>:11580`` and ``<ip>:11680``),
+  they shared a single ``session`` cookie because browsers scope
+  cookies by hostname only — not by port. Logging into the second
+  instance overwrote the first instance's cookie; switching back left
+  the user logged out, and the next login attempt 403'd on CSRF
+  validation because the form's token didn't match the (foreign)
+  session cookie the browser was still sending.
+
+  Fix: the session cookie name is now suffixed with the last four
+  characters of the hosted node's destination hash
+  (``session_<XXXX>``), so each instance has a uniquely-named cookie
+  and the browser stores both side-by-side. Instances without a
+  hosted site keep Flask's default ``session`` name (no regression
+  for the single-container case).
+
 ### Changed
 
 - **`build.yml` now runs on `dev` pushes** in addition to `main` /

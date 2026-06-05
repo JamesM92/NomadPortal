@@ -204,6 +204,17 @@ def create_app(
     app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
     app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(hours=8)
 
+    # Suffix the session cookie with the last 4 chars of the hosted node hash
+    # so co-located NomadPortal instances on the same browser host (different
+    # ports) don't clobber each other's sessions. Browsers scope cookies by
+    # hostname only — two instances on the same IP would otherwise share one
+    # "session" cookie and the second login would invalidate the first.
+    site_server = app.config.get("SITE_SERVER")
+    if site_server is not None:
+        node_hash = site_server.node_hash() or ""
+        if len(node_hash) >= 4:
+            app.config["SESSION_COOKIE_NAME"] = f"session_{node_hash[-4:]}"
+
     # Attach log buffer to root logger
     log_buffer.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(log_buffer)
