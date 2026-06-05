@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Default TCP-client seed includes Amsterdam Connect hub.** New
+  installs' `config.yml.example` now ships an `RNS Testnet Amsterdam`
+  entry (`amsterdam.connect.reticulum.network:4965`) alongside the
+  existing Dublin and BetweenTheBorders defaults. All three are
+  off-by-default — operator opts in through Admin → Settings →
+  Interfaces. Existing operators with a pre-existing `config.yml`
+  see no change unless they reseed from the example. Useful as a
+  transit-capable hub for operators whose primary hub doesn't
+  forward client-to-client traffic.
+
 ### Fixed
 
 - **Session-cookie collision between co-located NomadPortal instances.**
