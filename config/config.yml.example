@@ -35,9 +35,22 @@ interfaces:
   # UDP interfaces.
   udp: []
 
-# Set true to act as a transport node (route traffic for other peers).
-# Only enable on always-on, stationary hosts.
-transport_mode: false
+# Transport mode: should this node forward traffic for OTHER peers
+# in addition to handling its own destinations?
+#
+# Leaving this commented out auto-defaults based on whether you're
+# hosting a site (SITE_HOSTING env var / Admin → Settings → Hosting):
+#   - Hosting on  → transport on  (correct default — RNS 1.3+
+#                                   requires this for inbound link
+#                                   establishment to your site's
+#                                   destination to complete reliably)
+#   - Hosting off → transport off (leaf mode — no relay cost)
+#
+# Set explicitly to override the auto-default. Transport on means
+# your node will route some other peers' announces and link traffic
+# through, costing modest CPU/bandwidth. Only enable on always-on
+# stationary hosts.
+# transport_mode: true
 
 # Set true to suppress responses to incoming Reticulum discovery probes.
 # Outbound traffic on the interfaces below is unaffected — this only

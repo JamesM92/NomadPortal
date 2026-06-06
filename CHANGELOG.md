@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Site-hosting nodes silently failed to accept inbound link
+  establishment under RNS 1.3.** Symptom: announces from the hosted
+  site propagated through the mesh and other clients (MeshChat,
+  Sideband, other NomadPortals) saw the destination in their
+  sidebars — but attempts to navigate to a page on the site got as
+  far as RNS accepting the link request, then timed out at
+  ``Timeout waiting for RTT packet from link initiator``. Page load
+  never completed.
+
+  Root cause: RNS 1.3 (landed via the v0.9.24 Dependabot reticulum-
+  stack bump: ``rns 1.1.3 → 1.3.1``) changed how the receiver of an
+  inbound link request routes the proof-RTT response back. The
+  receiver now needs a return-path entry in its path table to
+  address the proof packet — which a leaf node
+  (``enable_transport = False``) doesn't maintain. Pre-1.3 RNS was
+  more permissive and sent the proof back along the incoming TCP
+  socket regardless. Result: every NomadPortal hosting a site since
+  v0.9.24 has been silently unreachable for incoming links unless
+  the operator manually flipped ``transport_mode`` to true.
+
+  Fix: ``transport_mode`` now defaults to follow site-hosting state
+  when not explicitly set in ``config.yml`` — hosting on → transport
+  on; hosting off → transport off (leaf). Operators who set
+  ``transport_mode`` explicitly (true or false) keep that exact
+  behaviour. The ``config.yml.example`` seed has the line commented
+  out (auto-default in play) with explanatory text describing the
+  RNS-1.3 reason.
+
+  Existing operators with ``transport_mode: false`` in their live
+  ``config.yml`` are NOT auto-migrated — they have to either remove
+  the line (to opt into the auto-default) or change it to true. New
+  installs and operators who reseed from the updated example get
+  the correct behaviour automatically.
+
+
+
 - **Session-cookie collision between co-located NomadPortal instances.**
   When two NomadPortal containers were accessed from the same browser
   host on different ports (e.g. ``<ip>:11580`` and ``<ip>:11680``),
