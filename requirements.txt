@@ -6,17 +6,21 @@
 # in a fresh venv before bumping any of them.
 
 # Reticulum stack
-# Diagnostic revert (2026-06-05): rns 1.3.x introduces link-handshake
-# behaviour that silently breaks inbound link establishment to sites
-# hosted on NomadPortal (Symptom: "Timeout waiting for RTT packet from
-# link initiator" / "No interfaces could process the outbound packet"
-# in mirror logs; clients see the announce but can't navigate). Pinning
-# to the most-recent pre-1.3 rns release to confirm whether 1.3.0
-# introduced the regression. If 1.2.9 also fails, bisect further to
-# 1.1.x. If 1.2.9 works, file an upstream issue against rns 1.3.0.
-rns==1.2.9
-lxmf==0.9.9
-nomadnet==1.2.2
+# Pinned to the pre-v0.9.24 set (2026-06-05): the rns 1.1.3 → 1.3.x +
+# lxmf 0.9.4 → 1.0.x + nomadnet 0.9.8 → 1.2.x bump silently broke
+# inbound link establishment to hosted NomadPortal sites. Under 1.3.x
+# rns, clients see the announce, the link request lands at the host
+# and gets accepted, then times out at "waiting for RTT packet from
+# link initiator" while logs flood with "No interfaces could process
+# the outbound packet". Setting enable_transport=true didn't fix it.
+# Intermediate revert to rns 1.2.9 (May 2026) broke announces entirely
+# (lxmf/nomadnet pins were incompatible), so the whole stack is rolled
+# back to the last known-good coherent triple from before the v0.9.24
+# Dependabot batch. Don't rebump these together without confirming
+# the link-handshake behaviour in an isolated test deployment first.
+rns==1.1.3
+lxmf==0.9.4
+nomadnet==0.9.8
 
 # Web app stack
 flask==3.1.3
