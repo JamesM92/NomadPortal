@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Diagnostic revert: pin `rns` from 1.3.1 back to 1.2.9** to test
+  whether 1.3.0 introduced the inbound-link-establishment regression
+  affecting hosted sites. Symptoms under 1.3.x: link request reaches
+  the host and is accepted by RNS, but the host can't complete the
+  proof-RTT handshake — log shows `Timeout waiting for RTT packet
+  from link initiator` plus persistent `No interfaces could process
+  the outbound packet`. Setting `enable_transport = true` doesn't
+  fix it. Clients see the announce but pages won't load.
+
+  Plan: if 1.2.9 also fails, bisect further to 1.1.9 / 1.1.x. If
+  1.2.9 works, file an upstream issue against rns 1.3.0 with the
+  reproduction details before deciding the long-term version pin.
+  lxmf and nomadnet stay at their current pins for this round —
+  bumping them too widens the variable set.
+
 ### Fixed
 
 - **Admin → Settings hosting / auto-announce toggles silently

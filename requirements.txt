@@ -6,7 +6,15 @@
 # in a fresh venv before bumping any of them.
 
 # Reticulum stack
-rns==1.3.1
+# Diagnostic revert (2026-06-05): rns 1.3.x introduces link-handshake
+# behaviour that silently breaks inbound link establishment to sites
+# hosted on NomadPortal (Symptom: "Timeout waiting for RTT packet from
+# link initiator" / "No interfaces could process the outbound packet"
+# in mirror logs; clients see the announce but can't navigate). Pinning
+# to the most-recent pre-1.3 rns release to confirm whether 1.3.0
+# introduced the regression. If 1.2.9 also fails, bisect further to
+# 1.1.x. If 1.2.9 works, file an upstream issue against rns 1.3.0.
+rns==1.2.9
 lxmf==0.9.9
 nomadnet==1.2.2
 
