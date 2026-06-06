@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Admin → Settings hosting / auto-announce toggles silently
+  reverted to "use env var" on every container restart.** Symptom:
+  flip Admin → Settings → Hosting → On (or off), save, see it stick
+  in the UI; restart the container; the UI shows "use env var"
+  again as if you never changed it. The persisted ``ui_settings.json``
+  file on disk did have the new value — the load path just never
+  read it back.
+
+  Root cause: ``UISettings.update()`` correctly wrote
+  ``hosting_enabled`` / ``auto_announce`` to disk, and ``DEFAULTS``
+  listed them, but ``_load()`` had no copy-back code for those two
+  keys. On restart, ``self._data`` re-initialised to the DEFAULTS
+  value (``None``) and the file's stored value was ignored. Bug
+  introduced in v0.9.26 when the toggles were added.
+
+  Fix: ``_load()`` now restores ``hosting_enabled`` and
+  ``auto_announce`` from the file when present and validates the
+  value is None or a bool (anything else falls through to the
+  DEFAULTS, matching the tri-state semantics). UI now correctly
+  reflects the persisted setting after a restart.
+
 - **Site-hosting nodes silently failed to accept inbound link
   establishment under RNS 1.3.** Symptom: announces from the hosted
   site propagated through the mesh and other clients (MeshChat,

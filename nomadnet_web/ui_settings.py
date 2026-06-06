@@ -189,6 +189,16 @@ class UISettings:
                 if "abuse_contact" in data:
                     self._data["abuse_contact"] = str(data["abuse_contact"]).strip()[:256]
 
+                # Tri-state site-server toggles: None (use env var) /
+                # True / False. The key must exist in the file AND be
+                # one of those three values; anything else is treated
+                # as absent so we fall through to the DEFAULTS value.
+                for k in ("hosting_enabled", "auto_announce"):
+                    if k in data:
+                        raw = data[k]
+                        if raw is None or isinstance(raw, bool):
+                            self._data[k] = raw
+
                 # Access fields. Strategy:
                 #   1. If the file already has per-audience fields, take them.
                 #   2. Otherwise seed from a preset implied by older fields:
