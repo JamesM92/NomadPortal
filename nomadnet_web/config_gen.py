@@ -10,6 +10,7 @@ Updates these things on every container start:
 All other settings in the RNS config file are left untouched.
 """
 
+import json
 import logging
 import os
 import re
@@ -31,7 +32,7 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
     with open(config_yml, "r", encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
 
-    transport       = bool(cfg.get("transport_mode", False))
+    transport       = _resolve_transport_mode(cfg, config_yml)
     ignore_probes   = bool(cfg.get("ignore_discovery_probes", False))
     ifaces          = cfg.get("interfaces", {})
     sections        = _build_interface_sections(ifaces)
@@ -64,6 +65,57 @@ def generate(config_yml: str, rns_config_path: str) -> bool:
 # ---------------------------------------------------------------------------
 # Interface section builders
 # ---------------------------------------------------------------------------
+
+def _resolve_transport_mode(cfg: dict, config_yml: str) -> bool:
+    """Decide the effective ``enable_transport`` setting.
+
+    Order of precedence:
+
+    1. If ``transport_mode`` is explicitly set in ``config.yml`` (a real
+       True or False, not None/absent) → use that value.
+    2. Otherwise, mirror the site-hosting resolution from
+       ``nomadnet_web/__init__.py``: the Admin → Settings UI wins if
+       set, otherwise fall back to ``SITE_HOSTING`` env / default True.
+       Hosting on → transport on; hosting off → transport off.
+
+    Why: RNS 1.3+ requires the receiver of an inbound link request to
+    have proper return-path state in its path table to send the
+    proof-RTT packet back. ``enable_transport = False`` (leaf mode)
+    doesn't maintain that, so leaf-mode hosts silently fail to
+    complete inbound link establishment after accepting the request.
+    Pre-RNS-1.3 this worked; from 1.3 onward, hosting nodes need
+    transport on. Auto-correlating with the hosting flag keeps
+    browse-only NomadPortals as leaves (cheap) while making
+    site-hosting NomadPortals transit-capable (correct).
+    """
+    explicit = cfg.get("transport_mode")
+    if explicit is not None:
+        return bool(explicit)
+
+    config_dir = os.path.dirname(config_yml)
+    ui_hosting = None
+    ui_path = os.path.join(config_dir, "ui_settings.json")
+    if os.path.exists(ui_path):
+        try:
+            with open(ui_path, "r", encoding="utf-8") as fh:
+                ui = json.load(fh) or {}
+            ui_hosting = ui.get("hosting_enabled")
+        except (OSError, ValueError) as exc:
+            log.warning("Could not read %s for transport auto-default: %s",
+                        ui_path, exc)
+
+    if ui_hosting is not None:
+        derived = bool(ui_hosting)
+        source = "Admin UI hosting_enabled"
+    else:
+        hosting_raw = os.environ.get("SITE_HOSTING", "true").strip().lower()
+        derived     = hosting_raw not in ("0", "false", "no", "off", "")
+        source      = "SITE_HOSTING env"
+
+    log.info("transport_mode not set in config.yml — auto-defaulting to %s "
+             "(source: %s)", derived, source)
+    return derived
+
 
 def _build_interface_sections(ifaces: dict) -> list[str]:
     sections = []
