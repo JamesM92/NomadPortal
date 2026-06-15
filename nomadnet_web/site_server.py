@@ -21,7 +21,9 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-ANNOUNCE_INTERVAL  = 6 * 60 * 60  # re-announce every 6 hours
+DEFAULT_ANNOUNCE_INTERVAL = 6 * 60 * 60  # 6 hours — matches NomadNet's own default
+MIN_ANNOUNCE_INTERVAL     = 60           # 1 minute — guard against accidental flooding
+MAX_ANNOUNCE_INTERVAL     = 24 * 60 * 60 # 24 hours — beyond this, peers' paths age out
 RESCAN_INTERVAL    = 5  * 60   # re-scan pages/files every 5 minutes
 START_ANNOUNCE_DELAY = 6        # seconds after start before first announce
 
@@ -43,6 +45,7 @@ class SiteServer:
         identity_file: str,
         node_name: Optional[str] = None,
         auto_announce: bool = False,
+        announce_interval: int = DEFAULT_ANNOUNCE_INTERVAL,
     ):
         # ``node_name=None`` means "auto-generate from the destination hash"
         # in start() — produces e.g. "NomadPortal-4d" so multiple NomadPortal
@@ -53,11 +56,20 @@ class SiteServer:
         # hash, but it won't spam the network with broadcast announces.
         # Operators who actually want to publish their site flip this on.
         # Manual announces (Admin → Dashboard → "Announce now") always work.
-        self._pages_dir     = pages_dir
-        self._files_dir     = files_dir
-        self._identity_file = identity_file
-        self._node_name     = node_name
-        self._auto_announce = auto_announce
+        #
+        # ``announce_interval`` controls how often the background loop
+        # re-announces when ``auto_announce`` is on. The value is in seconds
+        # and is clamped to ``[MIN_ANNOUNCE_INTERVAL, MAX_ANNOUNCE_INTERVAL]``.
+        # The background loop reads ``self._announce_interval`` per
+        # iteration, so admin-UI live updates take effect on the next tick.
+        self._pages_dir         = pages_dir
+        self._files_dir         = files_dir
+        self._identity_file     = identity_file
+        self._node_name         = node_name
+        self._auto_announce     = auto_announce
+        self._announce_interval = max(MIN_ANNOUNCE_INTERVAL,
+                                      min(MAX_ANNOUNCE_INTERVAL,
+                                          int(announce_interval)))
         self._dest          = None
         self._identity      = None
         self._node_hash: Optional[str] = None
@@ -364,7 +376,7 @@ class SiteServer:
         while self._running:
             time.sleep(60)
             now = time.time()
-            if self._auto_announce and now - self._last_announce > ANNOUNCE_INTERVAL:
+            if self._auto_announce and now - self._last_announce > self._announce_interval:
                 self.announce()
             if now - self._last_rescan > RESCAN_INTERVAL:
                 self._register_pages()

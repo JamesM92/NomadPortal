@@ -216,6 +216,11 @@ def create_wsgi():
         "SITE_NAME":              os.environ.get("SITE_NAME", ""),
         "SITE_HOSTING":           os.environ.get("SITE_HOSTING", "true"),
         "SITE_ANNOUNCE":          os.environ.get("SITE_ANNOUNCE", "false"),
+        # Auto-announce frequency in seconds — falls through to the
+        # site_server module's DEFAULT_ANNOUNCE_INTERVAL (6h) when unset.
+        # Admin → Settings can override per-instance without restart.
+        "SITE_ANNOUNCE_INTERVAL": os.environ.get(
+            "SITE_ANNOUNCE_INTERVAL", ""),
         # Virus scanning for file downloads — off by default. See
         # nomadnet_web/scanner.py for accepted values.
         "VIRUS_SCAN":             os.environ.get("VIRUS_SCAN", "off"),

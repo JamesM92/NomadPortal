@@ -147,6 +147,24 @@ def create_app(
     else:
         auto_announce = bool(ui_announce)
 
+    # Announce-interval resolution: same precedence as auto_announce —
+    # UI > env > default. Clamped to the SiteServer's min/max range.
+    from .site_server import (
+        DEFAULT_ANNOUNCE_INTERVAL, MIN_ANNOUNCE_INTERVAL,
+        MAX_ANNOUNCE_INTERVAL,
+    )
+    ui_interval = ui_all.get("announce_interval")
+    if ui_interval is None:
+        try:
+            announce_interval = int(cfg.get(
+                "SITE_ANNOUNCE_INTERVAL", DEFAULT_ANNOUNCE_INTERVAL))
+        except (TypeError, ValueError):
+            announce_interval = DEFAULT_ANNOUNCE_INTERVAL
+    else:
+        announce_interval = int(ui_interval)
+    announce_interval = max(MIN_ANNOUNCE_INTERVAL,
+                            min(MAX_ANNOUNCE_INTERVAL, announce_interval))
+
     if not hosting_enabled:
         log.info("Site hosting disabled (UI/env config)")
         app.config["SITE_SERVER"] = None
@@ -162,6 +180,7 @@ def create_app(
             identity_file=identity_file,
             node_name=saved_name or cfg.get("SITE_NAME") or None,
             auto_announce=auto_announce,
+            announce_interval=announce_interval,
         )
         try:
             site_server.start()

@@ -105,6 +105,10 @@ class UISettings:
         # config still wins when the UI value is None.
         "hosting_enabled":     None,
         "auto_announce":       None,
+        # Re-announce frequency in seconds, or None to fall through to
+        # the SITE_ANNOUNCE_INTERVAL env var / 6h default. Clamped at
+        # read/write time to [60, 86400].
+        "announce_interval":   None,
         # Access controls (defaults seeded from the "locked" preset — safe
         # default for fresh installs; operator can relax via Admin → Settings)
         **_PRESETS["locked"],
@@ -165,6 +169,22 @@ class UISettings:
                         self._data[k] = None
                     else:
                         self._data[k] = bool(raw)
+            # Announce interval: positive int seconds clamped to a sane
+            # range, or None for "use env var". Non-int values are dropped
+            # silently rather than reverting to default — the operator's
+            # last good value stays put.
+            if "announce_interval" in patch:
+                raw = patch["announce_interval"]
+                if raw in (None, ""):
+                    self._data["announce_interval"] = None
+                else:
+                    try:
+                        v = int(raw)
+                        if v < 60:    v = 60
+                        if v > 86400: v = 86400
+                        self._data["announce_interval"] = v
+                    except (TypeError, ValueError):
+                        pass
             if "default_node" in patch:
                 v = str(patch["default_node"]).strip().lower()
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
@@ -198,6 +218,13 @@ class UISettings:
                         raw = data[k]
                         if raw is None or isinstance(raw, bool):
                             self._data[k] = raw
+                # Announce interval: None or a clamped positive int.
+                if "announce_interval" in data:
+                    raw = data["announce_interval"]
+                    if raw is None:
+                        self._data["announce_interval"] = None
+                    elif isinstance(raw, int) and 60 <= raw <= 86400:
+                        self._data["announce_interval"] = raw
 
                 # Access fields. Strategy:
                 #   1. If the file already has per-audience fields, take them.

@@ -75,16 +75,39 @@
     <label>Auto-announce</label>
     <select id="s-auto-announce" style="max-width:260px;">
       <option value=""     {% if settings.auto_announce is none %}selected{% endif %}>Use env var (SITE_ANNOUNCE)</option>
-      <option value="true" {% if settings.auto_announce == True %}selected{% endif %}>On — broadcast every 6 hours</option>
+      <option value="true" {% if settings.auto_announce == True %}selected{% endif %}>On — broadcast at the chosen interval</option>
       <option value="false"{% if settings.auto_announce == False %}selected{% endif %}>Off — silent host</option>
     </select>
     <span class="dim" style="margin-top:4px;">
-      When on, the node broadcasts its presence to the mesh every 6 hours.
-      When off, the site is reachable to anyone who knows the destination
-      hash but the node is invisible to passive announce listeners.
-      Saving takes effect immediately and (when flipping on) sends a
-      fresh announce. The <em>"Announce now"</em> button on the dashboard
-      always works regardless of this setting.
+      When on, the node broadcasts its presence to the mesh at the
+      configured interval (see below). When off, the site is reachable
+      to anyone who knows the destination hash but the node is invisible
+      to passive announce listeners. Saving takes effect immediately and
+      (when flipping on) sends a fresh announce. The <em>"Announce now"</em>
+      button on the dashboard always works regardless of this setting.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Announce interval</label>
+    <select id="s-announce-interval" style="max-width:260px;">
+      <option value=""      {% if settings.announce_interval is none %}selected{% endif %}>Use env var (SITE_ANNOUNCE_INTERVAL)</option>
+      <option value="900"   {% if settings.announce_interval == 900 %}selected{% endif %}>Every 15 minutes</option>
+      <option value="1800"  {% if settings.announce_interval == 1800 %}selected{% endif %}>Every 30 minutes</option>
+      <option value="3600"  {% if settings.announce_interval == 3600 %}selected{% endif %}>Every hour</option>
+      <option value="10800" {% if settings.announce_interval == 10800 %}selected{% endif %}>Every 3 hours</option>
+      <option value="21600" {% if settings.announce_interval == 21600 %}selected{% endif %}>Every 6 hours (default)</option>
+      <option value="43200" {% if settings.announce_interval == 43200 %}selected{% endif %}>Every 12 hours</option>
+      <option value="86400" {% if settings.announce_interval == 86400 %}selected{% endif %}>Every 24 hours</option>
+    </select>
+    <span class="dim" style="margin-top:4px;">
+      How often the auto-announcer rebroadcasts this node's presence.
+      Shorter intervals keep path-table entries fresher on peers' caches
+      at the cost of mesh-wide traffic; longer intervals are gentler on
+      the network but mean longer recovery if peers' paths age out
+      between announces. Default 6h matches NomadNet's own behaviour.
+      Only effective when Auto-announce is On. Changes take effect on
+      the next 60-second background tick — no restart required.
     </span>
   </div>
 
