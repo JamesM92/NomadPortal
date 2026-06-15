@@ -147,6 +147,11 @@
       }
       payload.hosting_enabled = _triState('s-hosting-enabled');
       payload.auto_announce   = _triState('s-auto-announce');
+      // Announce interval: empty = "use env var" (send null), otherwise
+      // parse the dropdown's value as integer seconds. The server clamps
+      // out-of-range values; client just sends what was selected.
+      var rawIv = document.getElementById('s-announce-interval').value;
+      payload.announce_interval = (rawIv === '') ? null : parseInt(rawIv, 10);
       var res = await fetch('/admin/api/ui/settings', {
         method: 'POST',
         headers: {

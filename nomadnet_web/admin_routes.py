@@ -745,6 +745,8 @@ def api_ui_settings_save():
         "abuse_contact",
         # Site-server toggles (None = "fall through to env var")
         "hosting_enabled", "auto_announce",
+        # Re-announce frequency in seconds (None = use env var / default).
+        "announce_interval",
     )
     patch = {k: data[k] for k in allowed if k in data}
 
@@ -797,6 +799,36 @@ def api_ui_settings_save():
                 # First flip-on — fire an immediate announce so the network
                 # sees us right away instead of waiting up to 6h.
                 site_server.announce()
+
+    # Live-apply announce_interval too — the background loop reads
+    # self._announce_interval per iteration, so the next tick (within 60s)
+    # uses the new value. None = "use env var/default", which we resolve
+    # again from cfg to keep the running value consistent.
+    if site_server is not None and "announce_interval" in patch:
+        new_iv = patch["announce_interval"]
+        if new_iv is not None:
+            from .site_server import (
+                MIN_ANNOUNCE_INTERVAL, MAX_ANNOUNCE_INTERVAL,
+            )
+            site_server._announce_interval = max(
+                MIN_ANNOUNCE_INTERVAL,
+                min(MAX_ANNOUNCE_INTERVAL, int(new_iv)),
+            )
+        else:
+            # Flipped back to "use env var" — re-resolve from cfg.
+            from .site_server import (
+                DEFAULT_ANNOUNCE_INTERVAL, MIN_ANNOUNCE_INTERVAL,
+                MAX_ANNOUNCE_INTERVAL,
+            )
+            try:
+                fallback = int(current_app.config.get(
+                    "SITE_ANNOUNCE_INTERVAL", DEFAULT_ANNOUNCE_INTERVAL))
+            except (TypeError, ValueError):
+                fallback = DEFAULT_ANNOUNCE_INTERVAL
+            site_server._announce_interval = max(
+                MIN_ANNOUNCE_INTERVAL,
+                min(MAX_ANNOUNCE_INTERVAL, fallback),
+            )
 
     _audit_warn("ui_settings_save: actor=%s ip=%s patch=%s",
                    getattr(current_user, "name", "?"), request.remote_addr, patch)

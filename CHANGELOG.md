@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable site-announce interval.** Admin → Settings now has an
+  "Announce interval" dropdown alongside "Auto-announce": every 15min,
+  30min, 1h, 3h, 6h (default), 12h, 24h. Stored as integer seconds in
+  ``ui_settings.json`` under ``announce_interval`` (None = use env
+  var). Env var fallback: ``SITE_ANNOUNCE_INTERVAL`` (integer
+  seconds). Clamped to [60, 86400].
+
+  Background loop reads ``self._announce_interval`` per iteration so
+  changes apply on the next 60-second tick — no container restart
+  required. Only effective when Auto-announce is On.
+
+  Useful for operators who want their node to rebroadcast more
+  frequently (e.g. on a busy mesh where peers age out paths between
+  the default 6h ticks), or less frequently (operator courtesy on
+  small / bandwidth-constrained meshes).
+
 ### Changed
 
 - **Roll the reticulum stack back to the pre-v0.9.24 coherent set**
