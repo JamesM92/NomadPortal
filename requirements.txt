@@ -20,4 +20,4 @@ gunicorn==26.0.0
 pytest==9.0.3
 
 # Renderer — published to PyPI from v1.0.7 onwards
-Micron2HTML==1.0.7
+Micron2HTML==1.0.8
