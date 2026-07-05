@@ -68,6 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default 30; set 0 to disable). Prune runs before RNS starts
   so its effect is felt on the *current* boot, not the next one.
 
+  Age-based pruning is a no-op on filesystems / RNS versions
+  where mtime gets bulk-refreshed on every startup (empirically
+  common — one operator saw 15K ratchets all touched within the
+  last 30 days despite being months old). A hard count cap
+  (``NOMADPORTAL_RATCHET_MAX_COUNT``, default 5000) runs after
+  the age prune: if we're still over cap, keep only the newest
+  N files by mtime and delete the rest. Same regeneration cost —
+  one extra round-trip for the first link with a peer whose
+  ratchet was pruned. Set both env vars to 0 to disable pruning
+  entirely.
+
 - **CI container-startup smoke test.** ``build.yml``'s docker-build
   job now boots the freshly-built image, waits for gunicorn to
   accept HTTP, waits up to 3 min for ``/healthz`` to reach 200 (or

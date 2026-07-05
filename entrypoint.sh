@@ -51,21 +51,47 @@ fi
 # Tunable via NOMADPORTAL_RATCHET_MAX_AGE_DAYS (default 30). Set to
 # 0 to disable pruning entirely.
 RATCHET_MAX_AGE_DAYS="${NOMADPORTAL_RATCHET_MAX_AGE_DAYS:-30}"
-if [ "$RATCHET_MAX_AGE_DAYS" -gt 0 ]; then
-  RATCHET_DIR="${RNS_CONFIG_DIR:-/config/reticulum}/storage/ratchets"
-  if [ -d "$RATCHET_DIR" ]; then
-    count_before=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
-    if [ "$count_before" -gt 0 ]; then
-      echo "[startup] Pruning ratchets older than ${RATCHET_MAX_AGE_DAYS}d (currently ${count_before} files)..."
-      find "$RATCHET_DIR" -type f -mtime "+${RATCHET_MAX_AGE_DAYS}" -delete 2>/dev/null || true
-      count_after=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
-      pruned=$((count_before - count_after))
-      if [ "$pruned" -gt 0 ]; then
-        echo "[startup] Pruned ${pruned} old ratchet(s); ${count_after} remaining"
-      else
-        echo "[startup] No ratchets older than ${RATCHET_MAX_AGE_DAYS}d; keeping all ${count_after}"
-      fi
+RATCHET_MAX_COUNT="${NOMADPORTAL_RATCHET_MAX_COUNT:-5000}"
+RATCHET_DIR="${RNS_CONFIG_DIR:-/config/reticulum}/storage/ratchets"
+if [ -d "$RATCHET_DIR" ]; then
+  count_before=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
+
+  # Step 1: age-based prune. This does the right thing on
+  # filesystems / RNS versions where ratchet mtime reflects the
+  # actual last-use time. In practice we've observed RNS bulk-
+  # rewrites all ratchet mtimes on load, which makes this step a
+  # no-op; the count-based step below still handles that case.
+  if [ "$RATCHET_MAX_AGE_DAYS" -gt 0 ] && [ "$count_before" -gt 0 ]; then
+    echo "[startup] Pruning ratchets older than ${RATCHET_MAX_AGE_DAYS}d (currently ${count_before} files)..."
+    find "$RATCHET_DIR" -type f -mtime "+${RATCHET_MAX_AGE_DAYS}" -delete 2>/dev/null || true
+    count_after_age=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
+    aged_out=$((count_before - count_after_age))
+    if [ "$aged_out" -gt 0 ]; then
+      echo "[startup] Age-based prune removed ${aged_out}; ${count_after_age} remaining"
+    else
+      echo "[startup] No ratchets older than ${RATCHET_MAX_AGE_DAYS}d by mtime"
     fi
+  else
+    count_after_age="$count_before"
+  fi
+
+  # Step 2: hard count cap. Keep only the newest N files (by mtime,
+  # since that's what we have). This handles the common case where
+  # mtime is useless because RNS bulk-updates it — we can still get
+  # startup back under control by keeping a reasonable number of the
+  # most-recently-touched entries. Ratchets we delete are regenerated
+  # from live traffic on demand (one extra round-trip for the first
+  # link with an affected peer).
+  if [ "$RATCHET_MAX_COUNT" -gt 0 ] && [ "$count_after_age" -gt "$RATCHET_MAX_COUNT" ]; then
+    to_delete=$((count_after_age - RATCHET_MAX_COUNT))
+    echo "[startup] Ratchet count ${count_after_age} > cap ${RATCHET_MAX_COUNT}; deleting oldest ${to_delete}..."
+    find "$RATCHET_DIR" -type f -printf '%T@ %p\n' 2>/dev/null \
+      | sort -n \
+      | head -n "$to_delete" \
+      | cut -d' ' -f2- \
+      | xargs -r rm -f
+    count_final=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
+    echo "[startup] Ratchets after count-based prune: ${count_final}"
   fi
 fi
 
