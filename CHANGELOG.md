@@ -36,6 +36,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base updates. Was the sole reason Trivy was blocking every
   open Dependabot PR — pip-audit / bandit / codeql all passed.
 
+### Changed
+
+- **Faster container-visible startup: defer RNS init to a background
+  thread.** ``RNS.Reticulum(config_dir)`` blocks 60-300 s (occasionally
+  longer — 3½ min observed on a real deployment with 1731 known nodes
+  and 28K LXMF peers) while it replays ``destination_table``, brings
+  up TCP client interfaces to hubs, and completes internal transport
+  startup. That call used to run on the WSGI factory's main thread,
+  so gunicorn was listening on the port but every incoming request
+  hung until RNS finished. From the operator's POV: "the container
+  takes ~4 minutes to become usable after a reboot."
+
+  Now:
+  - ``NodeBrowser.__init__`` returns after the fast in-memory state
+    loading (nodes/favorites/iface stats/blocklist, sub-second) and
+    kicks off ``RNS.Reticulum(config_dir)`` in a background thread.
+    Exposes ``is_ready()`` / ``wait_ready(timeout)``.
+  - ``create_app`` queues its RNS-dependent setup steps (LXMF delivery,
+    LXMF tracker announce-handler registration, ``SiteServer.start()``,
+    session-cookie-name suffix) into a small deferred-actions list.
+    A background thread waits for ``browser.wait_ready(timeout=600)``
+    and then runs them in registration order — same behaviour as
+    before, just off the main thread.
+  - Gunicorn starts serving HTTP within ~1 second of container start
+    instead of ~4 minutes.
+  - ``/healthz`` returns HTTP 503 with ``{"status":"starting","reason":
+    "RNS transport is still coming up"}`` during the window so
+    Docker's healthcheck reflects "still booting" rather than
+    "listening but broken." Docker's ``--start-period=120s`` grace
+    window still applies.
+  - ``NodeBrowser.fetch_page`` short-circuits with
+    ``"NomadPortal is still starting up — try again in a moment"``
+    when hit before RNS is ready. ``get_diagnostics``, ``get_status``,
+    and ``ping_node`` already had defensive try/except blocks and
+    degrade to empty results during the window.
+
+  Side effect: co-located NomadPortal operators (see
+  [[transport-required-for-inbound-links]] fix earlier) may see a
+  one-time session logout at the moment the site server starts —
+  before that, the session-cookie name is Flask's default ``session``;
+  after, it switches to ``session_<XXXX>`` and any cookie under the
+  default name is ignored. Single-container operators aren't affected.
+
 ### Fixed
 
 - **Page-fetch reliability: retry on transient link failures.**

@@ -76,19 +76,66 @@ class NodeBrowser:
         self._load_iface_stats()
         self._load_blocklist()
 
-        log.info("Starting Reticulum (config: %s)", config_dir or "default")
-        self.reticulum = RNS.Reticulum(config_dir)
+        # Reticulum's constructor blocks for 60–300 seconds on real
+        # deployments while it replays destination_table, brings up
+        # TCP client interfaces to hubs, and runs internal transport
+        # startup. Running that on the main thread makes gunicorn's
+        # WSGI factory hang for the entire duration, so /healthz and
+        # the whole web UI are unreachable until it completes.
+        #
+        # Defer to a background thread. State-loading above (nodes,
+        # favorites, iface stats, blocklist) has already completed on
+        # the main thread — it's fast and its output is what the
+        # sidebar / node list needs to render even before RNS is up.
+        # RNS-dependent operations (fetch_page, get_diagnostics,
+        # ping_node, LXMF setup, site-server startup) block on
+        # ``self._ready`` before they can run.
+        self.reticulum = None
+        self._counter_handler  = None
+        self._announce_handler = None
+        self._config_dir = config_dir
+        self._ready = threading.Event()
+        threading.Thread(
+            target=self._init_reticulum,
+            daemon=True,
+            name="rns-init",
+        ).start()
 
-        self._counter_handler = _CountAnnounceHandler(self)
-        RNS.Transport.register_announce_handler(self._counter_handler)
+    def _init_reticulum(self) -> None:
+        """Background-thread RNS init. Sets ``self._ready`` on success.
+        Leaves the event unset on failure so callers keep returning 503
+        rather than exploding on a partially-initialised transport.
+        """
+        RNS = self._rns
+        try:
+            log.info("Starting Reticulum (config: %s)", self._config_dir or "default")
+            self.reticulum = RNS.Reticulum(self._config_dir)
 
-        self._announce_handler = _NodeAnnounceHandler(self)
-        RNS.Transport.register_announce_handler(self._announce_handler)
+            self._counter_handler = _CountAnnounceHandler(self)
+            RNS.Transport.register_announce_handler(self._counter_handler)
 
-        log.info(
-            "NodeBrowser ready — %d node(s) loaded, listening for announces",
-            len(self.nodes),
-        )
+            self._announce_handler = _NodeAnnounceHandler(self)
+            RNS.Transport.register_announce_handler(self._announce_handler)
+
+            log.info(
+                "NodeBrowser ready — %d node(s) loaded, listening for announces",
+                len(self.nodes),
+            )
+            self._ready.set()
+        except Exception:
+            log.exception("Reticulum init failed — RNS-dependent endpoints "
+                          "will return 503 until the process restarts")
+
+    def is_ready(self) -> bool:
+        """True once the background RNS init has finished successfully."""
+        return self._ready.is_set() and self.reticulum is not None
+
+    def wait_ready(self, timeout: Optional[float] = None) -> bool:
+        """Block up to ``timeout`` seconds for RNS to be ready. Returns
+        True on success, False on timeout. ``timeout=None`` waits
+        forever — use with care on request-handler paths.
+        """
+        return self._ready.wait(timeout=timeout)
 
     # ------------------------------------------------------------------
     # Public API
@@ -254,6 +301,13 @@ class NodeBrowser:
         `timeout` seconds, the fetch is aborted — as "no response" if
         nothing ever arrived, otherwise "lost connection".
         """
+        # RNS.Reticulum() is initialised in a background thread so the web
+        # UI can serve while Transport comes up (~2-4 min on a busy
+        # deployment). Reject fetches gracefully during that window rather
+        # than crashing on RNS.Transport access.
+        if not self.is_ready():
+            return None, "NomadPortal is still starting up — try again in a moment"
+
         RNS = self._rns
         try:
             dest_hash = bytes.fromhex(destination_hash_hex)

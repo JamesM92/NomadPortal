@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 import datetime
 from flask import Flask, abort, has_request_context, redirect, render_template, request, send_from_directory
@@ -56,6 +57,21 @@ def create_app(
     config_dir = cfg.get("CONFIG_DIR", "/config")
     rns_dir    = cfg.get("RNS_CONFIG_DIR", "/config/reticulum")
 
+    # RNS-dependent setup steps get queued here and run in a background
+    # thread AFTER the browser's own RNS init has finished (see the
+    # trailing block in create_app that launches that thread). Keeping
+    # them off the main path is what lets gunicorn accept connections
+    # in seconds instead of waiting the ~3 minutes RNS.Reticulum()
+    # blocks for during startup.
+    _deferred_rns_actions: list = []
+
+    def _defer_after_rns(name: str, fn):
+        """Queue an RNS-touching callable to run after ``browser.wait_ready()``.
+        Exceptions inside ``fn`` are caught and logged (with ``name``) so one
+        failing step doesn't kill the rest of the background init.
+        """
+        _deferred_rns_actions.append((name, fn))
+
     msg_store = MessageStore(config_dir)
     con_store = ContactStoreManager(config_dir)
     app.config["IDENTITY_STORE"] = IdentityStore(rns_dir)
@@ -102,19 +118,21 @@ def create_app(
         except Exception as exc:
             log.warning("Could not pre-create local admin identity: %s", exc)
 
-    try:
-        messaging.setup_delivery(app.config["IDENTITY_STORE"])
-    except Exception as exc:
-        log.warning("LXMF delivery setup failed: %s", exc)
+    # LXMF delivery setup registers LXMF destinations with the running
+    # RNS Transport, so it has to wait for that to be up.
+    _defer_after_rns(
+        "LXMF delivery setup",
+        lambda: messaging.setup_delivery(app.config["IDENTITY_STORE"]),
+    )
 
     lxmf_tracker = LXMFPeerTracker(config_dir)
     app.config["LXMF_TRACKER"] = lxmf_tracker
-    try:
+
+    def _register_lxmf_tracker():
         import RNS
         RNS.Transport.register_announce_handler(lxmf_tracker.register_announce_handler())
         log.info("LXMF peer tracker registered")
-    except Exception as exc:
-        log.warning("LXMF peer tracker registration failed: %s", exc)
+    _defer_after_rns("LXMF tracker registration", _register_lxmf_tracker)
 
     users_yml = cfg.get("USERS_YML", "/config/users.yml")
     app.config["USER_STORE"]  = UserStore(users_yml)
@@ -165,6 +183,10 @@ def create_app(
     announce_interval = max(MIN_ANNOUNCE_INTERVAL,
                             min(MAX_ANNOUNCE_INTERVAL, announce_interval))
 
+    # SiteServer object is constructed synchronously (its __init__ only
+    # stores config), but .start() has to wait for RNS since it registers
+    # a Destination on the running Transport. Same for the cookie-name
+    # suffix that reads site_server.node_hash().
     if not hosting_enabled:
         log.info("Site hosting disabled (UI/env config)")
         app.config["SITE_SERVER"] = None
@@ -182,14 +204,23 @@ def create_app(
             auto_announce=auto_announce,
             announce_interval=announce_interval,
         )
-        try:
+        # Publish the object early so admin routes / dashboard can
+        # reference it before start() completes (they'll show "site
+        # starting" until node_hash() is populated).
+        app.config["SITE_SERVER"] = site_server
+
+        def _start_site_server():
             site_server.start()
-            app.config["SITE_SERVER"] = site_server
             browser._hosted_hash = site_server.node_hash() or ""
             browser._hosted_name = site_server.node_name() or ""
             log.info("Site server active at hash %s", site_server.node_hash()[:16])
-        except Exception as exc:
-            log.warning("Site server failed to start: %s", exc)
+            # Now that the hosted node hash is known, retroactively set the
+            # session-cookie-name suffix (see the comment near the Flask
+            # session interface init below for why this matters).
+            node_hash = site_server.node_hash() or ""
+            if len(node_hash) >= 4:
+                app.config["SESSION_COOKIE_NAME"] = f"session_{node_hash[-4:]}"
+        _defer_after_rns("Site server start", _start_site_server)
     else:
         app.config["SITE_SERVER"] = None
 
@@ -225,14 +256,15 @@ def create_app(
 
     # Suffix the session cookie with the last 4 chars of the hosted node hash
     # so co-located NomadPortal instances on the same browser host (different
-    # ports) don't clobber each other's sessions. Browsers scope cookies by
-    # hostname only — two instances on the same IP would otherwise share one
-    # "session" cookie and the second login would invalidate the first.
-    site_server = app.config.get("SITE_SERVER")
-    if site_server is not None:
-        node_hash = site_server.node_hash() or ""
-        if len(node_hash) >= 4:
-            app.config["SESSION_COOKIE_NAME"] = f"session_{node_hash[-4:]}"
+    # ports) don't clobber each other's sessions. The suffix requires
+    # ``site_server.node_hash()``, which is only populated once site_server
+    # starts (deferred until RNS is ready). ``_start_site_server`` above
+    # updates ``SESSION_COOKIE_NAME`` when that finishes. During the
+    # startup window the default ``session`` name is in effect —
+    # co-located operators may see a one-time logout when RNS finishes
+    # coming up, but that's rare enough and gets self-corrected on the
+    # next login. Single-container operators (the common case) are
+    # unaffected.
 
     # Attach log buffer to root logger
     log_buffer.setLevel(logging.DEBUG)
@@ -362,5 +394,32 @@ def create_app(
     @app.errorhandler(500)
     def _err500(e):
         return render_template("errors/500.html"), 500
+
+    # Fire the deferred RNS-dependent init in a background thread. Waits for
+    # the browser's own RNS init to complete (up to 10 min — pathological
+    # RNS storage / hub-timeouts can take a while), then runs each queued
+    # step in registration order. Any step that raises is logged and
+    # skipped so a downstream failure doesn't block the others.
+    def _run_deferred_rns_init():
+        if not browser.wait_ready(timeout=600):
+            log.error(
+                "RNS did not become ready within 10 minutes — deferred "
+                "startup (LXMF, site server, etc) skipped. RNS-dependent "
+                "endpoints will keep returning 503 until the process is "
+                "restarted."
+            )
+            return
+        for name, fn in _deferred_rns_actions:
+            try:
+                fn()
+            except Exception as exc:
+                log.warning("Deferred RNS setup step '%s' failed: %s", name, exc)
+        log.info("NomadPortal deferred RNS-dependent setup complete")
+
+    threading.Thread(
+        target=_run_deferred_rns_init,
+        daemon=True,
+        name="rns-deferred-init",
+    ).start()
 
     return app
