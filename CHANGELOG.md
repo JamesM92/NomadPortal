@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Stale "single-operator tool" startup log line.** Every container
+  start logged ``NomadPortal is a single-operator tool. All logged-in
+  users share the same identity, message, and contact stores.`` —
+  which stopped being accurate when per-user identities landed
+  (each logged-in user gets their own LXMF identity via
+  ``IdentityStore.ensure_for_user``, seen in startup log lines like
+  ``Registered delivery identity <hex> → LXMF addr <hex> (user <sub>)``).
+  Removed. The README / SECURITY.md still describe NomadPortal as a
+  "single-operator application" in the security-model sense —
+  operator-vs-network trust boundary, one person deploying — which is
+  still correct.
+
 ### Security
 
 - **GitHub Actions batch bump** — brings the CI actions to their
