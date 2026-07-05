@@ -62,8 +62,12 @@ ENV RNS_CONFIG_DIR=/config/reticulum \
 # Healthcheck hits /healthz, which returns 503 if RNS has no online
 # interfaces (different from /api/status, which only confirms gunicorn is
 # listening). start-period is generous because RNS state replay can take
-# 60+ s when destination_table has accumulated months of paths.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+# 60-300s when destination_table has accumulated months of paths — real
+# deployments have been observed at ~3:30 with 1700+ known nodes and
+# 28K LXMF peers. 300s covers the observed distribution comfortably;
+# containers that are still warming past that mark start reporting
+# unhealthy, which is the correct signal at that point.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
   CMD python -c "import os, urllib.request, ssl; https=(os.environ.get('WEB_PORT_HTTPS') or '').strip(); http=(os.environ.get('WEB_PORT') or '').strip(); port=https or http or '8443'; tls=bool(https) or (not http); ctx=(ssl._create_unverified_context() if tls else None); urllib.request.urlopen(f'{\"https\" if tls else \"http\"}://localhost:{port}/healthz', context=ctx, timeout=4)"
 
 USER nomadnet

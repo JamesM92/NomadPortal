@@ -52,6 +52,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI container-startup smoke test.** ``build.yml``'s docker-build
+  job now boots the freshly-built image, waits for gunicorn to
+  accept HTTP, waits up to 3 min for ``/healthz`` to reach 200 (or
+  stay 503 with ``status: starting``), confirms the login page
+  renders, and verifies the container hasn't crashed mid-test.
+  Would have caught the ``signal.signal()`` ValueError shipped in
+  the deferred-init refactor before real containers hit it —
+  future startup-path regressions get a similar fast-feedback
+  gate. Doesn't test real RNS behaviour (no mesh in CI); the
+  smoke test's job is "container comes up cleanly," not "the
+  mesh works."
+
+- **Bump ``HEALTHCHECK --start-period`` from 120s → 300s.** Real
+  deployments have been observed booting in ~3:30 (RNS
+  destination_table replay + hub-TCP + 28K LXMF peers). At 120s
+  Docker starts running the healthcheck for real just as the
+  container is finishing warmup, flapping it "unhealthy" for
+  30-60s before the first ``/healthz=200`` lands. 300s covers
+  the observed distribution comfortably; containers still
+  warming past that report unhealthy honestly.
+
 - **RNS startup ETA in ``/healthz`` and the "warming up" browser
   message.** NodeBrowser now records how long ``RNS.Reticulum()``
   took on each restart and persists a rolling window of the last 5

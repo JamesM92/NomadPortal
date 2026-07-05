@@ -40,11 +40,99 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build image (no push)
+      - name: Build image (no push, load locally for smoke test)
         uses: docker/build-push-action@v7
         with:
           context: .
           push: false
+          load: true
           tags: nomadportal:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Container startup smoke test.
+      #
+      # Catches import errors, config-parse errors, background-thread
+      # signal-handler bugs (like the one that shipped in the deferred-RNS
+      # refactor and blew up in production), and generally anything that
+      # kills startup — the pattern being "container appears up but nothing
+      # responds." The signal.signal ValueError we hit would have failed
+      # this in <30s if it had existed.
+      #
+      # Deliberately does NOT try to test real RNS behaviour — there's no
+      # mesh in CI. We accept /healthz returning 503 with status=starting
+      # as a valid transient state, so long as the container is running
+      # and gunicorn is serving. A 200 is a bonus (means RNS came up in
+      # CI, which usually happens within 30-60s on a fresh volume).
+      - name: Smoke test — container starts and serves HTTP
+        run: |
+          set -euo pipefail
+
+          docker run -d --name smoke \
+            -e ADMIN_PASSWORD=smoketest \
+            -e WEB_PORT=8080 \
+            -e WEB_PORT_HTTPS= \
+            -p 127.0.0.1:8080:8080 \
+            nomadportal:ci
+
+          # 1. Gunicorn must accept HTTP within 30s — the deferred-init
+          #    refactor promised this.
+          echo "Waiting for gunicorn to accept requests..."
+          gunicorn_up=""
+          for i in $(seq 1 15); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/healthz || echo 000)
+            if [ "$code" != "000" ] && [ -n "$code" ]; then
+              gunicorn_up=1
+              echo "  gunicorn responded after $((i*2))s (healthz: $code)"
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$gunicorn_up" ]; then
+            echo "::error::gunicorn did not accept any connection within 30s"
+            docker logs smoke
+            exit 1
+          fi
+
+          # 2. Wait up to 3 min for /healthz=200. Accept 503 as transient,
+          #    fail on any other 5xx.
+          echo "Waiting for /healthz=200 or timeout..."
+          for i in $(seq 1 90); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/healthz)
+            case "$code" in
+              200)
+                echo "  RNS ready after $((i*2))s"
+                break ;;
+              503) ;;                 # starting or degraded — keep waiting
+              5*)
+                echo "::error::/healthz returned $code"
+                docker logs smoke
+                exit 1 ;;
+            esac
+            sleep 2
+          done
+
+          # 3. Login page renders (no auth, no RNS required — pure Flask).
+          echo "Checking /auth/login renders..."
+          code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/auth/login)
+          case "$code" in
+            2*|3*) echo "  /auth/login: $code (OK)" ;;
+            *)
+              echo "::error::/auth/login returned $code"
+              docker logs smoke
+              exit 1 ;;
+          esac
+
+          # 4. Container is still running (didn't crash mid-test).
+          if [ -z "$(docker ps -q --filter name=smoke)" ]; then
+            echo "::error::container exited during smoke test"
+            docker logs smoke
+            exit 1
+          fi
+
+          echo "Smoke test passed"
+          docker logs --tail 30 smoke
+
+      - name: Cleanup smoke test container
+        if: always()
+        run: docker rm -f smoke 2>/dev/null || true
