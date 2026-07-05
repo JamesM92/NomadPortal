@@ -65,18 +65,24 @@ jobs:
       # and gunicorn is serving. A 200 is a bonus (means RNS came up in
       # CI, which usually happens within 30-60s on a fresh volume).
       - name: Smoke test — container starts and serves HTTP
+        # GitHub's default is `bash -e {0}`. That aborts the whole step
+        # the first time `curl` returns a non-zero exit code (connection
+        # refused during startup), even when we're using `$(...)` and
+        # inspecting the output ourselves. Drop `-e` for this step so we
+        # can handle each curl outcome explicitly.
+        shell: bash --noprofile --norc -o pipefail {0}
         run: |
-          # NOTE: no `set -e` — we handle curl failures explicitly.
-          # `curl -w '%{http_code}'` prints "000" on connection refused
-          # AND returns exit 7. Chaining with `|| echo 000` would append
-          # to the already-printed "000" (giving "000000") and treat
-          # that as a real response.
-          set -uo pipefail
+          set -u
 
-          # helper: return the HTTP status code, or "000" on any failure
+          # helper: print the HTTP status code (or "000" on connection
+          # failure) and always exit 0 so callers survive under set -e.
+          # `curl -w '%{http_code}'` prints "000" whenever it can't get
+          # a response, so we never need to add a fallback ourselves —
+          # chaining `|| echo 000` would append to that and give "000000".
           probe() {
-            local url="$1"
-            curl -sk -o /dev/null -w '%{http_code}' "$url" 2>/dev/null
+            local code
+            code=$(curl -sk -o /dev/null -w '%{http_code}' "$1" 2>/dev/null) || :
+            printf '%s' "$code"
           }
 
           docker run -d --name smoke \
