@@ -295,6 +295,15 @@ def healthz():
         return jsonify({"status": "starting",
                         "reason": "browser not initialised"}), 503
 
+    # RNS.Reticulum() blocks 60-300 s at container start while it replays
+    # destination_table and brings up TCP interfaces. Report "starting"
+    # until the background init has finished so Docker's healthcheck
+    # gives the container a grace period rather than flapping it as
+    # unhealthy repeatedly during a legitimate boot.
+    if hasattr(browser, "is_ready") and not browser.is_ready():
+        return jsonify({"status": "starting",
+                        "reason": "RNS transport is still coming up"}), 503
+
     try:
         status = browser.get_status()
     except Exception:
