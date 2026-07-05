@@ -403,22 +403,10 @@ class NodeBrowser:
         # we have prior-run history to base it on.
         if not self.is_ready():
             prog = self.rns_init_progress()
-            elapsed = prog.get("elapsed_seconds", 0)
             remaining = prog.get("estimated_remaining_seconds")
             if remaining is not None:
-                msg = (f"Reticulum transport is still coming up "
-                       f"(started {elapsed}s ago, ~{remaining}s remaining "
-                       f"based on the last {prog['history_sample_size']} "
-                       f"restart(s)). The web UI is ready — just RNS "
-                       f"needs another moment before it can fetch remote "
-                       f"pages.")
-            else:
-                msg = ("Reticulum transport is still coming up. The web "
-                       "UI is ready — RNS needs another moment before "
-                       "it can fetch remote pages. First-time boot on "
-                       "this volume, so no ETA yet; typical range is "
-                       "60-300 seconds.")
-            return None, msg
+                return None, f"Reticulum transport is still coming up (~{remaining}s remaining)"
+            return None, "Reticulum transport is still coming up"
 
         RNS = self._rns
         try:
