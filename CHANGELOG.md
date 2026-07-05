@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Bump `python:3.14-slim-trixie` base image** to the latest digest
+  (`sha256:b877e50…`). Picks up
+  [CVE-2026-45447](https://avd.aquasec.com/nvd/cve-2026-45447)
+  (HIGH — heap use-after-free in OpenSSL `PKCS7_verify()`,
+  `libssl` 3.5.6-1~deb13u1 → 3.5.6-1~deb13u2) plus other trixie
+  base updates. Was the sole reason Trivy was blocking every
+  open Dependabot PR — pip-audit / bandit / codeql all passed.
+
 ### Fixed
 
 - **Page-fetch reliability: retry on transient link failures.**
