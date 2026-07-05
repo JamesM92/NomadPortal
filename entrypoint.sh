@@ -39,6 +39,36 @@ if [ ! -f "$SITE_SEED_MARKER" ]; then
 fi
 
 
+# Prune old ratchet files before RNS starts. RNS keeps per-peer
+# forward-secrecy ratchets under $RNS_CONFIG_DIR/storage/ratchets/,
+# one small file each. On long-running installs this accumulates —
+# 15K+ files was observed to cause ~10 min startups because RNS
+# reads them one at a time during Reticulum() init. Ratchets are
+# regenerated from live traffic, so pruning old ones costs at most
+# a one-time re-establish per still-active peer we hear from again;
+# genuinely stale peers just stay stale.
+#
+# Tunable via NOMADPORTAL_RATCHET_MAX_AGE_DAYS (default 30). Set to
+# 0 to disable pruning entirely.
+RATCHET_MAX_AGE_DAYS="${NOMADPORTAL_RATCHET_MAX_AGE_DAYS:-30}"
+if [ "$RATCHET_MAX_AGE_DAYS" -gt 0 ]; then
+  RATCHET_DIR="${RNS_CONFIG_DIR:-/config/reticulum}/storage/ratchets"
+  if [ -d "$RATCHET_DIR" ]; then
+    count_before=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
+    if [ "$count_before" -gt 0 ]; then
+      echo "[startup] Pruning ratchets older than ${RATCHET_MAX_AGE_DAYS}d (currently ${count_before} files)..."
+      find "$RATCHET_DIR" -type f -mtime "+${RATCHET_MAX_AGE_DAYS}" -delete 2>/dev/null || true
+      count_after=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
+      pruned=$((count_before - count_after))
+      if [ "$pruned" -gt 0 ]; then
+        echo "[startup] Pruned ${pruned} old ratchet(s); ${count_after} remaining"
+      else
+        echo "[startup] No ratchets older than ${RATCHET_MAX_AGE_DAYS}d; keeping all ${count_after}"
+      fi
+    fi
+  fi
+fi
+
 HTTPS_PORT="${WEB_PORT_HTTPS:-}"
 HTTP_PORT="${WEB_PORT:-}"
 

@@ -52,6 +52,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Auto-prune old RNS ratchet files at container startup.** RNS
+  keeps per-peer forward-secrecy ratchets under
+  ``$RNS_CONFIG_DIR/storage/ratchets/``, one small file each. On
+  long-running installs this accumulates — 15K+ files was
+  observed to cause ~10 min container startups (RNS loads them
+  one at a time during ``Reticulum()`` init, ~30-50ms each). The
+  entrypoint now runs a ``find -mtime`` prune before launching
+  gunicorn: files older than 30 days by default are deleted, and
+  RNS regenerates them on-demand from live traffic (one-time
+  re-establishment cost per still-active peer). Genuinely-stale
+  peers just stay stale.
+
+  Configurable via ``NOMADPORTAL_RATCHET_MAX_AGE_DAYS`` env var
+  (default 30; set 0 to disable). Prune runs before RNS starts
+  so its effect is felt on the *current* boot, not the next one.
+
 - **CI container-startup smoke test.** ``build.yml``'s docker-build
   job now boots the freshly-built image, waits for gunicorn to
   accept HTTP, waits up to 3 min for ``/healthz`` to reach 200 (or
