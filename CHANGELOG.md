@@ -50,6 +50,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base updates. Was the sole reason Trivy was blocking every
   open Dependabot PR — pip-audit / bandit / codeql all passed.
 
+### Added
+
+- **RNS startup ETA in ``/healthz`` and the "warming up" browser
+  message.** NodeBrowser now records how long ``RNS.Reticulum()``
+  took on each restart and persists a rolling window of the last 5
+  durations to ``<config>/rns_init_stats.json``. During the next
+  restart's warmup window, ``/healthz`` and the ``fetch_page``
+  friendly-error message include:
+  - ``elapsed_seconds`` — how long RNS has been coming up
+  - ``estimated_total_seconds`` — median of past runs
+  - ``estimated_remaining_seconds`` — ``max(0, total - elapsed)``
+  - ``history_sample_size`` — how many past runs the estimate uses
+
+  Median instead of mean so a single stuck run (hub TCP timeout,
+  bloated destination_table, etc.) doesn't skew the estimate for
+  months. First boot on a fresh volume returns no ETA and quotes
+  the typical range (60-300 s) instead.
+
 ### Changed
 
 - **Faster container-visible startup: defer RNS init to a background
