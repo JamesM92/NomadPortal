@@ -134,6 +134,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Page-fetch reliability: re-issue path requests during discovery.**
+  ``fetch_page`` used to call ``RNS.Transport.request_path()`` once,
+  then poll ``has_path`` silently for 60s. When the initial request
+  packet (or its response) got dropped anywhere on the mesh — which
+  is common — the whole 60s window was wasted and the fetch failed
+  with "Path not found." This was a real difference vs. clients like
+  MeshChat that reach the same destinations more reliably.
+
+  Now: re-issue the path request every 15s inside the 60s window
+  (t=0/15/30/45), giving the mesh up to four chances to answer. The
+  request is idempotent so replaying it is cheap. Same change
+  applied to ``ping_node`` for consistency.
+
 - **Page-fetch reliability: retry on transient link failures.**
   Under real-world Reticulum meshes, ``fetch_page`` used to fail on
   the first transient hiccup with "Link closed before response" —
