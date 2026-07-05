@@ -375,12 +375,6 @@ def create_app(
             "ADMIN_PASSWORD to grant admin access."
         )
 
-    # Warn that this is a single-operator tool
-    log.info(
-        "NomadPortal is a single-operator tool. All logged-in users share "
-        "the same identity, message, and contact stores."
-    )
-
     # robots.txt
     @app.route("/robots.txt")
     def _robots():
