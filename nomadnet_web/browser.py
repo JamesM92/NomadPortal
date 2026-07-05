@@ -232,6 +232,7 @@ class NodeBrowser:
             "history_sample_size":          len(self._rns_init_history),
             "estimated_total_seconds":      None,
             "estimated_remaining_seconds":  None,
+            "past_estimate":                False,
         }
         if self._rns_init_history:
             # Median instead of mean — resistant to a single outlier
@@ -242,6 +243,7 @@ class NodeBrowser:
                       else (sorted_h[n // 2 - 1] + sorted_h[n // 2]) / 2)
             info["estimated_total_seconds"]     = int(median)
             info["estimated_remaining_seconds"] = max(0, int(median - elapsed))
+            info["past_estimate"]               = elapsed > median
         return info
 
     def is_ready(self) -> bool:
@@ -427,6 +429,10 @@ class NodeBrowser:
         if not self.is_ready():
             prog = self.rns_init_progress()
             remaining = prog.get("estimated_remaining_seconds")
+            if prog.get("past_estimate"):
+                elapsed = prog.get("elapsed_seconds", 0)
+                return None, (f"Reticulum transport is still coming up "
+                              f"({elapsed}s elapsed, past the usual estimate)")
             if remaining is not None:
                 return None, f"Reticulum transport is still coming up (~{remaining}s remaining)"
             return None, "Reticulum transport is still coming up"
