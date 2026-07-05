@@ -301,8 +301,14 @@ def healthz():
     # gives the container a grace period rather than flapping it as
     # unhealthy repeatedly during a legitimate boot.
     if hasattr(browser, "is_ready") and not browser.is_ready():
+        # rns_init_progress() adds elapsed_seconds, an ETA derived from
+        # persisted prior-run durations, and how many past runs the
+        # estimate is based on (0 = first boot on this volume, no ETA).
+        progress = (browser.rns_init_progress()
+                    if hasattr(browser, "rns_init_progress") else {})
         return jsonify({"status": "starting",
-                        "reason": "RNS transport is still coming up"}), 503
+                        "reason": "RNS transport is still coming up",
+                        **progress}), 503
 
     try:
         status = browser.get_status()

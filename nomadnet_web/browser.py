@@ -95,6 +95,15 @@ class NodeBrowser:
         self._announce_handler = None
         self._config_dir = config_dir
         self._ready = threading.Event()
+
+        # RNS init timing — kept so /healthz can report elapsed time and
+        # an ETA derived from previous startup durations. First run has
+        # no history so the ETA is None; the second run onwards gets a
+        # median of the last few durations.
+        self._rns_init_history: list = self._load_rns_init_history()
+        self._rns_init_start_mono:  Optional[float] = None
+        self._rns_init_end_mono:    Optional[float] = None
+
         threading.Thread(
             target=self._init_reticulum,
             daemon=True,
@@ -105,8 +114,11 @@ class NodeBrowser:
         """Background-thread RNS init. Sets ``self._ready`` on success.
         Leaves the event unset on failure so callers keep returning 503
         rather than exploding on a partially-initialised transport.
+        Records the duration on success so subsequent restarts can quote
+        an ETA in ``rns_init_progress()``.
         """
         RNS = self._rns
+        self._rns_init_start_mono = time.monotonic()
         try:
             log.info("Starting Reticulum (config: %s)", self._config_dir or "default")
             self.reticulum = RNS.Reticulum(self._config_dir)
@@ -117,14 +129,97 @@ class NodeBrowser:
             self._announce_handler = _NodeAnnounceHandler(self)
             RNS.Transport.register_announce_handler(self._announce_handler)
 
+            self._rns_init_end_mono = time.monotonic()
+            duration = self._rns_init_end_mono - self._rns_init_start_mono
             log.info(
-                "NodeBrowser ready — %d node(s) loaded, listening for announces",
-                len(self.nodes),
+                "NodeBrowser ready — %d node(s) loaded, listening for "
+                "announces (RNS init took %.1fs)",
+                len(self.nodes), duration,
             )
+            self._save_rns_init_history(duration)
             self._ready.set()
         except Exception:
             log.exception("Reticulum init failed — RNS-dependent endpoints "
                           "will return 503 until the process restarts")
+
+    _RNS_STATS_FILENAME = "rns_init_stats.json"
+    _RNS_STATS_MAX_HISTORY = 5
+
+    def _rns_stats_path(self) -> str:
+        return os.path.join(
+            os.path.dirname(self._nodes_file), self._RNS_STATS_FILENAME,
+        )
+
+    def _load_rns_init_history(self) -> list:
+        """Read the rolling window of prior RNS init durations. Returns
+        an empty list on any error / first run.
+        """
+        try:
+            path = self._rns_stats_path()
+            if not os.path.exists(path):
+                return []
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            raw = data.get("durations", [])
+            return [float(v) for v in raw
+                    if isinstance(v, (int, float)) and v > 0][-self._RNS_STATS_MAX_HISTORY:]
+        except Exception:
+            log.debug("Could not read RNS init history", exc_info=True)
+            return []
+
+    def _save_rns_init_history(self, new_duration: float) -> None:
+        """Append this run's duration and trim to the rolling window."""
+        try:
+            self._rns_init_history.append(float(new_duration))
+            self._rns_init_history = self._rns_init_history[-self._RNS_STATS_MAX_HISTORY:]
+            path = self._rns_stats_path()
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"durations": self._rns_init_history}, fh)
+        except Exception:
+            log.debug("Could not persist RNS init history", exc_info=True)
+
+    def rns_init_progress(self) -> dict:
+        """Snapshot of the current RNS init state for callers who want
+        to show a progress hint or ETA. Returns keys:
+
+          * ``ready``               — True once RNS is up.
+          * ``starting``            — True while init is in flight.
+          * ``elapsed_seconds``     — int seconds since init began (only
+                                      while starting).
+          * ``estimated_total_seconds`` — median of the persisted history
+                                          (None on first run).
+          * ``estimated_remaining_seconds`` — max(0, total-elapsed), or
+                                              None if no history.
+          * ``history_sample_size`` — number of past runs the estimate
+                                       is drawn from.
+        """
+        if self.is_ready():
+            return {"ready": True, "starting": False}
+
+        if self._rns_init_start_mono is None:
+            # Background thread hasn't reached its body yet — should
+            # basically never be observed but guard against it.
+            return {"ready": False, "starting": False}
+
+        elapsed = time.monotonic() - self._rns_init_start_mono
+        info = {
+            "ready":                        False,
+            "starting":                     True,
+            "elapsed_seconds":              int(elapsed),
+            "history_sample_size":          len(self._rns_init_history),
+            "estimated_total_seconds":      None,
+            "estimated_remaining_seconds":  None,
+        }
+        if self._rns_init_history:
+            # Median instead of mean — resistant to a single outlier
+            # (e.g. a run that got stuck on a hub TCP timeout).
+            sorted_h = sorted(self._rns_init_history)
+            n = len(sorted_h)
+            median = (sorted_h[n // 2] if n % 2 == 1
+                      else (sorted_h[n // 2 - 1] + sorted_h[n // 2]) / 2)
+            info["estimated_total_seconds"]     = int(median)
+            info["estimated_remaining_seconds"] = max(0, int(median - elapsed))
+        return info
 
     def is_ready(self) -> bool:
         """True once the background RNS init has finished successfully."""
@@ -304,12 +399,26 @@ class NodeBrowser:
         # RNS.Reticulum() is initialised in a background thread so the web
         # UI can serve while Transport comes up (~2-4 min on a busy
         # deployment). Reject fetches gracefully during that window rather
-        # than crashing on RNS.Transport access.
+        # than crashing on RNS.Transport access. Include the ETA when
+        # we have prior-run history to base it on.
         if not self.is_ready():
-            return None, ("Reticulum transport is still coming up — the "
-                          "web UI is ready but RNS needs another moment "
-                          "before it can fetch remote pages. Try again "
-                          "shortly.")
+            prog = self.rns_init_progress()
+            elapsed = prog.get("elapsed_seconds", 0)
+            remaining = prog.get("estimated_remaining_seconds")
+            if remaining is not None:
+                msg = (f"Reticulum transport is still coming up "
+                       f"(started {elapsed}s ago, ~{remaining}s remaining "
+                       f"based on the last {prog['history_sample_size']} "
+                       f"restart(s)). The web UI is ready — just RNS "
+                       f"needs another moment before it can fetch remote "
+                       f"pages.")
+            else:
+                msg = ("Reticulum transport is still coming up. The web "
+                       "UI is ready — RNS needs another moment before "
+                       "it can fetch remote pages. First-time boot on "
+                       "this volume, so no ETA yet; typical range is "
+                       "60-300 seconds.")
+            return None, msg
 
         RNS = self._rns
         try:
