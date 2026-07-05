@@ -29,7 +29,7 @@ jobs:
     name: pip-audit (Python deps)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: requirements.txt
@@ -38,7 +38,7 @@ jobs:
     name: bandit (Python security linter)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -51,8 +51,8 @@ jobs:
     name: hadolint (Dockerfile linter)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: hadolint/hadolint-action@v3.1.0
+      - uses: actions/checkout@v7
+      - uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: Dockerfile
           # Fail only on errors (not warnings/info) by default — change to
@@ -63,7 +63,7 @@ jobs:
     name: trivy (image vulnerability scan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -93,9 +93,9 @@ jobs:
     name: gitleaks (secret detection)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so gitleaks scans every commit
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

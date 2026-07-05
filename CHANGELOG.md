@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **GitHub Actions batch bump** — brings the CI actions to their
+  current major versions. Also fixes the
+  `Node.js 20 is deprecated` runner warning that was firing on
+  every `security.yml` run (gitleaks v2 was still on Node 20).
+  Bumps:
+  - `actions/checkout@v6 → v7` (5 workflow files)
+  - `docker/metadata-action@v5 → v6` (`release.yml`)
+  - `github/codeql-action/{init,autobuild,analyze}@v3 → v4`
+    (`codeql.yml`)
+  - `hadolint/hadolint-action@v3.1.0 → v3.3.0` (`security.yml`)
+  - `gitleaks/gitleaks-action@v2 → v3` (`security.yml`)
+
+  All are same-config bumps — no workflow syntax changes needed.
+  Batches the outstanding Dependabot PRs #15, #16, #17, #19, #20
+  into a single dev commit; those PRs will auto-close on next
+  main promotion.
+- **`pytest 9.0.3 → 9.1.1`** (dev/test dep). Bundled here rather
+  than as a standalone commit — same reason.
+
 - **Bump `python:3.14-slim-trixie` base image** to the latest digest
   (`sha256:b877e50…`). Picks up
   [CVE-2026-45447](https://avd.aquasec.com/nvd/cve-2026-45447)
