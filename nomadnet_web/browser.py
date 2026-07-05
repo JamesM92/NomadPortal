@@ -464,9 +464,21 @@ class NodeBrowser:
         if not is_local and not RNS.Transport.has_path(dest_hash):
             log.info("Requesting path to %s", destination_hash_hex)
             RNS.Transport.request_path(dest_hash)
-            deadline = time.time() + PATH_TIMEOUT
+            path_start   = time.time()
+            deadline     = path_start + PATH_TIMEOUT
+            # Re-issue the path request every 15s inside the polling
+            # window. RNS.Transport.request_path is idempotent, and
+            # broadcast packets do get dropped — sending once and then
+            # waiting silently for 60s means a single lost initial
+            # request wastes the whole window. Four attempts (t=0/15/30/45)
+            # gives the mesh a fair chance to answer even when packets
+            # go missing. This is one of the differences between
+            # NomadPortal and clients that reach the same destinations
+            # more reliably.
+            next_retry = path_start + 15
             while not RNS.Transport.has_path(dest_hash):
-                if time.time() > deadline:
+                now = time.time()
+                if now > deadline:
                     log.warning(
                         "fetch_page: path discovery timed out for %s",
                         destination_hash_hex[:16],
@@ -474,6 +486,14 @@ class NodeBrowser:
                     self._record_fetch(destination_hash_hex.lower(), 0, 0, ok=False,
                                        update_status=is_index)
                     return None, "Path not found — node may be unreachable"
+                if now >= next_retry:
+                    log.info(
+                        "Re-requesting path to %s (still no path after %ds)",
+                        destination_hash_hex[:16],
+                        int(now - path_start),
+                    )
+                    RNS.Transport.request_path(dest_hash)
+                    next_retry = now + 15
                 time.sleep(0.1)
 
         identity = RNS.Identity.recall(dest_hash)
@@ -918,11 +938,20 @@ class NodeBrowser:
             pass
 
         if not is_local and not RNS.Transport.has_path(dest_hash):
+            # Same re-issue pattern as fetch_page: broadcast path
+            # requests get dropped, so send one every 15s inside the
+            # 60s window instead of relying on the initial packet.
             RNS.Transport.request_path(dest_hash)
-            deadline = time.time() + PATH_TIMEOUT
+            path_start = time.time()
+            deadline   = path_start + PATH_TIMEOUT
+            next_retry = path_start + 15
             while not RNS.Transport.has_path(dest_hash):
-                if time.time() > deadline:
+                now = time.time()
+                if now > deadline:
                     return None, "No path to node"
+                if now >= next_retry:
+                    RNS.Transport.request_path(dest_hash)
+                    next_retry = now + 15
                 time.sleep(0.1)
 
         identity = RNS.Identity.recall(dest_hash)
