@@ -320,201 +320,249 @@ class NodeBrowser:
             NODE_ASPECT,
         )
 
-        result: dict = {"content": None, "error": None}
-        done = threading.Event()
-        last_activity = [time.monotonic()]
-        link_active = [False]
-        progress_started = [False]
         t_start = time.monotonic()
 
-        def _bump():
-            last_activity[0] = time.monotonic()
+        # Fetch is wrapped in a small retry loop. RNS link establishment
+        # over an unstable mesh path fails intermittently — a common
+        # symptom is "Link closed before response" while other clients
+        # (MeshChat, Sideband) on the same mesh reach the same host fine.
+        # A single-attempt fetch turned every transient blip into a
+        # user-visible failure. Retrying with a fresh path lookup handles
+        # the common stale-route case; the total attempts is bounded so a
+        # genuinely-unreachable destination still fails within a
+        # reasonable time budget.
+        MAX_ATTEMPTS      = 3
+        RETRY_SLEEP       = 1.5
+        RETRYABLE_ERRORS  = ("Link closed before response", "Page request failed")
 
-        def _on_response(receipt):
-            # NomadNet ships three different response shapes through the
-            # same `receipt.response` slot — bytes for pages, `(name_bytes,
-            # data_bytes)` for small files, and `io.BufferedReader` for
-            # large files streamed via an RNS Resource. Treating any of
-            # them as `bytes(...)` blindly was raising TypeError on file
-            # responses; the exception killed the callback before
-            # `done.set()`, so the fetch sat waiting until the link closed
-            # — producing the misleading "Link closed before response"
-            # error even though the file had transferred successfully.
-            try:
-                resp = receipt.response
-                if resp is None:
-                    result["content"] = b""
-                    result["error"] = "Empty response from node"
-                elif isinstance(resp, tuple) and len(resp) >= 2:
-                    # (file_name_bytes, file_data_bytes) — mirrors NomadNet's
-                    # textui Browser handling at file_received().
-                    result["content"] = bytes(resp[1])
-                elif hasattr(resp, "read"):
-                    # io.BufferedReader pointing at the streamed temp file.
-                    try:
-                        resp.seek(0)
-                    except Exception:
-                        pass
-                    result["content"] = resp.read()
-                    try:
-                        resp.close()
-                    except Exception:
-                        pass
-                else:
-                    # Page response (and anything else that accepts bytes()).
-                    result["content"] = bytes(resp)
-            except Exception as exc:
-                log.exception("fetch response handler raised on %s",
-                              destination_hash_hex[:16])
-                result["content"] = b""
-                result["error"] = f"Response handler error: {exc}"
-            done.set()
+        def _do_attempt() -> dict:
+            """Run one link+request+wait+teardown attempt. Returns the
+            result dict — the outer retry loop decides whether to try again.
+            State (result, done, callbacks) is fresh per call so a retry
+            doesn't inherit stale closures from the previous attempt.
+            """
+            result: dict = {"content": None, "error": None}
+            done = threading.Event()
+            last_activity = [time.monotonic()]
+            link_active = [False]
+            progress_started = [False]
 
-        def _on_failed(receipt):
-            result["error"] = "Page request failed"
-            done.set()
+            def _bump():
+                last_activity[0] = time.monotonic()
 
-        def _on_progress(receipt):
-            _bump()
-            progress_started[0] = True
-            # Capture byte-level transfer metrics if RNS exposes them on the
-            # receipt — these are populated for both page and file requests
-            # by RNS as soon as the response size is negotiated. Lets the
-            # web UI show "12.3 MB of 4.5 MB transferred" instead of just a
-            # percentage.
-            try:
-                total = getattr(receipt, "response_size", None)
-                xfer  = getattr(receipt, "response_transfer_size", None)
-                if total is not None:
-                    result["response_size"] = int(total)
-                if xfer is not None:
-                    result["transfer_size"] = int(xfer)
-                if sizes_cb is not None and (total is not None or xfer is not None):
-                    try:
-                        sizes_cb(
-                            int(total) if total is not None else None,
-                            int(xfer)  if xfer  is not None else None,
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            if progress_cb is not None:
+            def _on_response(receipt):
+                # NomadNet ships three different response shapes through the
+                # same `receipt.response` slot — bytes for pages, `(name_bytes,
+                # data_bytes)` for small files, and `io.BufferedReader` for
+                # large files streamed via an RNS Resource. Treating any of
+                # them as `bytes(...)` blindly was raising TypeError on file
+                # responses; the exception killed the callback before
+                # `done.set()`, so the fetch sat waiting until the link closed
+                # — producing the misleading "Link closed before response"
+                # error even though the file had transferred successfully.
                 try:
-                    progress_cb(float(getattr(receipt, "progress", 0.0) or 0.0))
-                except Exception:
-                    pass  # never let a progress callback break the fetch
-
-        def _on_link_established(link):
-            _bump()
-            link_active[0] = True
-            # Identify the link BEFORE the request so the site server
-            # processes this fetch as an identified request (var_fingerprint,
-            # etc). Bare identifies on idle links are typically ignored —
-            # NomadNet only acts on identification while serving a page.
-            if identify_with is not None:
-                try:
-                    link.identify(identify_with)
-                    log.info(
-                        "Identified link to %s as %s",
-                        destination_hash_hex[:16],
-                        identify_with.hexhash[:16],
-                    )
-                except Exception as exc:
-                    log.warning("link.identify failed: %s", exc)
-            p = (path or "/").rstrip("/") or "/"
-            if p.startswith("/page/") or p.startswith("/file/"):
-                # Path already includes its resource prefix from the URL —
-                # /page/ for NomadNet pages, /file/ for binary files. Both
-                # use the same Link.request mechanism on the NomadNet side.
-                rns_path = p
-            else:
-                rns_path = "/page/" + (p.lstrip("/") or "index.mu")
-
-            # Field/var data must be a dict; NomadNet filters keys by prefix.
-            req_data = None
-            if field_data:
-                req_data = {}
-                for k, v in field_data.items():
-                    if k.startswith("field_") or k.startswith("var_"):
-                        req_data[k] = v
+                    resp = receipt.response
+                    if resp is None:
+                        result["content"] = b""
+                        result["error"] = "Empty response from node"
+                    elif isinstance(resp, tuple) and len(resp) >= 2:
+                        # (file_name_bytes, file_data_bytes) — mirrors NomadNet's
+                        # textui Browser handling at file_received().
+                        result["content"] = bytes(resp[1])
+                    elif hasattr(resp, "read"):
+                        # io.BufferedReader pointing at the streamed temp file.
+                        try:
+                            resp.seek(0)
+                        except Exception:
+                            pass
+                        result["content"] = resp.read()
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
                     else:
-                        req_data[f"field_{k}"] = v
-
-            log.debug("Link established, requesting '%s'", rns_path)
-            link.request(
-                rns_path,
-                data=req_data,
-                response_callback=_on_response,
-                failed_callback=_on_failed,
-                progress_callback=_on_progress,
-                timeout=PAGE_HARD_CAP,
-            )
-
-        def _on_link_closed(link):
-            if not done.is_set():
-                result["error"] = "Link closed before response"
+                        # Page response (and anything else that accepts bytes()).
+                        result["content"] = bytes(resp)
+                except Exception as exc:
+                    log.exception("fetch response handler raised on %s",
+                                  destination_hash_hex[:16])
+                    result["content"] = b""
+                    result["error"] = f"Response handler error: {exc}"
                 done.set()
 
-        link = RNS.Link(
-            destination,
-            established_callback=_on_link_established,
-            closed_callback=_on_link_closed,
-        )
+            def _on_failed(receipt):
+                result["error"] = "Page request failed"
+                done.set()
 
-        # Stall watchdog: only active AFTER the link has been established.
-        # Before that, RNS's own per-hop establishment timeout will fire
-        # _on_link_closed if the link can't form — applying a 15-second
-        # local watchdog at this stage would falsely abort multi-hop or
-        # LoRa paths whose establishment legitimately takes 20–40 s.
-        hard_deadline = time.monotonic() + PAGE_HARD_CAP
-        # Once the resource transfer reaches 100%, RNS still needs to do a
-        # final ack handshake before response_callback fires with the data.
-        # On slow/multi-hop links this finalisation can take much longer
-        # than the in-flight stall timeout — applying the regular 30s
-        # watchdog at that point falsely aborts otherwise-successful file
-        # downloads (resource arrives at 100%, callback is seconds away,
-        # we time out anyway). Use a larger timeout once we're in
-        # finalisation so we're patient enough for the conclude/teardown.
-        FINALISE_TIMEOUT = 180  # seconds — generous post-100% grace
-        while not done.is_set():
-            now = time.monotonic()
-            if link_active[0]:
-                idle = now - last_activity[0]
-                # Has the transfer reached its full advertised size?
-                rsize = result.get("response_size")
-                tsize = result.get("transfer_size")
-                in_finalise = rsize is not None and tsize is not None and tsize >= rsize > 0
-                stall_cap = FINALISE_TIMEOUT if in_finalise else timeout
-                if idle >= stall_cap:
-                    if in_finalise:
-                        result["error"] = (
-                            f"Resource transfer completed but the node never "
-                            f"finalised the response within {FINALISE_TIMEOUT}s"
+            def _on_progress(receipt):
+                _bump()
+                progress_started[0] = True
+                # Capture byte-level transfer metrics if RNS exposes them on the
+                # receipt — these are populated for both page and file requests
+                # by RNS as soon as the response size is negotiated. Lets the
+                # web UI show "12.3 MB of 4.5 MB transferred" instead of just a
+                # percentage.
+                try:
+                    total = getattr(receipt, "response_size", None)
+                    xfer  = getattr(receipt, "response_transfer_size", None)
+                    if total is not None:
+                        result["response_size"] = int(total)
+                    if xfer is not None:
+                        result["transfer_size"] = int(xfer)
+                    if sizes_cb is not None and (total is not None or xfer is not None):
+                        try:
+                            sizes_cb(
+                                int(total) if total is not None else None,
+                                int(xfer)  if xfer  is not None else None,
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                if progress_cb is not None:
+                    try:
+                        progress_cb(float(getattr(receipt, "progress", 0.0) or 0.0))
+                    except Exception:
+                        pass  # never let a progress callback break the fetch
+
+            def _on_link_established(link):
+                _bump()
+                link_active[0] = True
+                # Identify the link BEFORE the request so the site server
+                # processes this fetch as an identified request (var_fingerprint,
+                # etc). Bare identifies on idle links are typically ignored —
+                # NomadNet only acts on identification while serving a page.
+                if identify_with is not None:
+                    try:
+                        link.identify(identify_with)
+                        log.info(
+                            "Identified link to %s as %s",
+                            destination_hash_hex[:16],
+                            identify_with.hexhash[:16],
                         )
-                    else:
-                        result["error"] = (
-                            f"Lost connection — no data for {timeout}s"
-                            if progress_started[0]
-                            else f"No response from node ({timeout}s)"
-                        )
+                    except Exception as exc:
+                        log.warning("link.identify failed: %s", exc)
+                p = (path or "/").rstrip("/") or "/"
+                if p.startswith("/page/") or p.startswith("/file/"):
+                    # Path already includes its resource prefix from the URL —
+                    # /page/ for NomadNet pages, /file/ for binary files. Both
+                    # use the same Link.request mechanism on the NomadNet side.
+                    rns_path = p
+                else:
+                    rns_path = "/page/" + (p.lstrip("/") or "index.mu")
+
+                # Field/var data must be a dict; NomadNet filters keys by prefix.
+                req_data = None
+                if field_data:
+                    req_data = {}
+                    for k, v in field_data.items():
+                        if k.startswith("field_") or k.startswith("var_"):
+                            req_data[k] = v
+                        else:
+                            req_data[f"field_{k}"] = v
+
+                log.debug("Link established, requesting '%s'", rns_path)
+                link.request(
+                    rns_path,
+                    data=req_data,
+                    response_callback=_on_response,
+                    failed_callback=_on_failed,
+                    progress_callback=_on_progress,
+                    timeout=PAGE_HARD_CAP,
+                )
+
+            def _on_link_closed(link):
+                if not done.is_set():
+                    result["error"] = "Link closed before response"
+                    done.set()
+
+            link = RNS.Link(
+                destination,
+                established_callback=_on_link_established,
+                closed_callback=_on_link_closed,
+            )
+
+            # Stall watchdog: only active AFTER the link has been established.
+            # Before that, RNS's own per-hop establishment timeout will fire
+            # _on_link_closed if the link can't form — applying a 15-second
+            # local watchdog at this stage would falsely abort multi-hop or
+            # LoRa paths whose establishment legitimately takes 20–40 s.
+            hard_deadline = time.monotonic() + PAGE_HARD_CAP
+            # Once the resource transfer reaches 100%, RNS still needs to do a
+            # final ack handshake before response_callback fires with the data.
+            # On slow/multi-hop links this finalisation can take much longer
+            # than the in-flight stall timeout — applying the regular 30s
+            # watchdog at that point falsely aborts otherwise-successful file
+            # downloads (resource arrives at 100%, callback is seconds away,
+            # we time out anyway). Use a larger timeout once we're in
+            # finalisation so we're patient enough for the conclude/teardown.
+            FINALISE_TIMEOUT = 180  # seconds — generous post-100% grace
+            while not done.is_set():
+                now = time.monotonic()
+                if link_active[0]:
+                    idle = now - last_activity[0]
+                    # Has the transfer reached its full advertised size?
+                    rsize = result.get("response_size")
+                    tsize = result.get("transfer_size")
+                    in_finalise = rsize is not None and tsize is not None and tsize >= rsize > 0
+                    stall_cap = FINALISE_TIMEOUT if in_finalise else timeout
+                    if idle >= stall_cap:
+                        if in_finalise:
+                            result["error"] = (
+                                f"Resource transfer completed but the node never "
+                                f"finalised the response within {FINALISE_TIMEOUT}s"
+                            )
+                        else:
+                            result["error"] = (
+                                f"Lost connection — no data for {timeout}s"
+                                if progress_started[0]
+                                else f"No response from node ({timeout}s)"
+                            )
+                        break
+                if now >= hard_deadline:
+                    result["error"] = f"Page fetch exceeded hard cap ({PAGE_HARD_CAP}s)"
                     break
-            if now >= hard_deadline:
-                result["error"] = f"Page fetch exceeded hard cap ({PAGE_HARD_CAP}s)"
+                done.wait(timeout=1.0)
+
+            try:
+                link.teardown()
+            except Exception:
+                pass
+
+            return result
+
+        final_result: dict = {"content": None, "error": None}
+        for attempt in range(MAX_ATTEMPTS):
+            final_result = _do_attempt()
+            if final_result["content"] is not None:
                 break
-            done.wait(timeout=1.0)
+            err = final_result.get("error") or ""
+            # Only retry on transient link failures. Path-discovery timeouts,
+            # hard-cap breaches, and stall/finalise errors imply either an
+            # unreachable destination or a stuck transfer — retrying would
+            # just wait through it again.
+            if err not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
+                break
+            log.info(
+                "fetch_page: retrying %s (attempt %d/%d after: %s)",
+                destination_hash_hex[:16], attempt + 2, MAX_ATTEMPTS, err,
+            )
+            # Refresh the path in case the advertised route has gone stale.
+            # RNS.Transport.request_path is idempotent and cheap; a fresh
+            # announce from the destination (or a shorter path via a
+            # different hop) can arrive before the next attempt.
+            try:
+                RNS.Transport.request_path(dest_hash)
+            except Exception:
+                pass
+            time.sleep(RETRY_SLEEP)
 
         load_ms = int((time.monotonic() - t_start) * 1000)
 
-        try:
-            link.teardown()
-        except Exception:
-            pass
-
-        success = result["content"] is not None
+        success = final_result["content"] is not None
         self._record_fetch(
             destination_hash_hex.lower(),
-            rx_bytes=len(result["content"]) if success else 0,
+            rx_bytes=len(final_result["content"]) if success else 0,
             load_ms=load_ms,
             ok=success,
             update_status=is_index,
@@ -524,9 +572,9 @@ class NodeBrowser:
             log.warning(
                 "fetch_page failed for %s%s after %dms: %s",
                 destination_hash_hex[:16], path, load_ms,
-                result["error"] or "(unknown error)",
+                final_result["error"] or "(unknown error)",
             )
-        return result["content"], result["error"]
+        return final_result["content"], final_result["error"]
 
     # ------------------------------------------------------------------
     # Async page-fetch with progress tracking — drives the polling UI.
