@@ -306,7 +306,10 @@ class NodeBrowser:
         # deployment). Reject fetches gracefully during that window rather
         # than crashing on RNS.Transport access.
         if not self.is_ready():
-            return None, "NomadPortal is still starting up — try again in a moment"
+            return None, ("Reticulum transport is still coming up — the "
+                          "web UI is ready but RNS needs another moment "
+                          "before it can fetch remote pages. Try again "
+                          "shortly.")
 
         RNS = self._rns
         try:
