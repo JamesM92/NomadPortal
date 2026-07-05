@@ -43,6 +43,17 @@ RUN printf '#!/bin/sh\nexec nomadnet --config /config/nomadnetwork "$@"\n' \
 
 RUN chown -R nomadnet:nomadnet /app
 
+# Pre-create the volume mount points as nomadnet-owned dirs so anonymous
+# docker volumes (e.g. in CI, or `docker run` without an explicit -v)
+# inherit the correct ownership. Without this, docker creates the paths
+# owned by root and the entrypoint's `mkdir -p /site/pages` fails —
+# gunicorn never starts.
+#
+# Operators bind-mounting from the host still need to `chown -R 1000:1000`
+# their host dirs (documented below); this only fixes the no-mount case.
+RUN mkdir -p /config /site \
+ && chown -R nomadnet:nomadnet /config /site
+
 # /config is volume-mounted and must be writable by UID 1000.
 # On the host run: chown -R 1000:1000 ./config
 VOLUME ["/config"]
