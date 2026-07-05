@@ -117,6 +117,29 @@ class NodeBrowser:
         Records the duration on success so subsequent restarts can quote
         an ETA in ``rns_init_progress()``.
         """
+        import signal
+
+        # RNS.Reticulum() unconditionally installs a SIGINT handler via
+        # ``signal.signal()``, which raises
+        #     ValueError: signal only works in main thread of the main interpreter
+        # when called from any thread other than the main one — and this
+        # method IS called from a background thread by design (that's the
+        # whole point of the deferred init).
+        #
+        # gunicorn / Docker handle process signals for us in this
+        # deployment, so RNS's Ctrl-C handler isn't needed. Install a
+        # process-wide shim that swallows the ValueError; if the caller
+        # IS on the main thread it still delegates to the real
+        # ``signal.signal`` so nothing changes for well-behaved callers.
+        original_signal = signal.signal
+        def _thread_safe_signal(signum, handler):
+            try:
+                return original_signal(signum, handler)
+            except ValueError:
+                # Not on main thread; skip. Wanted behaviour in this deployment.
+                return None
+        signal.signal = _thread_safe_signal
+
         RNS = self._rns
         self._rns_init_start_mono = time.monotonic()
         try:
