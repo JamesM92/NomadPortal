@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Page-fetch reliability: retry on transient link failures.**
+  Under real-world Reticulum meshes, ``fetch_page`` used to fail on
+  the first transient hiccup with "Link closed before response" —
+  which turned every short-lived path-table inconsistency into a
+  user-visible failure. Other clients on the same mesh (MeshChat,
+  Sideband) don't exhibit the same unreliability because they either
+  reuse links or retry internally.
+
+  ``fetch_page`` now attempts up to 3 link+request cycles per
+  invocation. The retry only fires for genuinely retryable errors
+  ("Link closed before response", "Page request failed") — path
+  discovery timeouts, hard-cap breaches, and stall/finalise errors
+  still fail-fast because retrying wouldn't help. Between attempts,
+  ``RNS.Transport.request_path`` is re-requested so a stale advertised
+  route can be replaced by a fresh announce or a shorter path via a
+  different hop. A 1.5s sleep between attempts gives that new
+  routing information a chance to arrive.
+
+  Same-behaviour caveats:
+  - ``fetch_page_async`` picks up the retry for free (it delegates
+    to ``fetch_page``).
+  - Successful fetches take the same wall-clock time as before —
+    the retry only extends failed fetches.
+  - Worst-case wall clock for a fully-unreachable destination is
+    bounded by ``PAGE_HARD_CAP`` (10 min) plus the two retry sleeps.
+
 ### Added
 
 - **Configurable site-announce interval.** Admin → Settings now has an
