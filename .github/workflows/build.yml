@@ -66,7 +66,18 @@ jobs:
       # CI, which usually happens within 30-60s on a fresh volume).
       - name: Smoke test — container starts and serves HTTP
         run: |
-          set -euo pipefail
+          # NOTE: no `set -e` — we handle curl failures explicitly.
+          # `curl -w '%{http_code}'` prints "000" on connection refused
+          # AND returns exit 7. Chaining with `|| echo 000` would append
+          # to the already-printed "000" (giving "000000") and treat
+          # that as a real response.
+          set -uo pipefail
+
+          # helper: return the HTTP status code, or "000" on any failure
+          probe() {
+            local url="$1"
+            curl -sk -o /dev/null -w '%{http_code}' "$url" 2>/dev/null
+          }
 
           docker run -d --name smoke \
             -e ADMIN_PASSWORD=smoketest \
@@ -75,13 +86,14 @@ jobs:
             -p 127.0.0.1:8080:8080 \
             nomadportal:ci
 
-          # 1. Gunicorn must accept HTTP within 30s — the deferred-init
-          #    refactor promised this.
+          # 1. Gunicorn must accept HTTP within 30s. A valid response is
+          #    any 3-digit non-"000" code — curl prints "000" for
+          #    connection refused.
           echo "Waiting for gunicorn to accept requests..."
           gunicorn_up=""
           for i in $(seq 1 15); do
-            code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/healthz || echo 000)
-            if [ "$code" != "000" ] && [ -n "$code" ]; then
+            code=$(probe http://127.0.0.1:8080/healthz)
+            if [ ${#code} -eq 3 ] && [ "$code" != "000" ]; then
               gunicorn_up=1
               echo "  gunicorn responded after $((i*2))s (healthz: $code)"
               break
@@ -94,16 +106,17 @@ jobs:
             exit 1
           fi
 
-          # 2. Wait up to 3 min for /healthz=200. Accept 503 as transient,
-          #    fail on any other 5xx.
+          # 2. Wait up to 3 min for /healthz=200. Accept 503 as transient
+          #    (starting up), tolerate "000" (transient connection drops
+          #    during a busy startup), fail on any other 5xx.
           echo "Waiting for /healthz=200 or timeout..."
           for i in $(seq 1 90); do
-            code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/healthz)
+            code=$(probe http://127.0.0.1:8080/healthz)
             case "$code" in
               200)
                 echo "  RNS ready after $((i*2))s"
                 break ;;
-              503) ;;                 # starting or degraded — keep waiting
+              503|000) ;;             # starting / transient — keep waiting
               5*)
                 echo "::error::/healthz returned $code"
                 docker logs smoke
@@ -114,7 +127,7 @@ jobs:
 
           # 3. Login page renders (no auth, no RNS required — pure Flask).
           echo "Checking /auth/login renders..."
-          code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/auth/login)
+          code=$(probe http://127.0.0.1:8080/auth/login)
           case "$code" in
             2*|3*) echo "  /auth/login: $code (OK)" ;;
             *)
