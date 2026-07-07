@@ -29,6 +29,27 @@ interfaces:
       port: 4242
       enabled: false
 
+  # Per-interface options can be added to any tcp_clients or tcp_servers
+  # entry above:
+  #
+  #   ingress_control: false
+  #     RNS defaults ingress_control=True on every interface, which
+  #     rate-limits how many announces for previously-unknown
+  #     destinations it will process per burst. On busy public hubs
+  #     (michmesh, oklahoma, etc.) this holds/drops many announces
+  #     that were briefly bursty, leaving the client with a much
+  #     sparser path table than peers who happened to be listening
+  #     during a quiet moment. Symptom: path lookups for destinations
+  #     other clients on the same hub can reach fail with "Path not
+  #     found." Setting ingress_control: false disables the limiter
+  #     for that interface — recommended for TCP client links to
+  #     public hubs where you want the fullest possible path table.
+  #
+  #   mode: full | access_point | gateway | roaming | boundary | ptp
+  #     Controls how the interface participates in path discovery
+  #     and other transport behaviours. Leave unset (RNS default =
+  #     full) unless you know you need one of the others.
+
   # TCP servers — accept incoming Reticulum connections.
   tcp_servers: []
 

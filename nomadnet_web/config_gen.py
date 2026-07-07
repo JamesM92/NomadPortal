@@ -138,11 +138,19 @@ def _build_interface_sections(ifaces: dict) -> list[str]:
             "target_host": entry["host"],
             "target_port": entry["port"],
         }
-        _optional(fields, entry, "kiss_framing",  "kiss_framing",  _yn)
-        _optional(fields, entry, "i2p_tunneled",  "i2p_tunneled",  _yn)
-        _optional(fields, entry, "mode",          "mode")
-        _optional(fields, entry, "network_name",  "network_name")
-        _optional(fields, entry, "passphrase",    "passphrase")
+        _optional(fields, entry, "kiss_framing",     "kiss_framing",     _yn)
+        _optional(fields, entry, "i2p_tunneled",     "i2p_tunneled",     _yn)
+        _optional(fields, entry, "mode",             "mode")
+        _optional(fields, entry, "network_name",     "network_name")
+        _optional(fields, entry, "passphrase",       "passphrase")
+        # ingress_control defaults to True in RNS. Setting it False
+        # disables per-interface announce rate-limiting on this
+        # link — recommended for busy public hubs where the default
+        # limit causes new-destination announces to be held/dropped
+        # during burst periods, leaving the client's path table
+        # sparser than peers who happened to be listening during a
+        # quiet moment.
+        _optional(fields, entry, "ingress_control",  "ingress_control",  _yn)
         sections.append(_iface(entry.get("name", "TCP Client"), fields))
 
     # TCP Servers
@@ -155,10 +163,11 @@ def _build_interface_sections(ifaces: dict) -> list[str]:
             "listen_ip":   entry.get("listen_ip", "0.0.0.0"),
             "listen_port": entry["port"],
         }
-        _optional(fields, entry, "prefer_ipv6",  "prefer_ipv6",  _yn)
-        _optional(fields, entry, "mode",         "mode")
-        _optional(fields, entry, "network_name", "network_name")
-        _optional(fields, entry, "passphrase",   "passphrase")
+        _optional(fields, entry, "prefer_ipv6",     "prefer_ipv6",     _yn)
+        _optional(fields, entry, "mode",            "mode")
+        _optional(fields, entry, "network_name",    "network_name")
+        _optional(fields, entry, "passphrase",      "passphrase")
+        _optional(fields, entry, "ingress_control", "ingress_control", _yn)
         sections.append(_iface(entry.get("name", "TCP Server"), fields))
 
     # UDP Interfaces

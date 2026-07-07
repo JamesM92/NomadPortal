@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-interface `ingress_control` field for TCP client / TCP server
+  interfaces.** RNS defaults `ingress_control = True` on every
+  interface, which rate-limits how many announces for previously-
+  unknown destinations it will process per burst. On busy public
+  hubs (michmesh, oklahoma, etc.) this holds/drops many announces
+  during bursts, leaving the client's path table much sparser than
+  peers who happened to be listening during a quiet moment.
+
+  This turned out to be the actual root cause of the long-standing
+  "MeshChat can reach a destination that NomadPortal can't reach
+  on the same hub" mystery (see
+  [[path-request-ceiling]] memory for the diagnostic arc). MeshChat
+  caught the destination's announce during a quiet moment and it's
+  been cached ever since; NomadPortal never got it into the path
+  table, so `Transport.request_path()` had to ask the mesh — and
+  the hub silently ignored the request because it too had aged
+  out or lost the entry.
+
+  Setting `ingress_control: false` on a TCP client entry in
+  `config.yml` (or via a future admin UI field) is now plumbed
+  through `config_gen.py` and written to the RNS config. Recommended
+  for TCP client links to public hubs where you want the fullest
+  possible path table.
+
 ### Removed
 
 - **Stale "single-operator tool" startup log line.** Every container
