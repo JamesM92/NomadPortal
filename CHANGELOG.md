@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **RNS link cache — reuse per-destination links across page fetches.**
+  ``fetch_page`` used to establish a fresh ``RNS.Link``, use it for one
+  request, then unconditionally tear it down. Each subsequent click to
+  the same site paid the full ~2-8 s handshake cost again (3-way RTT +
+  ratchet exchange).
+
+  ``NodeBrowser`` now maintains ``self._link_cache: Dict[bytes, RNS.Link]``
+  (capped at 50 destinations, insertion-order LRU). On ``fetch_page``:
+
+  1. **Cache-hit fast path** — if a cached link exists AND
+     ``link.status == RNS.Link.ACTIVE``, skip the whole path-lookup /
+     identity-recall / establishment flow and send the request
+     directly. On success the link stays cached. On failure it's
+     evicted and the fresh-establishment retry loop takes over.
+  2. **Cache-miss / fresh path** — on successful attempt, the newly-
+     established link is stored in the cache instead of being torn
+     down.
+
+  Auto-eviction: ``_cache_link`` registers a ``closed_callback`` that
+  removes the entry when RNS drops the link on its own. ``_get_cached_link``
+  also checks ``status`` on every read and evicts stale entries.
+
+  Matches the pattern
+  [rBrowser](https://github.com/fr33n0w/rBrowser/blob/main/rbrowser/web_browser.py)
+  uses (``nomadnet_cached_links: Dict[bytes, RNS.Link]`` on the
+  ``NomadNetWebBrowser`` class). Subsequent page loads to the same
+  destination should feel instant (single-request latency) instead
+  of "click, wait several seconds, page loads."
+
 - **Per-interface `ingress_control` field for TCP client / TCP server
   interfaces.** RNS defaults `ingress_control = True` on every
   interface, which rate-limits how many announces for previously-
