@@ -868,7 +868,11 @@ class NodeBrowser:
         final_result: dict = {"content": None, "error": None}
         cached_link = self._get_cached_link(dest_hash)
         if cached_link is not None:
-            log.debug(
+            # Log at INFO so operators can see cache activity without
+            # cranking log level. It's diagnostic gold when someone says
+            # "the second click was slow" — presence/absence of this
+            # line answers "did the cache hit."
+            log.info(
                 "fetch_page: reusing cached link for %s",
                 destination_hash_hex[:16],
             )
