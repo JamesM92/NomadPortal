@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Silently-stalled site-announce loop now visible in ``/healthz``.**
+  Reported failure mode: mirror shows healthy in Portainer / Docker,
+  RNS interfaces are up, but no announces have gone out for hours.
+  Cause: the ``_background_jobs`` loop in ``site_server.py`` runs
+  ``self.announce()`` / ``_register_pages()`` / ``_register_files()``
+  each minute. If any of those raise, the whole thread dies without
+  a user-visible signal — everything else keeps working, only the
+  announces stop.
+
+  Fix at two layers:
+  1. Wrap the loop body in ``try/except log.exception`` so a raise
+     is captured and the next tick proceeds normally. Loop can no
+     longer die silently.
+  2. ``/healthz`` now checks ``site_server.last_announce_at()``
+     against ``site_server.announce_interval()`` (both new accessors
+     on ``SiteServer``). If auto-announce is on but the last
+     announce was more than 2× the configured interval ago, return
+     503 ``status: degraded, reason: "site announce loop appears
+     stalled"`` — Docker's healthcheck now flags the exact
+     failure mode instead of reporting green.
+
 ### Added
 
 - **RNS link cache — reuse per-destination links across page fetches.**

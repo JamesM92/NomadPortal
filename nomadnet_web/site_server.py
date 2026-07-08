@@ -375,12 +375,41 @@ class SiteServer:
 
         while self._running:
             time.sleep(60)
-            now = time.time()
-            if self._auto_announce and now - self._last_announce > self._announce_interval:
-                self.announce()
-            if now - self._last_rescan > RESCAN_INTERVAL:
-                self._register_pages()
-                self._register_files()
+            # Wrap each iteration so a raise in announce() /
+            # _register_pages() / _register_files() doesn't silently
+            # kill the whole thread — that's the failure mode where
+            # /healthz keeps reporting green (RNS is fine, interfaces
+            # are up) but the site stops announcing without any
+            # user-visible signal. Log and continue.
+            try:
+                now = time.time()
+                if self._auto_announce and now - self._last_announce > self._announce_interval:
+                    self.announce()
+                if now - self._last_rescan > RESCAN_INTERVAL:
+                    self._register_pages()
+                    self._register_files()
+            except Exception:
+                log.exception(
+                    "site_server background loop raised — continuing"
+                )
+
+    def last_announce_at(self) -> float:
+        """Unix timestamp of the last successful announce, or 0 if we
+        haven't announced yet. Used by /healthz to detect a silently-
+        dead announce loop (green interfaces, running container, but
+        no announces going out).
+        """
+        return self._last_announce
+
+    def announce_interval(self) -> int:
+        """The currently-configured announce interval (seconds).
+        Live-updated by the admin route when it changes, so /healthz's
+        "we should have announced by now" check sees the current value.
+        """
+        return self._announce_interval
+
+    def auto_announce_enabled(self) -> bool:
+        return self._auto_announce
 
 
 def _is_windows() -> bool:
