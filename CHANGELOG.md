@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Rate-limit warnings on the Announce interval dropdown.** Public
+  RNS hubs (michmesh, oklahoma, connect.reticulum.network, etc.)
+  enforce per-destination ``announce_rate_target`` at typically
+  30-60 min. Announcing faster than the hub's target trips its
+  rate check and the hub silently stops rebroadcasting your
+  announces downstream — your logs still say "Site node announced"
+  because the local send fires regardless, but peers stop seeing
+  you. Symptom that led to this fix: an operator's mirror looked
+  online in ``/healthz`` but nobody else could find it because
+  the 1h interval was tripping michmesh's rate limit.
+
+  The Admin → Settings → Announce interval dropdown now flags
+  the 15min, 30min, and 1h options with warnings, and the field
+  description explicitly calls out the failure mode. 3h+ is safe;
+  6h (default) matches NomadNet's own behaviour and is what hubs
+  are calibrated for.
+
 ### Fixed
 
 - **Silently-stalled site-announce loop now visible in ``/healthz``.**
