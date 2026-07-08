@@ -288,7 +288,6 @@ class NodeBrowser:
         first). Also registers a closed_callback so RNS-side link close
         removes the entry automatically.
         """
-        RNS = self._rns
         old_link = None
         with self._link_cache_lock:
             if len(self._link_cache) >= LINK_CACHE_MAX_SIZE:
