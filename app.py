@@ -85,9 +85,15 @@ def _log_versions() -> None:
 
 
 def _setup_logging() -> None:
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    # Default DEBUG so diagnostic paths (link cache activity, retry
+    # decisions, path re-request, RNS-side transport events) are visible
+    # by default. Operators can set LOG_LEVEL=INFO if they want the
+    # older quieter behaviour; the noise savings are modest and the
+    # diagnostic value of the DEBUG lines has repeatedly earned its
+    # keep during real debugging sessions.
+    log_level = os.environ.get("LOG_LEVEL", "DEBUG").upper()
     logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
+        level=getattr(logging, log_level, logging.DEBUG),
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         stream=sys.stdout,
     )
