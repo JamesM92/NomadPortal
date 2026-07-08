@@ -92,9 +92,9 @@
     <label>Announce interval</label>
     <select id="s-announce-interval" style="max-width:260px;">
       <option value=""      {% if settings.announce_interval is none %}selected{% endif %}>Use env var (SITE_ANNOUNCE_INTERVAL)</option>
-      <option value="900"   {% if settings.announce_interval == 900 %}selected{% endif %}>Every 15 minutes</option>
-      <option value="1800"  {% if settings.announce_interval == 1800 %}selected{% endif %}>Every 30 minutes</option>
-      <option value="3600"  {% if settings.announce_interval == 3600 %}selected{% endif %}>Every hour</option>
+      <option value="900"   {% if settings.announce_interval == 900 %}selected{% endif %}>Every 15 minutes ⚠ rate-limit risk</option>
+      <option value="1800"  {% if settings.announce_interval == 1800 %}selected{% endif %}>Every 30 minutes ⚠ rate-limit risk</option>
+      <option value="3600"  {% if settings.announce_interval == 3600 %}selected{% endif %}>Every hour ⚠ borderline</option>
       <option value="10800" {% if settings.announce_interval == 10800 %}selected{% endif %}>Every 3 hours</option>
       <option value="21600" {% if settings.announce_interval == 21600 %}selected{% endif %}>Every 6 hours (default)</option>
       <option value="43200" {% if settings.announce_interval == 43200 %}selected{% endif %}>Every 12 hours</option>
@@ -102,10 +102,21 @@
     </select>
     <span class="dim" style="margin-top:4px;">
       How often the auto-announcer rebroadcasts this node's presence.
-      Shorter intervals keep path-table entries fresher on peers' caches
-      at the cost of mesh-wide traffic; longer intervals are gentler on
-      the network but mean longer recovery if peers' paths age out
-      between announces. Default 6h matches NomadNet's own behaviour.
+      Shorter intervals keep path-table entries fresher on peers' caches;
+      longer intervals are gentler on the network but mean longer
+      recovery if peers' paths age out between announces. Default 6h
+      matches NomadNet's own behaviour.
+      <br><br>
+      <strong>Rate-limit warning:</strong> public RNS hubs (michmesh,
+      oklahoma, connect.reticulum.network, etc.) enforce per-destination
+      announce rate limits — typically 30-60 min minimum. Announcing
+      faster than that trips their <code>announce_rate_target</code> check
+      and the hub silently stops rebroadcasting your announces to
+      downstream peers. Your own logs still say "Site node announced"
+      because the send fires locally, but peers stop seeing you.
+      Symptom: mirror looks online in Portainer / <code>/healthz</code>
+      but nobody else can find it. Recommended: 3h or 6h.
+      <br><br>
       Only effective when Auto-announce is On. Changes take effect on
       the next 60-second background tick — no restart required.
     </span>
