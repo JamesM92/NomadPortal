@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Default ``LOG_LEVEL`` bumped from ``INFO`` to ``DEBUG``.** Set
+  in both ``app.py`` (the default when the env var is unset) and
+  the Dockerfile (the default the container ships with). Makes
+  diagnostic paths visible without cranking log level after a
+  problem is already happening — link-cache activity, retry
+  decisions, path re-request, and various RNS-side transport
+  events are useful defaults for real-world troubleshooting.
+  Operators who want quieter output can still set
+  ``LOG_LEVEL=INFO`` in the container env.
+
 - **Rate-limit warnings on the Announce interval dropdown.** Public
   RNS hubs (michmesh, oklahoma, connect.reticulum.network, etc.)
   enforce per-destination ``announce_rate_target`` at typically

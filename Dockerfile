@@ -68,7 +68,7 @@ ENV RNS_CONFIG_DIR=/config/reticulum \
     WEB_PORT=8080 \
     WEB_PORT_HTTPS=8443 \
     CACHE_TTL=300 \
-    LOG_LEVEL=INFO
+    LOG_LEVEL=DEBUG
 
 # Healthcheck hits /healthz, which returns 503 if RNS has no online
 # interfaces (different from /api/status, which only confirms gunicorn is
