@@ -332,6 +332,37 @@ def healthz():
                         "reason": "no interfaces online",
                         "interfaces": interfaces}), 503
 
+    # Hosting-side staleness check. Catches the specific failure mode
+    # where RNS + interfaces are green but the site server's background
+    # announce loop has silently died — the operator has a "healthy"
+    # container that isn't announcing. Grace of 2× the configured
+    # announce_interval before we flip the status; some slop is normal
+    # (RNS jitter, network hiccups).
+    site_server = current_app.config.get("SITE_SERVER")
+    announce_stale = None
+    if (site_server is not None
+            and getattr(site_server, "auto_announce_enabled", lambda: False)()
+            and hasattr(site_server, "last_announce_at")
+            and hasattr(site_server, "announce_interval")):
+        try:
+            last     = site_server.last_announce_at()
+            interval = site_server.announce_interval()
+            if last > 0:
+                idle = time.time() - last
+                if idle > 2 * interval:
+                    announce_stale = {
+                        "last_announce_seconds_ago": int(idle),
+                        "announce_interval":         int(interval),
+                    }
+        except Exception:
+            log.exception("healthz: site announce staleness check raised")
+
+    if announce_stale is not None:
+        return jsonify({"status":     "degraded",
+                        "reason":     "site announce loop appears stalled",
+                        "interfaces": interfaces,
+                        **announce_stale}), 503
+
     return jsonify({
         "status": "ok",
         "interfaces_online": len(online),
