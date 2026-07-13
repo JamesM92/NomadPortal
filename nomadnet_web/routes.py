@@ -373,6 +373,112 @@ def healthz():
 
 
 # ---------------------------------------------------------------------------
+# Debug — read-only application-state introspection
+# ---------------------------------------------------------------------------
+
+@bp.get("/api/_debug/state")
+@login_required
+def api_debug_state():
+    """Snapshot of application-level dicts / RNS Transport dicts that
+    could grow unbounded over a long-running session. Read-only —
+    counts and small samples, not full contents. Used to diagnose
+    "container degrades over time" complaints where OS-level metrics
+    (RSS, threads, FDs) show nothing.
+
+    Login-gated so an unauthenticated probe can't read state; no
+    sensitive contents are ever returned (hashes are truncated to the
+    last 4 chars, no identity material).
+    """
+    browser = current_app.config.get("BROWSER")
+    out: dict = {
+        "uptime_seconds": int(time.time() - current_app.config["START_TIME"]),
+        "rns_ready":      bool(getattr(browser, "is_ready", lambda: False)()),
+    }
+
+    # NodeBrowser — fetch jobs + link cache.
+    if browser is not None:
+        try:
+            with browser._jobs_lock:
+                job_ages = sorted(
+                    (time.time() - j.get("started", time.time()))
+                    for j in browser._jobs.values()
+                )
+            out["fetch_jobs"] = {
+                "count":                    len(job_ages),
+                "oldest_started_seconds_ago": int(job_ages[-1]) if job_ages else 0,
+            }
+        except Exception as exc:
+            out["fetch_jobs"] = {"error": str(exc)}
+
+        try:
+            with browser._link_cache_lock:
+                keys = list(browser._link_cache.keys())
+            out["link_cache"] = {
+                "size":       len(keys),
+                "keys_last4": [k.hex()[-4:] for k in keys[:20]],
+            }
+        except Exception as exc:
+            out["link_cache"] = {"error": str(exc)}
+
+    # RNS Transport internal dicts — the ones I want to watch for
+    # unbounded growth. Accessed defensively; RNS is not initialised
+    # to guarantee these attributes exist across minor versions.
+    try:
+        import RNS
+        transport_snapshot: dict = {}
+
+        for attr in ("path_table", "announce_table", "discovery_pr_tags",
+                     "announce_rate_table", "held_announces", "tunnels"):
+            try:
+                obj = getattr(RNS.Transport, attr, None)
+                if obj is None:
+                    continue
+                if isinstance(obj, dict):
+                    transport_snapshot[attr] = {"size": len(obj)}
+                elif isinstance(obj, (list, tuple, set)):
+                    transport_snapshot[attr] = {"size": len(obj)}
+                else:
+                    transport_snapshot[attr] = {"type": type(obj).__name__}
+            except Exception as exc:
+                transport_snapshot[attr] = {"error": str(exc)}
+
+        # Per-interface counters (some are set by RNS itself, some are
+        # our announce-frequency deques).
+        try:
+            ifaces_info = []
+            for iface in getattr(RNS.Transport, "interfaces", []) or []:
+                info = {
+                    "name":            getattr(iface, "name", str(iface)),
+                    "online":          bool(getattr(iface, "online", False)),
+                    "ia_freq_samples": len(getattr(iface, "ia_freq_deque", []) or []),
+                    "oa_freq_samples": len(getattr(iface, "oa_freq_deque", []) or []),
+                }
+                held = getattr(iface, "held_announces", None)
+                if isinstance(held, dict):
+                    info["held_announces"] = len(held)
+                ifaces_info.append(info)
+            transport_snapshot["interfaces"] = ifaces_info
+        except Exception as exc:
+            transport_snapshot["interfaces_error"] = str(exc)
+
+        out["transport"] = transport_snapshot
+    except Exception as exc:
+        out["transport_error"] = str(exc)
+
+    # LXMF tracker — bounded? Let's find out.
+    tracker = current_app.config.get("LXMF_TRACKER")
+    if tracker is not None:
+        try:
+            peers = getattr(tracker, "peers", None)
+            if isinstance(peers, dict):
+                out["lxmf_tracker"] = {"peer_count": len(peers)}
+        except Exception as exc:
+            out["lxmf_tracker"] = {"error": str(exc)}
+
+    return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
 # Node discovery
 # ---------------------------------------------------------------------------
 
