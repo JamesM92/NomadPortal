@@ -377,17 +377,17 @@ def healthz():
 # ---------------------------------------------------------------------------
 
 @bp.get("/api/_debug/state")
-@login_required
 def api_debug_state():
     """Snapshot of application-level dicts / RNS Transport dicts that
     could grow unbounded over a long-running session. Read-only —
-    counts and small samples, not full contents. Used to diagnose
-    "container degrades over time" complaints where OS-level metrics
-    (RSS, threads, FDs) show nothing.
+    counts and small samples, not full contents.
 
-    Login-gated so an unauthenticated probe can't read state; no
-    sensitive contents are ever returned (hashes are truncated to the
-    last 4 chars, no identity material).
+    Unauthenticated on purpose — same rationale as /healthz. The only
+    output is dict counts (integers), interface names (already visible
+    via the sidebar), and truncated 4-char hash prefixes (not enough to
+    identify a destination). No packet contents, no identity material,
+    no session data. Convenience beats theoretical exposure for a
+    diagnostic endpoint operators need to poll from ad-hoc terminals.
     """
     browser = current_app.config.get("BROWSER")
     out: dict = {
