@@ -233,9 +233,27 @@ def _iface(name: str, fields: dict) -> str:
 
 
 def _optional(out: dict, src: dict, key: str, out_key: str, transform=None):
+    """Copy ``src[key]`` into ``out[out_key]`` if the operator set it.
+
+    Handling of ``False``:
+      * With NO transform — treat ``False`` as "unset", skip. This
+        preserves the old behaviour for string/numeric fields where
+        we didn't want to emit "false" as a literal string.
+      * WITH a transform (typically ``_yn`` for booleans) —
+        ``False`` is a meaningful value and MUST be emitted. Skipping
+        it silently collapses "user wants False" with "user didn't
+        set it," which is exactly what caused ``ingress_control: false``
+        to never reach the RNS config even after we plumbed it through
+        the schema. RNS defaults ``ingress_control = True``, so the
+        skip-on-False behaviour meant the operator's explicit "off"
+        was silently overridden by the RNS default.
+    """
     val = src.get(key)
-    if val is not None and val != "" and val is not False:
-        out[out_key] = transform(val) if transform else val
+    if val is None or val == "":
+        return
+    if val is False and transform is None:
+        return
+    out[out_key] = transform(val) if transform else val
 
 
 def _yn(v) -> str:
