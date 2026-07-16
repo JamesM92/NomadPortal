@@ -23,6 +23,22 @@ PAGE_HARD_CAP = 600  # seconds — absolute upper bound per fetch (10 min).
 PATH_TIMEOUT  = 60   # seconds for RNS path discovery before link is established.
 PING_TIMEOUT  = 30   # for ping_node link establishment.
 
+# Max time to wait for a fresh RNS.Link's establishment callback to
+# fire before we treat it as failed. This exists because RNS's own
+# _on_link_closed callback empirically doesn't always fire for
+# destinations that are unreachable — the link sits in HANDSHAKE
+# state indefinitely, the stall watchdog is gated behind
+# link_active[0] so it never fires, and only PAGE_HARD_CAP (10 min)
+# eventually breaks us out. Under the retry loop that's up to
+# 30 minutes of "loading spinner" for one click.
+#
+# 60s is long enough for legitimate multi-hop / high-latency links
+# (RNS typically completes handshake in 2-8s on healthy paths),
+# short enough that unreachable destinations fail out fast and the
+# retry loop can move on. Total worst-case failed fetch is now
+# ~3 min (3 × 60s + 2 × 1.5s backoff) instead of 30 min.
+LINK_ESTABLISH_TIMEOUT = 60
+
 # fetch_page reuses successful links per-destination so back-to-back
 # page loads to the same site don't repeat the ~2-8 s link handshake
 # every click. 50 entries is far more than a browsing session touches
@@ -803,11 +819,18 @@ class NodeBrowser:
                 )
 
             # Stall watchdog: only active AFTER the link has been established.
-            # Before that, RNS's own per-hop establishment timeout will fire
-            # _on_link_closed if the link can't form — applying a 15-second
-            # local watchdog at this stage would falsely abort multi-hop or
-            # LoRa paths whose establishment legitimately takes 20–40 s.
-            hard_deadline = time.monotonic() + PAGE_HARD_CAP
+            # Before establishment, we use LINK_ESTABLISH_TIMEOUT (a shorter
+            # window than PAGE_HARD_CAP) as the pre-establishment abort. RNS
+            # empirically doesn't always fire _on_link_closed for unreachable
+            # destinations — the link sits in HANDSHAKE state and only the
+            # 10-minute hard cap eventually breaks us out, producing the
+            # "click, wait 30 minutes because retry × 3" UX we've been
+            # seeing. 60 s is far longer than a healthy handshake (2-8 s)
+            # and comfortably fits multi-hop paths; anything longer is
+            # almost certainly a dead route where retry might still catch
+            # a fresh path.
+            attempt_start = time.monotonic()
+            hard_deadline = attempt_start + PAGE_HARD_CAP
             # Once the resource transfer reaches 100%, RNS still needs to do a
             # final ack handshake before response_callback fires with the data.
             # On slow/multi-hop links this finalisation can take much longer
@@ -819,7 +842,22 @@ class NodeBrowser:
             FINALISE_TIMEOUT = 180  # seconds — generous post-100% grace
             while not done.is_set():
                 now = time.monotonic()
-                if link_active[0]:
+                if not link_active[0]:
+                    # Pre-establishment window. Give it up to
+                    # LINK_ESTABLISH_TIMEOUT for RNS to fire the
+                    # established callback (or the closed callback);
+                    # if neither happens the link is silently stuck.
+                    # Treat as a retryable link failure so the outer
+                    # retry loop can request a fresh path and try again.
+                    if now - attempt_start >= LINK_ESTABLISH_TIMEOUT:
+                        log.info(
+                            "fetch_page: link to %s failed to establish "
+                            "in %ds, aborting attempt",
+                            destination_hash_hex[:16], LINK_ESTABLISH_TIMEOUT,
+                        )
+                        result["error"] = "Link closed before response"
+                        break
+                elif link_active[0]:
                     idle = now - last_activity[0]
                     # Has the transfer reached its full advertised size?
                     rsize = result.get("response_size")
