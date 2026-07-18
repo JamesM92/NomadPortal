@@ -38,6 +38,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **``link.request()`` failure return value now checked.** In
+  ``fetch_page``'s ``_on_link_established``, ``link.request(...)`` was
+  called but its return value was discarded. RNS's ``Link.request``
+  returns ``False`` when the send failed outright: link went CLOSED
+  between our cache-hit check and the send, or ``Transport.outbound()``
+  couldn't find an interface to send on. Neither case fires the
+  response/failed callback we registered, so without checking the
+  return we sit in the 30s stall watchdog until it aborts with
+  "No response from node (30s)" — a misleading error that obscures
+  the actual failure (link isn't a viable delivery channel at that
+  instant). Now we surface the real failure immediately as a
+  retryable "Link closed before response" so the retry loop can
+  establish a fresh link on the next attempt.
+
 - **Link cache LRU actually reorders on refresh.** ``_cache_link``
   claimed LRU semantics ("oldest insertion goes first") but plain
   ``self._link_cache[dest_hash] = link`` on an existing key does NOT
