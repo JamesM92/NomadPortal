@@ -36,6 +36,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   6h (default) matches NomadNet's own behaviour and is what hubs
   are calibrated for.
 
+### Added
+
+- **Reverse-path keepalive.** Periodic background ``Transport.request_path``
+  every 5 min for a rotating known destination (up to 8 most-recently
+  successfully-loaded nodes). Tests a specific hypothesis about why
+  NomadPortal-browser reaches "works fresh, degrades after ~10-15 min"
+  while MeshChat on the same MichMesh hub and same 2-hop route keeps
+  working: intermediate transport nodes reverse-learn a route to our
+  identity from packets they see us send outbound, but that entry
+  ages out. A silent client (no LXMF router, no site to announce, no
+  traffic between clicks) falls off the intermediates' reverse-path
+  tables — outbound ``Link.request`` gets through fine, but the
+  return proof-of-establishment gets dropped at the intermediate
+  that no longer knows how to reach us. MeshChat is never idle
+  thanks to LXMF activity; NomadPortal was completely radio-silent.
+
+  Fires the minimum-footprint outbound packet: no destination is
+  created, no identity announced, just a broadcast path query for a
+  destination the user has already browsed successfully. 5-min
+  interval is well under the 15-min failure threshold; 8-way rotation
+  keeps path-table entries for common targets warm as a side benefit.
+
+  If the hypothesis is right, the "stops loading after ~15 min"
+  pattern goes away. If wrong, this is invisible in behaviour and
+  eliminates one more theory.
+
 ### Fixed
 
 - **Silently-stalled site-announce loop now visible in ``/healthz``.**
