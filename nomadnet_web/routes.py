@@ -450,9 +450,25 @@ def api_debug_state():
                 info = {
                     "name":            getattr(iface, "name", str(iface)),
                     "online":          bool(getattr(iface, "online", False)),
+                    # OUT is the flag RNS checks in Transport.outbound() —
+                    # if False, no packets get transmitted on this iface.
+                    # Set False by teardown() and by "outgoing = No" in the
+                    # config. Observing OUT=False on a client interface
+                    # that was never explicitly torn down means something
+                    # in RNS decided the interface was unusable.
+                    "OUT":             bool(getattr(iface, "OUT", False)),
+                    "IN":              bool(getattr(iface, "IN", False)),
+                    # Client-only fields; None on server interfaces.
+                    "reconnecting":    bool(getattr(iface, "reconnecting", False)),
+                    "detached":        bool(getattr(iface, "detached", False)),
+                    "never_connected": bool(getattr(iface, "never_connected", False)),
                     "ia_freq_samples": len(getattr(iface, "ia_freq_deque", []) or []),
                     "oa_freq_samples": len(getattr(iface, "oa_freq_deque", []) or []),
                 }
+                for stat_field in ("rxb", "txb"):
+                    val = getattr(iface, stat_field, None)
+                    if isinstance(val, (int, float)):
+                        info[stat_field] = val
                 held = getattr(iface, "held_announces", None)
                 if isinstance(held, dict):
                     info["held_announces"] = len(held)
