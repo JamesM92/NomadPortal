@@ -45,25 +45,6 @@ LINK_ESTABLISH_TIMEOUT = 60
 # in practice; oldest is evicted (and torn down) when the cap is hit.
 LINK_CACHE_MAX_SIZE = 50
 
-# Reverse-path keepalive interval. HYPOTHESIS (unproven): intermediate
-# transport nodes on the mesh reverse-learn a route to our identity
-# from outbound packets they see us send, but that learned entry ages
-# out. A radio-silent client (like NomadPortal-browser: no LXMF router,
-# no site to announce, no traffic between clicks) eventually falls off
-# intermediate reverse-path tables — Link.request goes through fine
-# but the return proof-of-establishment gets dropped at the intermediate
-# that no longer knows how to reach us. Matches the observed pattern:
-# fresh-restart works, ~10-15 min later a specific destination stops
-# loading while MeshChat (never idle at RNS layer thanks to LXMF
-# announces and propagation-node sync) keeps working through the same
-# window. Fire one `Transport.request_path` every REVERSE_PATH_KEEPALIVE_S
-# for a rotating known destination: minimal footprint (no destinations
-# created, no announces, just a broadcast query), well under the 15 min
-# observed failure threshold, sufficient to keep our outbound-packet
-# presence live at intermediates. If the hypothesis is wrong, this does
-# nothing observable and we've eliminated one more theory.
-REVERSE_PATH_KEEPALIVE_S = 300
-
 # RNS sentinel value meaning "hop count unknown / unreachable"
 _HOPS_UNKNOWN = 128
 
@@ -165,12 +146,6 @@ class NodeBrowser:
             name="rns-init",
         ).start()
 
-        threading.Thread(
-            target=self._reverse_path_keepalive_loop,
-            daemon=True,
-            name="reverse-path-keepalive",
-        ).start()
-
     def _init_reticulum(self) -> None:
         """Background-thread RNS init. Sets ``self._ready`` on success.
         Leaves the event unset on failure so callers keep returning 503
@@ -225,62 +200,6 @@ class NodeBrowser:
         except Exception:
             log.exception("Reticulum init failed — RNS-dependent endpoints "
                           "will return 503 until the process restarts")
-
-    def _reverse_path_keepalive_loop(self) -> None:
-        """See ``REVERSE_PATH_KEEPALIVE_S`` for rationale.
-
-        Waits for RNS ready, then fires one ``Transport.request_path``
-        per interval for a rotating destination the user has actually
-        loaded successfully. If no candidates exist yet, skip the tick
-        and try again next interval — a brand-new container with no
-        prior fetches has nothing to warm anyway.
-        """
-        self._ready.wait()
-        RNS = self._rns
-        idx = 0
-        while True:
-            try:
-                time.sleep(REVERSE_PATH_KEEPALIVE_S)
-                candidates = self._reverse_path_keepalive_candidates()
-                if not candidates:
-                    continue
-                target_hex = candidates[idx % len(candidates)]
-                rotation_pos = (idx % len(candidates)) + 1
-                idx += 1
-                try:
-                    dest_hash = bytes.fromhex(target_hex)
-                    RNS.Transport.request_path(dest_hash)
-                    log.info(
-                        "reverse-path keepalive: request_path for %s "
-                        "(rotation %d/%d)",
-                        target_hex[:16], rotation_pos, len(candidates),
-                    )
-                except Exception as exc:
-                    log.debug(
-                        "reverse-path keepalive: request_path for %s "
-                        "raised: %s", target_hex[:16], exc,
-                    )
-            except Exception:
-                log.exception(
-                    "Unexpected error in reverse-path keepalive loop; "
-                    "sleeping 60s before retrying"
-                )
-                time.sleep(60)
-
-    def _reverse_path_keepalive_candidates(self) -> list:
-        """Destinations worth keeping the reverse-path warm to: nodes
-        the user has actually loaded successfully, sorted by recency.
-        Capped at 8 so the 5-min rotation cycles through in ~40 min.
-        """
-        scored = []
-        for hex_hash, info in list(self.nodes.items()):
-            if info.get("is_hosted"):
-                continue
-            if not info.get("ever_load_ok"):
-                continue
-            scored.append((info.get("last_seen", 0), hex_hash))
-        scored.sort(reverse=True)
-        return [h for _, h in scored[:8]]
 
     _RNS_STATS_FILENAME = "rns_init_stats.json"
     _RNS_STATS_MAX_HISTORY = 5
