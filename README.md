@@ -190,6 +190,44 @@ nomadnet.example.com {
 }
 ```
 
+## Running behind a VPN (Gluetun, WireGuard, etc.)
+
+If NomadPortal runs in a container that reaches Reticulum hubs through a VPN with lower MTU than 1500 — Gluetun with a WireGuard provider is the common case — the Docker network MTU must be set to match the VPN's, or TCP connections to the hubs will silently blackhole after ~24–40 s. The failure looks like it's the mesh being unresponsive (fetches work briefly after a container restart, then every subsequent fetch times out with "No response from node" or "Link closed before response"), but the actual cause is path-MTU-discovery being unable to negotiate around packets that get dropped at the VPN boundary. RNS logs show `Connection reset by peer` at the interface level.
+
+Two fixes; pick one:
+
+**Option A — set the Docker network MTU explicitly:**
+
+```yaml
+services:
+  nomadportal:
+    # ... existing config ...
+    networks: [default]
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1280   # match your VPN's actual MTU
+```
+
+Typical WireGuard MTU is 1280; OpenVPN varies (often 1400–1500). Check your VPN interface MTU with `ip link show <iface>`.
+
+**Option B — share the VPN container's network namespace directly:**
+
+```yaml
+services:
+  nomadportal:
+    # ... existing config ...
+    network_mode: "service:gluetun"
+    ports: []   # ports move to the gluetun service
+    depends_on: [gluetun]
+```
+
+This makes NomadPortal use Gluetun's network stack directly; Gluetun's already-correct MTU applies automatically. Port mappings must move to the `gluetun` service definition (Docker's `network_mode` inheritance disallows setting ports on the sharing container).
+
+`entrypoint.sh` prints a warning at boot when the primary interface MTU is ≥ 1500 (i.e., the default bridge), because that's the case where this failure mode is virtually guaranteed if anything VPN-shaped sits upstream. If your deployment genuinely has no VPN in path, silence the warning with `NOMADPORTAL_SKIP_MTU_WARNING=true`.
+
 ## SSL certificate
 
 On first start, `entrypoint.sh` generates a self-signed RSA-2048 certificate at `/config/ssl/cert.pem` (valid 10 years). To use your own certificate, place `cert.pem` and `key.pem` in `config/ssl/` before starting.

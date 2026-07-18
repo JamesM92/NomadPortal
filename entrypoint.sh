@@ -39,6 +39,81 @@ if [ ! -f "$SITE_SEED_MARKER" ]; then
 fi
 
 
+# MTU sanity check. When this container's primary interface uses the
+# default 1500 MTU but the outbound network path (a VPN, an upstream
+# tunnel) has a smaller MTU, TCP connections to Reticulum hubs will
+# establish, work briefly, then fail with `Connection reset by peer`
+# after ~24-40 s once large enough packets get dropped by path-MTU-
+# discovery blackholes. Symptoms surface as "cached link failed", "No
+# response from node", "Link closed before response", "path discovery
+# timed out" — all downstream of TCP itself dying silently. Reticulum
+# sets aggressive TCP keepalives (5 s idle probe, 24 s TCP_USER_TIMEOUT)
+# so the failure is fast and looks like the destination is being
+# unresponsive when actually our packets aren't making it out.
+#
+# We can't autodetect the true PMTU here without hitting a hub, but
+# we can flag the setup that almost always causes this: an eth0 with
+# the default 1500 MTU inside a container. If your deployment is
+# entirely on a local mesh without any VPN, the warning is harmless
+# and you can silence it with NOMADPORTAL_SKIP_MTU_WARNING=true.
+#
+# The fix is a docker-compose change, not a NomadPortal code change:
+# either set the docker network MTU to match your VPN's (typical
+# WireGuard is 1280, OpenVPN varies), or share a VPN container's
+# network namespace directly via network_mode: "service:gluetun".
+if [ "${NOMADPORTAL_SKIP_MTU_WARNING:-false}" != "true" ]; then
+  PRIMARY_IF=""
+  if [ -e /sys/class/net/eth0 ]; then
+    PRIMARY_IF="eth0"
+  else
+    # `network_mode: host` or a namespace-shared container: eth0 may
+    # not exist. Pick the first non-loopback interface with an mtu.
+    for candidate in /sys/class/net/*; do
+      [ -e "$candidate/mtu" ] || continue
+      name="$(basename "$candidate")"
+      case "$name" in
+        lo|lo0) continue ;;
+      esac
+      PRIMARY_IF="$name"
+      break
+    done
+  fi
+  if [ -n "$PRIMARY_IF" ] && [ -e "/sys/class/net/$PRIMARY_IF/mtu" ]; then
+    PRIMARY_MTU="$(cat "/sys/class/net/$PRIMARY_IF/mtu" 2>/dev/null || echo "")"
+    if [ -n "$PRIMARY_MTU" ] && [ "$PRIMARY_MTU" -ge 1500 ]; then
+      echo "[startup] ================================================================" >&2
+      echo "[startup] WARNING: Primary interface $PRIMARY_IF has MTU $PRIMARY_MTU (default)." >&2
+      echo "[startup]" >&2
+      echo "[startup] If this container is behind a VPN (Gluetun, WireGuard, OpenVPN," >&2
+      echo "[startup] Tailscale, etc.), TCP connections to Reticulum hubs will silently" >&2
+      echo "[startup] fail after ~24-40s of activity due to path-MTU-discovery blackholes." >&2
+      echo "[startup] Symptoms: fetches work briefly after a container restart, then" >&2
+      echo "[startup] every subsequent fetch times out with 'No response from node' or" >&2
+      echo "[startup] 'Link closed before response'. RNS logs show 'Connection reset by" >&2
+      echo "[startup] peer' at the interface level." >&2
+      echo "[startup]" >&2
+      echo "[startup] Fix in docker-compose.yml — either:" >&2
+      echo "[startup]" >&2
+      echo "[startup]   networks:" >&2
+      echo "[startup]     default:" >&2
+      echo "[startup]       driver: bridge" >&2
+      echo "[startup]       driver_opts:" >&2
+      echo "[startup]         com.docker.network.driver.mtu: 1280   # match your VPN's" >&2
+      echo "[startup]" >&2
+      echo "[startup] Or share a VPN container's network namespace directly:" >&2
+      echo "[startup]" >&2
+      echo "[startup]   services:" >&2
+      echo "[startup]     nomadportal:" >&2
+      echo "[startup]       network_mode: \"service:gluetun\"" >&2
+      echo "[startup]" >&2
+      echo "[startup] Silence this warning with NOMADPORTAL_SKIP_MTU_WARNING=true if" >&2
+      echo "[startup] your deployment has no VPN in path." >&2
+      echo "[startup] ================================================================" >&2
+    fi
+  fi
+fi
+
+
 # Prune old ratchet files before RNS starts. RNS keeps per-peer
 # forward-secrecy ratchets under $RNS_CONFIG_DIR/storage/ratchets/,
 # one small file each. On long-running installs this accumulates —
