@@ -80,6 +80,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **RNS zombie-interface bug** — a transient ``ConnectionResetError``
+  from ``TCPClientInterface.socket.sendall`` no longer permanently
+  disables the interface. RNS 1.1.3's ``process_outgoing`` catches
+  every exception and calls ``teardown()``, which flips
+  ``IN``/``OUT`` to False. The read_loop separately notices the
+  closed socket and fires ``reconnect()``, but reconnect only resets
+  ``online=True`` — ``IN``/``OUT`` stay False forever, so
+  ``Transport.outbound()`` silently refuses to send anything on that
+  interface for the rest of the process's life. The container keeps
+  receiving announces (``rxb`` grows) but every fetch fails "path
+  discovery timed out" or "Link closed before response" until the
+  container is restarted.
+
+  This was the smoking gun behind "works fresh, degrades after ~15
+  min, only restart fixes it" — the actual failure mode we have
+  chased through Reticulum internals, Link caching, path expiry,
+  announce cadence, MTU handling, and hub reachability for months.
+  Errno 104 (Connection reset by peer) fires often enough behind
+  a low-MTU VPN tunnel to hit this bug within minutes of the first
+  outbound path request or Link handshake.
+
+  Fix: monkey-patch ``TCPClientInterface.process_outgoing`` at RNS
+  init time to catch the specific transient TCP errors
+  (``ConnectionResetError``, ``BrokenPipeError``,
+  ``ConnectionAbortedError``, ``socket.timeout``) and route recovery
+  through ``socket.close()`` + read_loop reconnect. That path
+  preserves ``IN``/``OUT``, so ``Transport.outbound()`` keeps
+  working across the RST → reconnect cycle. Truly-unexpected
+  exceptions still fall through to RNS's original teardown, so
+  genuinely unrecoverable errors are not masked.
+
+  Idempotent — safe if ``_init_reticulum`` runs more than once — and
+  logs a single INFO line at boot confirming the patch is in place.
+
 - **``link.request()`` failure return value now checked.** In
   ``fetch_page``'s ``_on_link_established``, ``link.request(...)`` was
   called but its return value was discarded. RNS's ``Link.request``

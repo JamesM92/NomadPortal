@@ -177,6 +177,20 @@ class NodeBrowser:
         signal.signal = _thread_safe_signal
 
         RNS = self._rns
+
+        # Patch RNS.TCPClientInterface.process_outgoing BEFORE
+        # constructing Reticulum(). See docstring on
+        # _patch_tcpclient_transient_tx_errors for the full rationale
+        # — short version: RNS treats any Exception from ``sendall``
+        # as unrecoverable and calls ``teardown()``, which flips
+        # ``IN``/``OUT`` to False. The read_loop then quietly
+        # reconnects the socket but does NOT reset the flags, so
+        # ``Transport.outbound()`` refuses to send anything on that
+        # interface for the rest of the process's life. This is what
+        # made "works fresh, degrades in ~15 min, only container
+        # restart fixes it" a stable failure mode for months.
+        self._patch_tcpclient_transient_tx_errors(RNS)
+
         self._rns_init_start_mono = time.monotonic()
         try:
             log.info("Starting Reticulum (config: %s)", self._config_dir or "default")
@@ -200,6 +214,118 @@ class NodeBrowser:
         except Exception:
             log.exception("Reticulum init failed — RNS-dependent endpoints "
                           "will return 503 until the process restarts")
+
+    def _patch_tcpclient_transient_tx_errors(self, RNS) -> None:
+        """Replace ``TCPClientInterface.process_outgoing`` so transient
+        TCP errors (``ConnectionResetError``, ``BrokenPipeError``, etc.)
+        don't permanently disable the interface.
+
+        RNS 1.1.3's TCPClientInterface catches every exception from
+        ``socket.sendall`` and calls ``self.teardown()``. That flips
+        ``IN``/``OUT`` to False. The read_loop separately detects the
+        closed socket and fires ``reconnect()`` — which brings
+        ``online`` back to True, but does NOT reset ``IN``/``OUT``.
+        Result: an interface stuck in a zombie state where
+        ``online=True`` (data still flows in) but
+        ``Transport.outbound()`` silently refuses to send anything ever
+        again on it. The only way to reset the flags is a full RNS
+        restart, which in a container context means restarting the
+        container.
+
+        Why this happens more than you'd think: any transient TCP RST
+        from a PMTU boundary crossing, VPN tunnel churn, or ISP
+        middlebox will trigger the exception path. In deployments
+        behind a VPN with a low tunnel MTU (Gluetun-with-WireGuard is
+        the reproducer we found), it happens within minutes of the
+        first fetch that generates any packet close to the MTU limit.
+
+        Fix: catch the transient TCP errors specifically and route
+        recovery through the socket-close + read_loop.reconnect path,
+        which preserves ``IN``/``OUT``. Truly-unexpected exceptions
+        still fall through to the original teardown behaviour.
+        """
+        import socket
+
+        try:
+            # HDLC/KISS are inner classes defined at module scope in
+            # TCPInterface.py, not separate modules — import the module
+            # itself and pull them off it.
+            from RNS.Interfaces import TCPInterface as _tcp_mod
+            TCPClientInterface = _tcp_mod.TCPClientInterface
+            HDLC = _tcp_mod.HDLC
+            KISS = _tcp_mod.KISS
+        except Exception:
+            log.exception(
+                "Could not import TCPClientInterface for tx-error patch; "
+                "the RNS zombie-interface bug will still cause the "
+                "container to eventually stop sending outbound packets."
+            )
+            return
+
+        # Idempotent: only patch once, even if _init_reticulum runs again.
+        if getattr(TCPClientInterface, "_nomadportal_tx_patched", False):
+            return
+
+        def _patched(iface, data):
+            if iface.online and not iface.detached:
+                try:
+                    iface.writing = True
+                    if iface.kiss_framing:
+                        framed = (bytes([KISS.FEND])
+                                  + bytes([KISS.CMD_DATA])
+                                  + KISS.escape(data)
+                                  + bytes([KISS.FEND]))
+                    else:
+                        framed = (bytes([HDLC.FLAG])
+                                  + HDLC.escape(data)
+                                  + bytes([HDLC.FLAG]))
+                    iface.socket.sendall(framed)
+                    iface.writing = False
+                    iface.txb += len(data)
+                    if (hasattr(iface, "parent_interface")
+                            and iface.parent_interface is not None):
+                        iface.parent_interface.txb += len(data)
+                except (ConnectionResetError, BrokenPipeError,
+                        ConnectionAbortedError, socket.timeout) as exc:
+                    # Transient TCP-layer failure. NOT calling
+                    # teardown() here is the whole point of this patch.
+                    # Close the socket so read_loop.recv() returns
+                    # empty and fires reconnect() naturally; IN/OUT
+                    # stay True and the interface recovers cleanly.
+                    RNS.log(
+                        "Transient TX error on " + str(iface)
+                        + ", closing socket so read_loop reconnects "
+                        + "(IN/OUT preserved): " + str(exc),
+                        RNS.LOG_WARNING,
+                    )
+                    iface.writing = False
+                    try:
+                        iface.socket.close()
+                    except Exception:
+                        pass
+                    iface.online = False
+                except Exception as exc:
+                    # Something we didn't anticipate — preserve RNS's
+                    # original teardown behaviour so we don't hide
+                    # genuinely unrecoverable errors.
+                    RNS.log(
+                        "Exception occurred while transmitting via "
+                        + str(iface) + ", tearing down interface",
+                        RNS.LOG_ERROR,
+                    )
+                    RNS.log(
+                        "The contained exception was: " + str(exc),
+                        RNS.LOG_ERROR,
+                    )
+                    iface.teardown()
+
+        TCPClientInterface.process_outgoing = _patched
+        TCPClientInterface._nomadportal_tx_patched = True
+        log.info(
+            "Patched RNS.TCPClientInterface.process_outgoing to treat "
+            "ConnectionResetError / BrokenPipeError as transient; "
+            "interface IN/OUT flags will survive transient TX failures."
+        )
 
     _RNS_STATS_FILENAME = "rns_init_stats.json"
     _RNS_STATS_MAX_HISTORY = 5
