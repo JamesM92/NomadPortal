@@ -79,21 +79,6 @@ class NodeBrowser:
         self._link_cache: dict = {}   # dest_hash (bytes) -> RNS.Link
         self._link_cache_lock = threading.Lock()
 
-        # Per-destination establishment serialization. Two concurrent
-        # fetches to the same node — from separate browser tabs, a
-        # user-driven reload racing with a scheduled refresh, or two
-        # parallel async jobs — would otherwise fire independent
-        # Link.request() bursts at the mesh from the same identity.
-        # Peers appear to rate-limit or blackhole that pattern silently,
-        # which matches the "works fresh, degrades over time" symptom
-        # (fresh restart clears everything; the more parallel bursts
-        # accumulate against our identity, the worse the state gets).
-        # Holding a per-dest lock across the cache-hit + retry block
-        # means the second caller waits for the first to finish and
-        # then rides the cached link the first attempt just established.
-        self._establish_locks: dict = {}   # dest_hash (bytes) -> Lock
-        self._establish_locks_mutex = threading.Lock()
-
         if config_dir:
             self._nodes_file = os.path.join(
                 os.path.dirname(config_dir.rstrip("/")), "nodes.json"
@@ -380,18 +365,6 @@ class NodeBrowser:
         except Exception:
             pass
         return None
-
-    def _establish_lock(self, dest_hash: bytes) -> threading.Lock:
-        """Per-destination establishment lock, created lazily. See the
-        block in __init__ for why concurrent Link.request()s to the same
-        destination are the problem this exists to prevent.
-        """
-        with self._establish_locks_mutex:
-            lock = self._establish_locks.get(dest_hash)
-            if lock is None:
-                lock = threading.Lock()
-                self._establish_locks[dest_hash] = lock
-            return lock
 
     # ------------------------------------------------------------------
     # Public API
@@ -931,74 +904,69 @@ class NodeBrowser:
         # we evict the cached link (probably dead despite ACTIVE status)
         # and fall through to the fresh-establishment path below.
         final_result: dict = {"content": None, "error": None}
-        # Serialize establishment per destination. A second caller that
-        # arrives while we're mid-handshake waits here, then finds the
-        # freshly-cached link and rides it through the fast path. See
-        # __init__ for the rationale.
-        with self._establish_lock(dest_hash):
-            cached_link = self._get_cached_link(dest_hash)
-            if cached_link is not None:
-                # Log at INFO so operators can see cache activity without
-                # cranking log level. It's diagnostic gold when someone says
-                # "the second click was slow" — presence/absence of this
-                # line answers "did the cache hit."
+        cached_link = self._get_cached_link(dest_hash)
+        if cached_link is not None:
+            # Log at INFO so operators can see cache activity without
+            # cranking log level. It's diagnostic gold when someone says
+            # "the second click was slow" — presence/absence of this
+            # line answers "did the cache hit."
+            log.info(
+                "fetch_page: reusing cached link for %s",
+                destination_hash_hex[:16],
+            )
+            result, _link = _do_attempt(existing_link=cached_link)
+            if result["content"] is not None:
+                final_result = result
+                # cached_link is still fine; leave it in place. Also
+                # re-register the eviction closed_callback — _do_attempt
+                # overwrote it with its own local one for the fetch, so
+                # if RNS closes this link later we still want the cache
+                # entry cleaned up.
+                self._cache_link(dest_hash, cached_link)
+            else:
+                # Cached link failed mid-request. Evict and let the
+                # fresh-flow retry loop take over.
                 log.info(
-                    "fetch_page: reusing cached link for %s",
+                    "fetch_page: cached link for %s failed (%s); "
+                    "establishing fresh",
                     destination_hash_hex[:16],
+                    result.get("error") or "?",
                 )
-                result, _link = _do_attempt(existing_link=cached_link)
+                self._evict_cached_link(dest_hash, teardown=True)
+                cached_link = None
+
+        if final_result["content"] is None:
+            for attempt in range(MAX_ATTEMPTS):
+                result, link_obj = _do_attempt()
                 if result["content"] is not None:
                     final_result = result
-                    # cached_link is still fine; leave it in place. Also
-                    # re-register the eviction closed_callback — _do_attempt
-                    # overwrote it with its own local one for the fetch, so
-                    # if RNS closes this link later we still want the cache
-                    # entry cleaned up.
-                    self._cache_link(dest_hash, cached_link)
-                else:
-                    # Cached link failed mid-request. Evict and let the
-                    # fresh-flow retry loop take over.
-                    log.info(
-                        "fetch_page: cached link for %s failed (%s); "
-                        "establishing fresh",
-                        destination_hash_hex[:16],
-                        result.get("error") or "?",
-                    )
-                    self._evict_cached_link(dest_hash, teardown=True)
-                    cached_link = None
-
-            if final_result["content"] is None:
-                for attempt in range(MAX_ATTEMPTS):
-                    result, link_obj = _do_attempt()
-                    if result["content"] is not None:
-                        final_result = result
-                        # Cache the successfully-established link so the
-                        # next fetch to this destination skips establishment.
-                        if link_obj is not None:
-                            self._cache_link(dest_hash, link_obj)
-                        break
-                    final_result = result
-                    err = result.get("error") or ""
-                    # Only retry on transient link failures. Path-discovery
-                    # timeouts, hard-cap breaches, and stall/finalise errors
-                    # imply either an unreachable destination or a stuck
-                    # transfer — retrying would just wait through it again.
-                    if err not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
-                        break
-                    log.info(
-                        "fetch_page: retrying %s (attempt %d/%d after: %s)",
-                        destination_hash_hex[:16], attempt + 2, MAX_ATTEMPTS, err,
-                    )
-                    # Refresh the path in case the advertised route has
-                    # gone stale. RNS.Transport.request_path is idempotent
-                    # and cheap; a fresh announce from the destination (or
-                    # a shorter path via a different hop) can arrive
-                    # before the next attempt.
-                    try:
-                        RNS.Transport.request_path(dest_hash)
-                    except Exception:
-                        pass
-                    time.sleep(RETRY_SLEEP)
+                    # Cache the successfully-established link so the
+                    # next fetch to this destination skips establishment.
+                    if link_obj is not None:
+                        self._cache_link(dest_hash, link_obj)
+                    break
+                final_result = result
+                err = result.get("error") or ""
+                # Only retry on transient link failures. Path-discovery
+                # timeouts, hard-cap breaches, and stall/finalise errors
+                # imply either an unreachable destination or a stuck
+                # transfer — retrying would just wait through it again.
+                if err not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
+                    break
+                log.info(
+                    "fetch_page: retrying %s (attempt %d/%d after: %s)",
+                    destination_hash_hex[:16], attempt + 2, MAX_ATTEMPTS, err,
+                )
+                # Refresh the path in case the advertised route has
+                # gone stale. RNS.Transport.request_path is idempotent
+                # and cheap; a fresh announce from the destination (or
+                # a shorter path via a different hop) can arrive
+                # before the next attempt.
+                try:
+                    RNS.Transport.request_path(dest_hash)
+                except Exception:
+                    pass
+                time.sleep(RETRY_SLEEP)
 
         load_ms = int((time.monotonic() - t_start) * 1000)
 
