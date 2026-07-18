@@ -151,6 +151,14 @@ def _build_interface_sections(ifaces: dict) -> list[str]:
         # sparser than peers who happened to be listening during a
         # quiet moment.
         _optional(fields, entry, "ingress_control",  "ingress_control",  _yn)
+        # fixed_mtu forces RNS to use this MTU on the interface instead
+        # of its default (8192 for TCP). Use when this container's
+        # outbound path traverses a low-MTU tunnel (e.g. Gluetun's
+        # WireGuard tun0 with MTU 1171) — set fixed_mtu to something
+        # comfortably below the tunnel's MTU (1000 is a safe default
+        # for the ~1200-1280 MTU tunnels most VPN providers use). Too
+        # small hurts throughput; too large replicates the blackhole.
+        _optional(fields, entry, "fixed_mtu",        "fixed_mtu")
         sections.append(_iface(entry.get("name", "TCP Client"), fields))
 
     # TCP Servers

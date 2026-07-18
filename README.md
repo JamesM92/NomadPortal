@@ -192,11 +192,13 @@ nomadnet.example.com {
 
 ## Running behind a VPN (Gluetun, WireGuard, etc.)
 
-If NomadPortal runs in a container that reaches Reticulum hubs through a VPN with lower MTU than 1500 — Gluetun with a WireGuard provider is the common case — the Docker network MTU must be set to match the VPN's, or TCP connections to the hubs will silently blackhole after ~24–40 s. The failure looks like it's the mesh being unresponsive (fetches work briefly after a container restart, then every subsequent fetch times out with "No response from node" or "Link closed before response"), but the actual cause is path-MTU-discovery being unable to negotiate around packets that get dropped at the VPN boundary. RNS logs show `Connection reset by peer` at the interface level.
+When NomadPortal reaches Reticulum hubs through a VPN with an MTU smaller than 1500, TCP connections can silently blackhole after ~30–60 s: fetches work briefly after a container restart, then every subsequent fetch times out with "No response from node" or "Link closed before response". At the RNS level the interface logs `Connection reset by peer` and reconnects, works briefly, dies again. Nothing in Reticulum or the application code is broken — it's straight path-MTU-discovery blackhole, or fragmentation from Reticulum's default TCP hardware-MTU (8192) writing chunks the tunnel can't carry.
 
-Two fixes; pick one:
+Two different setups produce this, with two different fixes:
 
-**Option A — set the Docker network MTU explicitly:**
+### Setup A — container NOT sharing a VPN namespace (default docker bridge, VPN upstream on host)
+
+The container's `eth0` is at MTU 1500 (docker default). Traffic leaves the container, hits the host's VPN interface with a smaller MTU, packets stall. Fix by matching the docker network MTU to whatever the upstream VPN uses:
 
 ```yaml
 services:
@@ -211,22 +213,41 @@ networks:
       com.docker.network.driver.mtu: 1280   # match your VPN's actual MTU
 ```
 
-Typical WireGuard MTU is 1280; OpenVPN varies (often 1400–1500). Check your VPN interface MTU with `ip link show <iface>`.
+Or share a VPN container's namespace directly — the same option as Setup B below, which sidesteps the docker-network-MTU dance entirely.
 
-**Option B — share the VPN container's network namespace directly:**
+### Setup B — container IS sharing a VPN namespace (e.g., `network_mode: "container:gluetun"`) with a low-MTU tunnel
+
+Here the tunnel interface (`tun0` / `wg0`) is inside the container's namespace but its MTU is low — many providers land in the 1170–1300 range on WireGuard. Even with MSS clamping active, Reticulum's default 8192 hardware-MTU produces payloads that get fragmented at the tunnel. Fix by constraining Reticulum itself:
 
 ```yaml
-services:
-  nomadportal:
-    # ... existing config ...
-    network_mode: "service:gluetun"
-    ports: []   # ports move to the gluetun service
-    depends_on: [gluetun]
+interfaces:
+  tcp_clients:
+    - name: MichMesh
+      host: rns.michmesh.net
+      port: 7822
+      enabled: true
+      fixed_mtu: 1000     # ← under whatever your tun MTU is
 ```
 
-This makes NomadPortal use Gluetun's network stack directly; Gluetun's already-correct MTU applies automatically. Port mappings must move to the `gluetun` service definition (Docker's `network_mode` inheritance disallows setting ports on the sharing container).
+`fixed_mtu: 1000` is a safe default under any tunnel MTU ≥ 1100 (leaves room for IP + TCP + IFAC headers). If throughput matters and your tunnel MTU is comfortably higher, you can raise it — as a rule of thumb, `tunnel_mtu − 80` is a good ceiling. Set per-`tcp_clients` entry so hubs reached via different paths can be tuned independently.
 
-`entrypoint.sh` prints a warning at boot when the primary interface MTU is ≥ 1500 (i.e., the default bridge), because that's the case where this failure mode is virtually guaranteed if anything VPN-shaped sits upstream. If your deployment genuinely has no VPN in path, silence the warning with `NOMADPORTAL_SKIP_MTU_WARNING=true`.
+### Diagnosing which setup you have
+
+Inside the container:
+
+```bash
+# List interfaces with their MTUs
+for i in /sys/class/net/*; do
+  n=$(basename $i); echo "$n mtu=$(cat $i/mtu 2>/dev/null)"
+done
+
+# Show the default route(s)
+awk 'NR==1 || $2=="00000000"' /proc/net/route
+```
+
+If you see a `tun0` / `wg0` interface at MTU < 1400, you're in **Setup B**. If you see only `eth0` at MTU 1500 and the default route goes through it, you're in **Setup A**.
+
+`entrypoint.sh` runs this check at boot and prints a warning matched to whichever setup it detects. Silence with `NOMADPORTAL_SKIP_MTU_WARNING=true` on deployments where neither shape applies.
 
 ## SSL certificate
 

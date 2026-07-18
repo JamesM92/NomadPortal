@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **``fixed_mtu`` on ``tcp_clients`` entries in ``config.yml``.**
+  Passed straight through to ``TCPClientInterface`` in the generated
+  RNS config; constrains Reticulum's TCP hardware MTU below the
+  default 8192. Required when the container shares a VPN namespace
+  with a low-MTU tunnel (Gluetun's WireGuard `tun0` at MTU 1171 is
+  the case that surfaced this) — even with MSS clamping, RNS's
+  default chunk size can generate payloads the tunnel can't carry,
+  and fetches silently blackhole within ~30-60s of session start.
+  Setting ``fixed_mtu: 1000`` per hub is a safe default under any
+  tunnel MTU ≥ 1100.
+
 - **``entrypoint.sh`` MTU sanity-check with a docker-compose fix
   recipe.** When the container's primary interface is at MTU 1500 —
   the default for a stock Docker bridge — and a VPN with lower MTU
