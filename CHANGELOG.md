@@ -36,6 +36,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   6h (default) matches NomadNet's own behaviour and is what hubs
   are calibrated for.
 
+### Added
+
+- **``entrypoint.sh`` MTU sanity-check with a docker-compose fix
+  recipe.** When the container's primary interface is at MTU 1500 —
+  the default for a stock Docker bridge — and a VPN with lower MTU
+  sits upstream (Gluetun with WireGuard is the canonical case), TCP
+  connections to Reticulum hubs establish cleanly, work briefly, then
+  silently blackhole after ~24–40 s. The failure surfaces as the
+  mesh appearing unresponsive: fetches to specific destinations work
+  briefly after a container restart, then every subsequent fetch
+  times out with "No response from node" or "Link closed before
+  response". At the RNS level the interface logs ``Connection reset
+  by peer`` and reconnects, works briefly, dies again. Nothing in
+  Reticulum or the application code is broken; it's straight
+  path-MTU-discovery blackhole.
+
+  Multiple sessions in this repo chased this failure through
+  Reticulum internals, Link caching, path expiry, announce cadence,
+  and hub reachability — because the RNS layer's symptoms perfectly
+  mimic those. Isolated by comparing a bare RNS session on the host
+  (works) with the same session in a default-bridge container behind
+  a WireGuard VPN (RST at ~41 s), and confirmed by rerunning the
+  container on a network with the MTU set to match the VPN (no
+  RSTs). The boot-time warning now catches this class of setup
+  before the operator burns hours in Reticulum's log timeline. Fix
+  recipe (two options — explicit network MTU, or ``network_mode:
+  "service:gluetun"``) is printed inline and documented in the new
+  "Running behind a VPN" README section. Silence the warning with
+  ``NOMADPORTAL_SKIP_MTU_WARNING=true`` on deployments with no VPN
+  in path.
+
 ### Fixed
 
 - **``link.request()`` failure return value now checked.** In
