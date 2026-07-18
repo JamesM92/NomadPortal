@@ -62,54 +62,95 @@ fi
 # WireGuard is 1280, OpenVPN varies), or share a VPN container's
 # network namespace directly via network_mode: "service:gluetun".
 if [ "${NOMADPORTAL_SKIP_MTU_WARNING:-false}" != "true" ]; then
-  PRIMARY_IF=""
-  if [ -e /sys/class/net/eth0 ]; then
-    PRIMARY_IF="eth0"
-  else
-    # `network_mode: host` or a namespace-shared container: eth0 may
-    # not exist. Pick the first non-loopback interface with an mtu.
-    for candidate in /sys/class/net/*; do
-      [ -e "$candidate/mtu" ] || continue
-      name="$(basename "$candidate")"
-      case "$name" in
-        lo|lo0) continue ;;
-      esac
-      PRIMARY_IF="$name"
-      break
-    done
-  fi
-  if [ -n "$PRIMARY_IF" ] && [ -e "/sys/class/net/$PRIMARY_IF/mtu" ]; then
-    PRIMARY_MTU="$(cat "/sys/class/net/$PRIMARY_IF/mtu" 2>/dev/null || echo "")"
-    if [ -n "$PRIMARY_MTU" ] && [ "$PRIMARY_MTU" -ge 1500 ]; then
-      echo "[startup] ================================================================" >&2
-      echo "[startup] WARNING: Primary interface $PRIMARY_IF has MTU $PRIMARY_MTU (default)." >&2
-      echo "[startup]" >&2
-      echo "[startup] If this container is behind a VPN (Gluetun, WireGuard, OpenVPN," >&2
-      echo "[startup] Tailscale, etc.), TCP connections to Reticulum hubs will silently" >&2
-      echo "[startup] fail after ~24-40s of activity due to path-MTU-discovery blackholes." >&2
-      echo "[startup] Symptoms: fetches work briefly after a container restart, then" >&2
-      echo "[startup] every subsequent fetch times out with 'No response from node' or" >&2
-      echo "[startup] 'Link closed before response'. RNS logs show 'Connection reset by" >&2
-      echo "[startup] peer' at the interface level." >&2
-      echo "[startup]" >&2
-      echo "[startup] Fix in docker-compose.yml — either:" >&2
-      echo "[startup]" >&2
-      echo "[startup]   networks:" >&2
-      echo "[startup]     default:" >&2
-      echo "[startup]       driver: bridge" >&2
-      echo "[startup]       driver_opts:" >&2
-      echo "[startup]         com.docker.network.driver.mtu: 1280   # match your VPN's" >&2
-      echo "[startup]" >&2
-      echo "[startup] Or share a VPN container's network namespace directly:" >&2
-      echo "[startup]" >&2
-      echo "[startup]   services:" >&2
-      echo "[startup]     nomadportal:" >&2
-      echo "[startup]       network_mode: \"service:gluetun\"" >&2
-      echo "[startup]" >&2
-      echo "[startup] Silence this warning with NOMADPORTAL_SKIP_MTU_WARNING=true if" >&2
-      echo "[startup] your deployment has no VPN in path." >&2
-      echo "[startup] ================================================================" >&2
-    fi
+  # Two failure shapes we want to catch:
+  #
+  # 1) Container is on a default docker bridge (eth0 MTU 1500) with
+  #    NO tunnel interface visible in the namespace, but a lower-MTU
+  #    VPN upstream on the host. TCP inside the container has no
+  #    signal that the effective path MTU is smaller, so packets
+  #    fragment or blackhole at the VPN boundary. Fix: docker network
+  #    MTU or network_mode:container:<gluetun>.
+  #
+  # 2) Container shares a Gluetun-like VPN namespace (tun0/wg0
+  #    present with sub-1400 MTU) but the sockets still see eth0 as
+  #    1500. Even with MSS clamping in Gluetun, the very low tun
+  #    MTUs some providers use (~1170-1280) cause enough overhead
+  #    that Reticulum's default TCP hardware MTU (8192) generates
+  #    payloads that don't survive. Fix: set fixed_mtu ~1000 on the
+  #    tcp_clients entry in config.yml so RNS produces small enough
+  #    chunks.
+  MIN_TUNNEL_MTU=""
+  MIN_TUNNEL_IF=""
+  MAX_NON_TUNNEL_MTU=0
+  MAX_NON_TUNNEL_IF=""
+  for candidate in /sys/class/net/*; do
+    [ -e "$candidate/mtu" ] || continue
+    name="$(basename "$candidate")"
+    case "$name" in
+      lo|lo0) continue ;;
+    esac
+    m="$(cat "$candidate/mtu" 2>/dev/null || echo "")"
+    [ -z "$m" ] && continue
+    case "$name" in
+      tun*|tap*|wg*|utun*)
+        # Track the smallest tunnel MTU.
+        if [ -z "$MIN_TUNNEL_MTU" ] || [ "$m" -lt "$MIN_TUNNEL_MTU" ]; then
+          MIN_TUNNEL_MTU="$m"
+          MIN_TUNNEL_IF="$name"
+        fi
+        ;;
+      *)
+        # Track the largest non-tunnel MTU.
+        if [ "$m" -gt "$MAX_NON_TUNNEL_MTU" ]; then
+          MAX_NON_TUNNEL_MTU="$m"
+          MAX_NON_TUNNEL_IF="$name"
+        fi
+        ;;
+    esac
+  done
+
+  if [ -n "$MIN_TUNNEL_MTU" ] && [ "$MIN_TUNNEL_MTU" -lt 1400 ]; then
+    # Shape 2: tunnel present in namespace, MTU low enough that we
+    # need to constrain RNS explicitly.
+    echo "[startup] ================================================================" >&2
+    echo "[startup] Reticulum TCP interface config note:" >&2
+    echo "[startup]" >&2
+    echo "[startup] A tunnel interface ($MIN_TUNNEL_IF, MTU $MIN_TUNNEL_MTU) is present in this" >&2
+    echo "[startup] container's network namespace — likely a VPN routing outbound" >&2
+    echo "[startup] traffic. When the tunnel MTU is below ~1400, RNS's default TCP" >&2
+    echo "[startup] hardware MTU (8192) produces payloads that get fragmented or" >&2
+    echo "[startup] silently dropped at the tunnel boundary, causing 'Link closed" >&2
+    echo "[startup] before response' / 'No response from node' failures within" >&2
+    echo "[startup] ~30-60s of Reticulum session start." >&2
+    echo "[startup]" >&2
+    echo "[startup] Fix: add fixed_mtu: 1000 to each tcp_clients entry in config.yml" >&2
+    echo "[startup] (safe value under ~1200 tunnel MTUs). Example:" >&2
+    echo "[startup]" >&2
+    echo "[startup]   interfaces:" >&2
+    echo "[startup]     tcp_clients:" >&2
+    echo "[startup]       - name: MichMesh" >&2
+    echo "[startup]         host: rns.michmesh.net" >&2
+    echo "[startup]         port: 7822" >&2
+    echo "[startup]         enabled: true" >&2
+    echo "[startup]         fixed_mtu: 1000" >&2
+    echo "[startup]" >&2
+    echo "[startup] Silence: NOMADPORTAL_SKIP_MTU_WARNING=true" >&2
+    echo "[startup] ================================================================" >&2
+  elif [ -z "$MIN_TUNNEL_MTU" ] && [ -n "$MAX_NON_TUNNEL_IF" ] && [ "$MAX_NON_TUNNEL_MTU" -ge 1500 ]; then
+    # Shape 1: no tunnel visible, non-tunnel primary at MTU 1500.
+    # If a VPN sits upstream at the host or network level, we're
+    # heading into a PMTU blackhole. Compact warning — the docker-
+    # network-MTU / network_mode fix is in the README.
+    echo "[startup] ================================================================" >&2
+    echo "[startup] MTU note: primary interface $MAX_NON_TUNNEL_IF is at MTU $MAX_NON_TUNNEL_MTU," >&2
+    echo "[startup] no tunnel interface visible in this namespace. If a VPN sits" >&2
+    echo "[startup] upstream (Gluetun, host VPN, Tailscale exit node, …), TCP to" >&2
+    echo "[startup] Reticulum hubs may silently blackhole after ~30-60s." >&2
+    echo "[startup] Fix: docker network driver_opts.mtu, or network_mode:" >&2
+    echo "[startup] container:<gluetun_container_name> to share a VPN namespace." >&2
+    echo "[startup] See README 'Running behind a VPN'. Silence:" >&2
+    echo "[startup] NOMADPORTAL_SKIP_MTU_WARNING=true" >&2
+    echo "[startup] ================================================================" >&2
   fi
 fi
 
