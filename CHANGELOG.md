@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Link cache LRU actually reorders on refresh.** ``_cache_link``
+  claimed LRU semantics ("oldest insertion goes first") but plain
+  ``self._link_cache[dest_hash] = link`` on an existing key does NOT
+  move it to the end of insertion order in Python. Consequence: a
+  heavily-reused destination first cached at boot became the
+  perpetual eviction target once the 50-entry cap was hit — exactly
+  inverting what LRU should do. Fix pops any existing entry before
+  the re-insert so the key moves to the end of insertion order, and
+  handles the "same link re-cached" case (cache-hit refresh at
+  ``fetch_page:952``) without tearing down the link being re-cached.
+
 - **Silently-stalled site-announce loop now visible in ``/healthz``.**
   Reported failure mode: mirror shows healthy in Portainer / Docker,
   RNS interfaces are up, but no announces have gone out for hours.
