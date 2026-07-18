@@ -38,34 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Serialize Link establishment per destination.** ``fetch_page`` now
-  holds a per-``dest_hash`` lock across the cache-hit-fast-path and
-  fresh-establishment retry loop. Two concurrent fetches to the same
-  node — different browser tabs, a user reload racing with an
-  in-flight async job, two async workers dispatched near-simultaneously
-  — previously each fired their own ``RNS.Link.request()`` from the
-  same identity. Peers appear to blackhole that burst pattern
-  silently, and the resulting state is sticky: once a peer starts
-  ignoring our Link requests, retries just add to the count until a
-  container restart drops the TCP session and lets us start fresh.
-
-  Symptom this fix targets: "works right after restart, then a
-  specific destination stops loading after ~15 min while MeshChat on
-  the same MichMesh peer keeps reaching it fine." Investigation
-  ruled out memory/state accumulation on our side (fresh RNS instance
-  in the same container also failed), stale routes (``rnpath`` found
-  the same 2-hop route the failing fetch was using), and network
-  wobble (TCP RTT to the hub was rock-steady). The remaining
-  difference from MeshChat: it serializes user-triggered link
-  operations to one destination; we didn't, so any click during a
-  degrading window multiplied the pressure on the peer.
-
-  Trade-off: two simultaneous fetches to the SAME destination
-  serialize instead of running in parallel. The second one either
-  rides the just-established cached link (fast) or waits through
-  the first's retry loop if the first fails. Fetches to *different*
-  destinations remain fully parallel — each has its own lock.
-
 - **Silently-stalled site-announce loop now visible in ``/healthz``.**
   Reported failure mode: mirror shows healthy in Portainer / Docker,
   RNS interfaces are up, but no announces have gone out for hours.
