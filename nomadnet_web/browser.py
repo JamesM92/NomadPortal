@@ -807,7 +807,7 @@ class NodeBrowser:
                             req_data[f"field_{k}"] = v
 
                 log.debug("Link established, requesting '%s'", rns_path)
-                link.request(
+                request_receipt = link.request(
                     rns_path,
                     data=req_data,
                     response_callback=_on_response,
@@ -815,6 +815,24 @@ class NodeBrowser:
                     progress_callback=_on_progress,
                     timeout=PAGE_HARD_CAP,
                 )
+                # RNS.Link.request returns False if the send failed
+                # outright — link went CLOSED between our cache-hit
+                # check and the send, or RNS.Transport.outbound() found
+                # no interface to send on. In either case no callback
+                # will ever fire, and without this check we sit in the
+                # stall watchdog for 30s until it aborts with a
+                # misleading "No response from node" error. Report the
+                # real failure immediately so the retry loop can try a
+                # fresh link.
+                if request_receipt is False:
+                    log.info(
+                        "fetch_page: link.request to %s returned False "
+                        "(link closed or interface unavailable at send "
+                        "time); aborting attempt",
+                        destination_hash_hex[:16],
+                    )
+                    result["error"] = "Link closed before response"
+                    done.set()
 
             def _on_link_closed(link):
                 if not done.is_set():
