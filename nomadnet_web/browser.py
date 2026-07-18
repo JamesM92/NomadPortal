@@ -300,23 +300,45 @@ class NodeBrowser:
     def _cache_link(self, dest_hash: bytes, link) -> None:
         """Store a successfully-established link so the next fetch to
         this destination can skip the establishment handshake. Enforces
-        the LINK_CACHE_MAX_SIZE cap (LRU-ish — oldest insertion goes
-        first). Also registers a closed_callback so RNS-side link close
-        removes the entry automatically.
+        the LINK_CACHE_MAX_SIZE cap (LRU — oldest insertion goes first).
+        Also registers a closed_callback so RNS-side link close removes
+        the entry automatically.
         """
-        old_link = None
+        stale_dest_link = None
+        evicted_link = None
         with self._link_cache_lock:
+            # If dest_hash is already cached, pop it first so the
+            # re-insertion below moves it to the end of insertion order.
+            # Plain ``self._link_cache[dest_hash] = link`` does NOT
+            # reorder an existing key in Python's dict — so a
+            # heavily-reused destination first cached at boot would
+            # become the perpetual eviction target when the cap is hit,
+            # exactly the opposite of what an LRU should do.
+            existing = self._link_cache.pop(dest_hash, None)
+            if existing is not None and existing is not link:
+                # Caller replaced a previous link for this dest with a
+                # different one; the old one needs teardown so we don't
+                # leak an RNS-side session. If it's the same object
+                # (refresh-after-cache-hit case), leave it alone.
+                stale_dest_link = existing
             if len(self._link_cache) >= LINK_CACHE_MAX_SIZE:
-                # Evict oldest insertion (dict order preserves that in 3.7+).
+                # Cap reached (we didn't just pop an existing entry
+                # above; that would have left us at cap-1). Evict oldest
+                # insertion (dict order preserves that in Python 3.7+).
                 first_key = next(iter(self._link_cache))
-                old_link = self._link_cache.pop(first_key)
+                evicted_link = self._link_cache.pop(first_key)
             self._link_cache[dest_hash] = link
 
-        # Tear down the evicted link outside the lock to avoid holding
-        # it during a network operation.
-        if old_link is not None:
+        # Tear down outside the lock to avoid holding it during a
+        # network operation.
+        if stale_dest_link is not None:
             try:
-                old_link.teardown()
+                stale_dest_link.teardown()
+            except Exception:
+                pass
+        if evicted_link is not None:
+            try:
+                evicted_link.teardown()
             except Exception:
                 pass
 
