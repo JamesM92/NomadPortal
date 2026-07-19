@@ -1,16 +1,30 @@
-name: Dev image
+name: Branch image
 
-# Build and publish a `:dev` image to GHCR on every push to the dev branch.
-# Lets in-progress fixes be tested with `docker compose pull` against the
-# `:dev` tag without merging to main or cutting a release.
+# Build and publish a branch-scoped image to GHCR on every push to `dev`
+# or any `feature/**` branch. Lets in-progress work be tested with
+# `docker compose pull` against the branch-scoped tag without merging.
 #
-# Tags published:
-#   - :dev               always points at the latest dev commit
-#   - :dev-<short-sha>   immutable per-commit tag for pinning / rollback
+# Tags published (branch name is slugified — slashes → hyphens):
+#   - :<branch-slug>              always points at the latest branch commit
+#   - :<branch-slug>-<short-sha>  immutable per-commit tag for pinning / rollback
+#
+# Examples:
+#   dev                                        → :dev, :dev-abc1234
+#   feature/parity-phase1-propagation-sync     → :feature-parity-phase1-propagation-sync,
+#                                                :feature-parity-phase1-propagation-sync-abc1234
+#
+# Rationale for including feature branches: this project's dev-branch
+# workflow (see /home/james/.claude/CLAUDE.md) uses feature branches
+# for multi-commit work that shouldn't destabilise `dev`. Operators
+# need to be able to soak-test a feature branch on real hardware
+# before we merge it — a published image with a predictable tag
+# makes that trivial.
 
 on:
   push:
-    branches: [dev]
+    branches:
+      - dev
+      - "feature/**"
 
 jobs:
   publish:
@@ -42,13 +56,24 @@ jobs:
         id: repo
         run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      # Convert branch name to a valid Docker tag: slashes → hyphens
+      # (feature/parity-phase1 → feature-parity-phase1). Also lowercased
+      # since Docker tags are case-sensitive but branch names conventionally
+      # aren't — makes `docker pull ...` less error-prone.
+      - name: Compute tag base from branch name
+        id: tagbase
+        run: |
+          slug="${GITHUB_REF_NAME//\//-}"
+          slug=$(echo "$slug" | tr '[:upper:]' '[:lower:]')
+          echo "slug=${slug}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ steps.repo.outputs.name }}:dev
-            ghcr.io/${{ steps.repo.outputs.name }}:dev-${{ steps.sha.outputs.short }}
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.tagbase.outputs.slug }}
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.tagbase.outputs.slug }}-${{ steps.sha.outputs.short }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
