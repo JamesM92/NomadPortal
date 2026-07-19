@@ -16,6 +16,7 @@ from .auth import auth_bp, init_auth
 from .admin_routes import admin_bp
 from .identity_store import IdentityStore
 from .messaging import MessagingService
+from .lxmf_sync import PropagationSyncService
 from .message_store import MessageStore
 from .contact_store import ContactStoreManager
 from .user_store import UserStore
@@ -124,6 +125,20 @@ def create_app(
         "LXMF delivery setup",
         lambda: messaging.setup_delivery(app.config["IDENTITY_STORE"]),
     )
+
+    # LXMF propagation-node outbound sync — see nomadnet_web/lxmf_sync.py
+    # for rationale. Deferred so it starts AFTER setup_delivery has
+    # registered the admin router; the service can then include it in
+    # its per-tick iteration. Auto-discovers propagation nodes from
+    # lxmf.propagation announces; no operator config needed. Runs
+    # continuously; belt-and-braces with the default-node keepalive in
+    # browser.py (both push RNS in the "warmer" direction independently).
+    prop_sync = PropagationSyncService(
+        rns=browser._rns,
+        messaging_service=messaging,
+    )
+    app.config["PROP_SYNC"] = prop_sync
+    _defer_after_rns("LXMF propagation sync service", prop_sync.start)
 
     lxmf_tracker = LXMFPeerTracker(config_dir)
     app.config["LXMF_TRACKER"] = lxmf_tracker
