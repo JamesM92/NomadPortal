@@ -38,7 +38,6 @@ class _StubBrowser:
         # Track call counts so we can assert on batching.
         self.persist_calls = 0
         # Wrap _persist to count calls, delegating to the real impl.
-        original = self._persist
         def counted(snapshot):
             self.persist_calls += 1
             NodeBrowser._persist(self, snapshot)
