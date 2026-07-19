@@ -141,10 +141,7 @@ class MessagingService:
                 lambda msg, sub=user_sub: self._on_delivery(msg, sub)
             )
 
-            # ``identity`` is stored so the propagation-node sync loop
-            # (see ``enable_propagation_node_sync``) can request messages
-            # on behalf of this user without re-resolving the identity.
-            data = {"router": router, "dest": registered, "identity": identity}
+            data = {"router": router, "dest": registered}
             with self._lock:
                 if user_sub:
                     self._user_routers[user_sub] = data
@@ -158,123 +155,6 @@ class MessagingService:
         except Exception as exc:
             log.warning("Failed to init router for %s: %s", identity_id[:16], exc)
             return None
-
-    def enable_propagation_node_sync(
-        self,
-        user_sub: str,
-        prop_node_hex: str,
-        interval_s: int = 300,
-    ) -> bool:
-        """Configure a propagation node for the given user's LXMRouter
-        and start a background thread that periodically calls
-        ``request_messages_from_propagation_node`` on it.
-
-        Purpose: match MeshChat's structural reliability advantage
-        without needing a full LXMF chat UI. MeshChat maintains a
-        standing Link to a propagation node via the same call this
-        loop makes; the continuous activity keeps the RNS Transport
-        identity's return-path routing state refreshed at every
-        intermediate node on the mesh. Without it, a silent NomadPortal
-        browser's identity ages out of intermediate caches over hours
-        and specific-destination reachability degrades — see the
-        session-long investigation in [[path-request-ceiling]].
-
-        Requires the user's router to already be initialised via
-        ``setup_delivery``. Fires-and-forgets a daemon thread; nothing
-        to shut down. Failures are logged at INFO with the specific
-        reason (mesh flakiness looks the same in the log as it does in
-        the default-node keepalive loop).
-
-        Args:
-            user_sub: user identifier (typically ``"local:admin"``)
-            prop_node_hex: propagation node destination hash (32 hex)
-            interval_s: seconds between sync attempts. Default 300 s
-                (5 min) matches the cadence MeshChat uses.
-
-        Returns:
-            True if the router was configured and the sync thread
-            started, False if the user isn't registered or the hash
-            is invalid.
-        """
-        with self._lock:
-            data = self._user_routers.get(user_sub)
-        if data is None:
-            log.warning(
-                "propagation-node sync: no router for user %s — call "
-                "setup_delivery() first", user_sub[:16] if user_sub else "?",
-            )
-            return False
-
-        try:
-            prop_node_hash = bytes.fromhex(prop_node_hex.strip().lower())
-            if len(prop_node_hash) != 16:
-                # LXMF destination hashes are the RNS truncated-hash length
-                # (16 bytes = 32 hex chars). Reject anything else early
-                # rather than let LXMF raise a cryptic error later.
-                log.warning(
-                    "propagation-node sync: hash %s has wrong length "
-                    "(expected 32 hex chars)", prop_node_hex[:20],
-                )
-                return False
-        except ValueError:
-            log.warning(
-                "propagation-node sync: invalid hex %s",
-                prop_node_hex[:20],
-            )
-            return False
-
-        router = data["router"]
-        identity = data["identity"]
-
-        try:
-            router.set_outbound_propagation_node(prop_node_hash)
-        except Exception as exc:
-            log.warning(
-                "propagation-node sync: set_outbound_propagation_node "
-                "raised: %s", exc,
-            )
-            return False
-
-        log.info(
-            "Configured LXMF propagation node %s for user %s "
-            "(sync interval %ds)",
-            prop_node_hex[:16].lower(),
-            user_sub[:16] if user_sub else "?",
-            interval_s,
-        )
-
-        def _sync_loop():
-            # Small initial delay so RNS Transport has time to hear the
-            # propagation node's announces before we try to open a Link.
-            time.sleep(30)
-            while True:
-                try:
-                    try:
-                        router.request_messages_from_propagation_node(
-                            identity,
-                        )
-                        log.info(
-                            "propagation-node sync: request fired to %s",
-                            prop_node_hex[:16].lower(),
-                        )
-                    except Exception as exc:
-                        log.info(
-                            "propagation-node sync: request raised "
-                            "(mesh flaky?): %s", exc,
-                        )
-                    time.sleep(interval_s)
-                except Exception:
-                    log.exception(
-                        "propagation-node sync loop error; sleeping 60s"
-                    )
-                    time.sleep(60)
-
-        threading.Thread(
-            target=_sync_loop,
-            daemon=True,
-            name=f"lxmf-prop-sync-{(user_sub or 'anon')[:8]}",
-        ).start()
-        return True
 
     def _get_user_router(self, user_sub: str) -> Optional[dict]:
         """Return the router/dest pair for a user, lazily initialising if needed."""

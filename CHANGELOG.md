@@ -49,26 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **LXMF propagation-node sync (opt-in, `LXMF_PROPAGATION_NODE` env
-  var).** Matches MeshChat's structural reliability advantage. When
-  the operator sets `LXMF_PROPAGATION_NODE=<32 hex chars>` on the
-  container, NomadPortal configures that propagation node on the
-  local admin's LXMRouter and starts a background thread that fires
-  `request_messages_from_propagation_node` every 5 minutes. That's
-  the same call MeshChat's `announce_sync_propagation_nodes` loop
-  makes — the continuous outbound activity keeps the container's
-  RNS Transport identity's return-path routing state refreshed at
-  every intermediate transport node on the mesh. Without it, a
-  silent NomadPortal-browser's identity ages out of intermediate
-  caches over hours and specific-destination reachability degrades
-  in ways we can observe (see [[path-request-ceiling]] resolution).
-
-  Off by default — set the env var to enable. Requires the admin
-  LXMF identity to already be registered (which it is any time
-  `ADMIN_PASSWORD` is set). The `MessagingService.enable_propagation_node_sync`
-  method can also be called for other user identities but the wiring
-  in `nomadnet_web/__init__.py` only auto-enables for admin.
-
 - **Default-node hard-reset on repeated keepalive failure.** After
   ``DEFAULT_NODE_HARD_RESET_FAILURES`` (3) consecutive failed
   keepalives, the loop surgically clears RNS's cached state for that
