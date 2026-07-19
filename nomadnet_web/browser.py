@@ -32,12 +32,26 @@ PING_TIMEOUT  = 30   # for ping_node link establishment.
 # eventually breaks us out. Under the retry loop that's up to
 # 30 minutes of "loading spinner" for one click.
 #
-# 60s is long enough for legitimate multi-hop / high-latency links
-# (RNS typically completes handshake in 2-8s on healthy paths),
-# short enough that unreachable destinations fail out fast and the
-# retry loop can move on. Total worst-case failed fetch is now
-# ~3 min (3 × 60s + 2 × 1.5s backoff) instead of 30 min.
-LINK_ESTABLISH_TIMEOUT = 60
+# 120s is long enough for legitimate multi-hop / high-latency links —
+# during real-world flaky mesh conditions we've observed handshake
+# RTTs up to 2.5 s across a 2-hop path, and each step of the
+# handshake needs a full round trip. A tight 60s can time out on a
+# link that would have completed in 90-100 s once the mesh recovers
+# from a slow patch. 120s keeps a "loading spinner while the mesh is
+# catching up" experience under 3 min per attempt while still failing
+# fast enough on genuinely unreachable destinations. Total worst-case
+# failed fetch: ~6 min (3 × 120s + 2 × 1.5s backoff).
+LINK_ESTABLISH_TIMEOUT = 120
+
+# Default-node keepalive: how often to touch the operator-configured
+# default node's index page to keep an RNS.Link warm. Slightly under
+# RNS's built-in Link.KEEPALIVE (360s) so we're always the ones
+# generating the keepalive activity rather than waiting for RNS's
+# internal probe, which fails silently when the peer isn't
+# responding during a mesh-flaky window. When the mesh is healthy
+# this is one tiny fetch every ~4 min; when the mesh is flaky, we
+# detect breakage early and re-establish before the user clicks.
+DEFAULT_NODE_KEEPALIVE_S = 240
 
 # fetch_page reuses successful links per-destination so back-to-back
 # page loads to the same site don't repeat the ~2-8 s link handshake
@@ -144,6 +158,12 @@ class NodeBrowser:
             target=self._init_reticulum,
             daemon=True,
             name="rns-init",
+        ).start()
+
+        threading.Thread(
+            target=self._default_node_keepalive_loop,
+            daemon=True,
+            name="default-node-keepalive",
         ).start()
 
     def _init_reticulum(self) -> None:
@@ -326,6 +346,101 @@ class NodeBrowser:
             "ConnectionResetError / BrokenPipeError as transient; "
             "interface IN/OUT flags will survive transient TX failures."
         )
+
+    def _get_default_node_hash(self) -> str:
+        """Read ``default_node`` from ``ui_settings.json`` on disk.
+
+        The keepalive thread has no Flask request context, so we can't
+        use ``current_app.config['UI_SETTINGS']``. Read the file
+        directly instead. Returns the destination hex-hash (lowercased)
+        or empty string if no default node is configured.
+        """
+        ui_file = os.path.join(
+            os.path.dirname(self._nodes_file), "ui_settings.json"
+        )
+        if not os.path.exists(ui_file):
+            return ""
+        try:
+            with open(ui_file, "r", encoding="utf-8") as fh:
+                data = json.load(fh) or {}
+            val = data.get("default_node", "") or ""
+            return val.strip().lower()
+        except (OSError, ValueError):
+            return ""
+
+    def _default_node_keepalive_loop(self) -> None:
+        """Keep the operator-configured default node's link warm.
+
+        RNS's Link.KEEPALIVE (360 s) sends an internal probe on any
+        idle link, but the probe requires the peer to respond. During
+        mesh-flaky windows the peer's proof gets lost, the link goes
+        STALE at 720 s, and both cached-link reuse and fresh
+        establishment fail during the window — even though a fresh
+        peer round-trip minutes later would succeed.
+
+        By actively fetching the default node's index page every
+        ``DEFAULT_NODE_KEEPALIVE_S`` we accomplish three things at
+        once:
+
+        1. Keep the link's ``last_data`` counter fresh — RNS won't
+           mark it STALE
+        2. Detect breakage EARLY. If the ping fails, the retry loop
+           establishes a fresh link before the user clicks
+        3. Match MeshChat's warm-link behaviour without needing a
+           full LXMF router. MeshChat's constant LXMF activity is
+           what lets it navigate through mesh-flaky windows; this
+           gives NomadPortal the same for a single high-value target
+           (the default node)
+
+        Only fires when ``default_node`` is set in Admin → Settings.
+        No-op if unset — we won't establish warm links proactively
+        for arbitrary destinations.
+        """
+        self._ready.wait()
+        while True:
+            try:
+                time.sleep(DEFAULT_NODE_KEEPALIVE_S)
+                default_hex = self._get_default_node_hash()
+                if not default_hex:
+                    # No default node configured — nothing to keep warm.
+                    continue
+                if self._browser_is_blocked_dest(default_hex):
+                    continue
+                try:
+                    content, error = self.fetch_page(default_hex, "/page/index.mu")
+                    if content is not None:
+                        log.debug(
+                            "default-node keepalive: %s ok (%d bytes)",
+                            default_hex[:16], len(content),
+                        )
+                    else:
+                        # Not a crash — the link failure is exactly what
+                        # this loop's early-detection is for. Next tick
+                        # will try again with a fresh establishment.
+                        log.info(
+                            "default-node keepalive: %s currently unreachable "
+                            "(%s); will retry in %ds",
+                            default_hex[:16],
+                            error or "(unknown error)",
+                            DEFAULT_NODE_KEEPALIVE_S,
+                        )
+                except Exception:
+                    log.exception(
+                        "default-node keepalive: fetch_page raised for %s",
+                        default_hex[:16],
+                    )
+            except Exception:
+                log.exception(
+                    "default-node keepalive loop error; sleeping 60s"
+                )
+                time.sleep(60)
+
+    def _browser_is_blocked_dest(self, hex_hash: str) -> bool:
+        """Skip keepalive traffic to blocklisted destinations."""
+        try:
+            return self.is_blocked(hex_hash)
+        except Exception:
+            return False
 
     _RNS_STATS_FILENAME = "rns_init_stats.json"
     _RNS_STATS_MAX_HISTORY = 5
