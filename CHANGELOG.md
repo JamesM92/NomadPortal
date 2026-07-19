@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **LXMF propagation-node outbound sync** — new
+  ``nomadnet_web/lxmf_sync.py`` module with
+  ``PropagationSyncService``. Registers a
+  ``lxmf.propagation`` announce handler that auto-discovers
+  propagation nodes from the mesh and picks the closest fresh one
+  (ranking: hops ascending, last_seen descending). A background
+  thread every 5 minutes calls
+  ``LXMRouter.request_messages_from_propagation_node`` on each
+  currently-active router, generating the ongoing outbound RNS.Link
+  traffic that keeps NomadPortal's transport identity warm at every
+  intermediate mesh node. This is the mechanism MeshChat uses
+  (``announce_sync_propagation_nodes`` loop → same LXMF API call)
+  and is the Phase 1 delivery of the MeshChat-parity work
+  documented in ``[[north-star-meshchat-parity-via-web]]``.
+
+  Design intent: the mailbox function of the sync is coincidental —
+  even when the mailbox is empty, the periodic outbound Link
+  handshake through the mesh is what warms transport routing state
+  at each intermediate hop. That's what closes the "long-running
+  NomadPortal-browser can't reach destinations a fresh RNS instance
+  in the same namespace can" reproducer that motivated the whole
+  investigation.
+
+  No operator configuration required — auto-discovery makes it
+  self-configuring. Runs continuously for admin's LXMRouter (per
+  the operator's model: admin is always active); user routers get
+  sync activity while they're registered (i.e. while their user
+  session is active). Belt-and-braces with the existing default-node
+  keepalive in ``browser.py`` — both run independently and push RNS
+  in the warmer direction; no coordination needed.
+
+  New fields in ``/api/_debug/state``: ``lxmf_propagation`` block
+  reporting the picked node, pool size, and per-user sync status.
+
+- **``LXMRouter.PROCESSING_INTERVAL = 1``** — override the LXMF
+  library default (4s) to match MeshChat's cadence. Faster response
+  to pending outbound messages; more frequent ``clean_links`` runs;
+  trivial CPU cost. Applied at router instantiation in
+  ``MessagingService._init_user_router``.
+
+- **``MessagingService.active_routers()``** — public snapshot
+  iterator over ``_user_routers``. Consumed by
+  ``PropagationSyncService`` to know which routers to sync each
+  tick.
+
 ### Changed
 
 - **Default ``LOG_LEVEL`` bumped from ``INFO`` to ``DEBUG``.** Set

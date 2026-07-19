@@ -127,6 +127,16 @@ class MessagingService:
 
         try:
             router = LXMF.LXMRouter(storagepath=user_storage)
+            # Match MeshChat's LXMRouter job cadence (1s vs the library
+            # default of 4s). Faster processing of pending outbound
+            # messages and quicker ``clean_links`` runs. Trivial CPU
+            # cost. Guarded by try/except in case a future LXMF version
+            # moves or removes the attribute — we don't want a Nomad-
+            # Portal boot to break on an upstream refactor.
+            try:
+                router.PROCESSING_INTERVAL = 1
+            except Exception:
+                pass
             registered = router.register_delivery_identity(
                 identity, display_name=entry.get("name", "")
             )
@@ -179,6 +189,24 @@ class MessagingService:
         """
         with self._lock:
             self._user_routers.pop(user_sub, None)
+
+    def active_routers(self) -> list:
+        """Return a snapshot list of currently-registered routers as
+        ``[(user_sub, {"router": ..., "dest": ..., "identity": ...}), ...]``.
+
+        Consumed by ``PropagationSyncService`` — each tick it iterates
+        this list and fires an outbound sync per router. Snapshot
+        semantics: safe to iterate outside the lock, but a router
+        removed after this call may still get one more sync tick.
+        Harmless — the sync operation itself is idempotent and
+        LXMRouter handles stale references gracefully.
+
+        Admin's router is always present (created at container
+        startup); user routers appear on login and disappear when
+        ``reset_user_router`` is called.
+        """
+        with self._lock:
+            return list(self._user_routers.items())
 
     def lxmf_address(self, user_sub: str = "") -> Optional[str]:
         """Return the hexhash of the user's LXMF delivery destination, or None."""

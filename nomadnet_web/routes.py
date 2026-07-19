@@ -491,6 +491,16 @@ def api_debug_state():
         except Exception as exc:
             out["lxmf_tracker"] = {"error": str(exc)}
 
+    # LXMF propagation-node sync service — reports currently-picked
+    # propagation node, pool size, per-user sync status. See
+    # nomadnet_web/lxmf_sync.py for what these fields mean.
+    prop_sync = current_app.config.get("PROP_SYNC")
+    if prop_sync is not None:
+        try:
+            out["lxmf_propagation"] = prop_sync.snapshot()
+        except Exception as exc:
+            out["lxmf_propagation"] = {"error": str(exc)}
+
     return jsonify(out)
 
 
