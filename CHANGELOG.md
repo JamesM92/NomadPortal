@@ -54,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``PropagationSyncService`` to know which routers to sync each
   tick.
 
+- **``tests/test_announce_waiter.py``** — pytest suite for
+  ``_DestinationAnnounceWaiter`` covering the class-level RNS
+  handler contract (``aspect_filter``, ``receive_path_responses``),
+  the per-instance destination-hash filter in
+  ``received_announce``, and the timeout / wake / reset semantics
+  of ``wait_and_reset``. Runs in under a second without a container
+  or a live mesh. The ``receive_path_responses`` test
+  specifically encodes the pre-fix bug that had the waiter
+  silently miss every path response — future regressions of that
+  class attribute are now caught before a docker round-trip.
+
 ### Fixed
 
 - **``PropagationSyncService`` silently skipped every sync.** The
