@@ -53,6 +53,15 @@ LINK_ESTABLISH_TIMEOUT = 120
 # detect breakage early and re-establish before the user clicks.
 DEFAULT_NODE_KEEPALIVE_S = 240
 
+# After this many consecutive keepalive failures we assume RNS's
+# long-running Transport state has some stale entry for the default
+# node that's preventing recovery. Force-reset the specific
+# destination's path_table entry and request_path throttle so the
+# next attempt does a completely fresh discovery — not a full RNS
+# restart, just targeted state clearing for one destination. See the
+# comment on ``_reset_default_node_rns_state`` for the mechanism.
+DEFAULT_NODE_HARD_RESET_FAILURES = 3
+
 # fetch_page reuses successful links per-destination so back-to-back
 # page loads to the same site don't repeat the ~2-8 s link handshake
 # every click. 50 entries is far more than a browsing session touches
@@ -397,14 +406,17 @@ class NodeBrowser:
         for arbitrary destinations.
         """
         self._ready.wait()
+        consecutive_failures = 0
         while True:
             try:
                 time.sleep(DEFAULT_NODE_KEEPALIVE_S)
                 default_hex = self._get_default_node_hash()
                 if not default_hex:
                     # No default node configured — nothing to keep warm.
+                    consecutive_failures = 0
                     continue
                 if self._browser_is_blocked_dest(default_hex):
+                    consecutive_failures = 0
                     continue
                 try:
                     content, error = self.fetch_page(default_hex, "/page/index.mu")
@@ -413,27 +425,109 @@ class NodeBrowser:
                             "default-node keepalive: %s ok (%d bytes)",
                             default_hex[:16], len(content),
                         )
+                        consecutive_failures = 0
                     else:
+                        consecutive_failures += 1
                         # Not a crash — the link failure is exactly what
                         # this loop's early-detection is for. Next tick
                         # will try again with a fresh establishment.
                         log.info(
                             "default-node keepalive: %s currently unreachable "
-                            "(%s); will retry in %ds",
+                            "(%s); consecutive_failures=%d, next retry in %ds",
                             default_hex[:16],
                             error or "(unknown error)",
+                            consecutive_failures,
                             DEFAULT_NODE_KEEPALIVE_S,
                         )
+                        if consecutive_failures >= DEFAULT_NODE_HARD_RESET_FAILURES:
+                            self._reset_default_node_rns_state(default_hex)
+                            consecutive_failures = 0
                 except Exception:
+                    consecutive_failures += 1
                     log.exception(
-                        "default-node keepalive: fetch_page raised for %s",
-                        default_hex[:16],
+                        "default-node keepalive: fetch_page raised for %s "
+                        "(consecutive_failures=%d)",
+                        default_hex[:16], consecutive_failures,
                     )
             except Exception:
                 log.exception(
                     "default-node keepalive loop error; sleeping 60s"
                 )
                 time.sleep(60)
+
+    def _reset_default_node_rns_state(self, default_hex: str) -> None:
+        """After ``DEFAULT_NODE_HARD_RESET_FAILURES`` consecutive keepalive
+        failures, forcibly clear RNS's cached state for the default
+        destination and fire a fresh ``request_path``.
+
+        This targets the "long-running Transport state degrades
+        reachability for specific destinations" pattern documented in
+        [[destination-table-cache-is-load-bearing]]. A fresh RNS
+        instance in the same container namespace can reach the
+        destination fine; the long-running one can't. Fully restarting
+        RNS or the container is heavy; this instead surgically pops
+        the specific destination's entries from ``path_table`` and
+        ``path_requests`` so subsequent path discovery starts from
+        scratch. Does not affect other destinations.
+
+        Cheap and low-risk: worst case we lose a stale path we
+        couldn't use anyway. If the mesh is still broken for this
+        destination the next keepalive attempts will still fail; if
+        the stale state was the blocker, they'll now succeed.
+        """
+        log.warning(
+            "default-node keepalive: resetting RNS state for %s after "
+            "%d consecutive failures",
+            default_hex[:16], DEFAULT_NODE_HARD_RESET_FAILURES,
+        )
+        RNS = self._rns
+        try:
+            dh = bytes.fromhex(default_hex)
+        except ValueError:
+            log.warning(
+                "default-node keepalive: invalid default_node hex %s",
+                default_hex,
+            )
+            return
+
+        # Evict our own cached Link (if any) — the retry loop after
+        # this reset should build a fresh one.
+        try:
+            self._evict_cached_link(dh, teardown=True)
+        except Exception:
+            log.debug("cached-link evict raised", exc_info=True)
+
+        # Clear RNS's path table entry — has_path() will now return
+        # False, forcing the fetch code into full path discovery.
+        try:
+            if dh in RNS.Transport.path_table:
+                del RNS.Transport.path_table[dh]
+                log.info(
+                    "default-node keepalive: cleared path_table entry "
+                    "for %s", default_hex[:16],
+                )
+        except Exception:
+            log.debug("path_table clear raised", exc_info=True)
+
+        # Clear the request_path throttle timestamp so an immediate
+        # re-request isn't rate-limited by PATH_REQUEST_MI (20 s).
+        try:
+            if dh in RNS.Transport.path_requests:
+                del RNS.Transport.path_requests[dh]
+        except Exception:
+            log.debug("path_requests clear raised", exc_info=True)
+
+        # Fire a fresh path_request so the mesh has a chance to
+        # answer before the next scheduled keepalive tick. Any answer
+        # arriving between now and the next tick populates path_table.
+        try:
+            RNS.Transport.request_path(dh)
+            log.info(
+                "default-node keepalive: fired fresh request_path for %s",
+                default_hex[:16],
+            )
+        except Exception:
+            log.debug("request_path raised", exc_info=True)
 
     def _browser_is_blocked_dest(self, hex_hash: str) -> bool:
         """Skip keepalive traffic to blocklisted destinations."""
