@@ -78,6 +78,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dict and upgrades ``_sync_one`` to log a warning instead of
   swallowing the mismatch — future shape drifts won't be invisible.
 
+- **Reticulum stack rebumped to rns 1.3.9 / lxmf 1.0.1 /
+  nomadnet 1.2.7.** Side-by-side testing this session showed
+  MeshChat (which pins ``rns>=1.3.7`` / ``lxmf>=1.0.1``) reaches
+  destinations that NomadPortal on the old 1.1.3 / 0.9.4 / 0.9.8
+  triple can't — same machine, same LAN, same second, same peer.
+  Whatever the 2026-06-05 pin was working around (inbound
+  link-establishment regression on hosted sites) may now be fixed
+  upstream, or may have been misattributed. Watch inbound link
+  handshakes after redeploy; if they regress in a way that outweighs
+  the outbound reliability win, revert this commit and pursue
+  another mitigation. Note: dropping the previous per-project
+  Reticulum patch we monkey-patched (``process_outgoing``) is
+  a separate consideration — the fix for the RNS zombie-interface
+  bug the patch targeted may or may not be present upstream in
+  1.3.9; leaving the patch in place is defensive.
+
 - **Concurrent ``fetch_page`` calls to the same destination now
   serialize.** Observed pattern: three parallel fetches for pages
   on ``49c45a`` each registered their own announce waiter; a
