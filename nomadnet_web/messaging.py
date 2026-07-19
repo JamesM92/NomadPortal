@@ -151,7 +151,7 @@ class MessagingService:
                 lambda msg, sub=user_sub: self._on_delivery(msg, sub)
             )
 
-            data = {"router": router, "dest": registered}
+            data = {"router": router, "dest": registered, "identity": identity}
             with self._lock:
                 if user_sub:
                     self._user_routers[user_sub] = data

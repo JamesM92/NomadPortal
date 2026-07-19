@@ -338,6 +338,13 @@ class PropagationSyncService:
         router = data.get("router")
         identity = data.get("identity")
         if router is None or identity is None:
+            log.warning(
+                "PropagationSyncService: skipping sync for user %s — "
+                "router=%s identity=%s (unexpected router shape)",
+                (user_sub or "anon")[:16],
+                "present" if router is not None else "missing",
+                "present" if identity is not None else "missing",
+            )
             return
 
         try:
