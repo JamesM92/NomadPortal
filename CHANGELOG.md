@@ -36,7 +36,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   6h (default) matches NomadNet's own behaviour and is what hubs
   are calibrated for.
 
+### Changed
+
+- **``LINK_ESTABLISH_TIMEOUT`` raised from 60s to 120s.** During
+  real-world flaky mesh conditions we've observed handshake RTTs
+  reach 2.5s across a 2-hop path. A tight 60s could time out on a
+  link that would have completed in 90-100s once the mesh recovered
+  from a slow patch. 120s keeps the retry loop patient enough for
+  the mesh to catch up while still failing fast enough on genuinely
+  unreachable destinations. Total worst-case failed fetch is now
+  ~6 min (3 × 120s + 2 × 1.5s backoff) instead of ~3 min.
+
 ### Added
+
+- **Warm-link keepalive for the default node.** A background thread
+  fetches the operator-configured ``default_node``'s index page every
+  ``DEFAULT_NODE_KEEPALIVE_S`` (240s, just under RNS's built-in
+  ``Link.KEEPALIVE`` of 360s). Three benefits at once: (a) keeps the
+  link's ``last_data`` counter fresh so RNS won't STALE it; (b)
+  detects breakage EARLY — if the ping fails, our retry loop
+  establishes a fresh link before the user clicks; (c) matches
+  MeshChat's warm-link behaviour without needing a full LXMF router.
+
+  Symptom this targets: cached link to a heavily-used destination
+  goes STALE during a mesh-flaky window (peer's keepalive proof
+  doesn't reach us), and both cached-link reuse and fresh
+  establishment fail during the window even though the destination
+  is reachable minutes later. MeshChat sidesteps this by having
+  constant LXMF activity touching its warm Links; NomadPortal-browser
+  had no equivalent until now.
+
+  Only fires when ``default_node`` is set in Admin → Settings; no-op
+  if unset (we don't establish warm links proactively for
+  arbitrary destinations). Failed keepalive pings are logged at
+  INFO with the specific failure reason so operators can distinguish
+  "mesh is flaky right now" from "we've silently lost reachability."
 
 - **``fixed_mtu`` on ``tcp_clients`` entries in ``config.yml``.**
   Passed straight through to ``TCPClientInterface`` in the generated
