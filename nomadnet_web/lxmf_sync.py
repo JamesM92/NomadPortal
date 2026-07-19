@@ -239,14 +239,29 @@ class PropagationSyncService:
     def _sync_loop(self) -> None:
         """Background thread body.
 
-        Sleeps ``STARTUP_GRACE_S``, then loops forever: every
-        ``SYNC_INTERVAL_S`` (checked at ``LOOP_POLL_S`` granularity),
-        run one sync pass across all active routers.
+        Sleeps ``STARTUP_GRACE_S``, fires one sync tick immediately so
+        operators can verify the service is working, then loops
+        forever: every ``SYNC_INTERVAL_S`` (checked at ``LOOP_POLL_S``
+        granularity), run one sync pass across all active routers.
         """
         # Startup grace — let announces trickle in.
         time.sleep(STARTUP_GRACE_S)
 
-        last_sync_at = 0.0
+        # First tick fires right after grace ends. Earlier drafts set
+        # ``last_sync_at = 0.0`` and let the interval compare handle
+        # it, but ``time.monotonic()`` on a freshly-booted container
+        # returns a small value (system uptime seconds since boot),
+        # which is < SYNC_INTERVAL_S, so the first tick didn't fire
+        # until ~SYNC_INTERVAL_S after process start — far too late for
+        # operators to verify the service works.
+        try:
+            self._tick()
+        except Exception:
+            log.exception(
+                "PropagationSyncService: initial tick raised"
+            )
+        last_sync_at = time.monotonic()
+
         while True:
             try:
                 time.sleep(LOOP_POLL_S)
