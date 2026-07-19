@@ -119,11 +119,28 @@ def create_app(
             log.warning("Could not pre-create local admin identity: %s", exc)
 
     # LXMF delivery setup registers LXMF destinations with the running
-    # RNS Transport, so it has to wait for that to be up.
-    _defer_after_rns(
-        "LXMF delivery setup",
-        lambda: messaging.setup_delivery(app.config["IDENTITY_STORE"]),
-    )
+    # RNS Transport, so it has to wait for that to be up. If the
+    # operator has opted into propagation-node sync via the
+    # ``LXMF_PROPAGATION_NODE`` env var, hook that up in the same
+    # deferred callback so the sync loop starts as soon as the admin
+    # router is registered — see MessagingService.
+    # enable_propagation_node_sync for the "why."
+    def _lxmf_startup():
+        messaging.setup_delivery(app.config["IDENTITY_STORE"])
+        prop_hash = os.environ.get("LXMF_PROPAGATION_NODE", "").strip()
+        if not prop_hash:
+            return
+        admin_user = cfg.get("ADMIN_USERNAME", "admin")
+        admin_sub = f"local:{admin_user}"
+        ok = messaging.enable_propagation_node_sync(admin_sub, prop_hash)
+        if not ok:
+            log.warning(
+                "LXMF_PROPAGATION_NODE set but sync could not be enabled — "
+                "check the destination hash and that the admin identity "
+                "is registered."
+            )
+
+    _defer_after_rns("LXMF delivery + propagation sync setup", _lxmf_startup)
 
     lxmf_tracker = LXMFPeerTracker(config_dir)
     app.config["LXMF_TRACKER"] = lxmf_tracker
