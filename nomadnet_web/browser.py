@@ -68,6 +68,53 @@ DEFAULT_NODE_HARD_RESET_FAILURES = 3
 # in practice; oldest is evicted (and torn down) when the cap is hit.
 LINK_CACHE_MAX_SIZE = 50
 
+# Between failed link attempts, wait for a fresh announce from the
+# target destination (signal that the mesh has updated its view of
+# the path) for up to this long before firing the next attempt.
+# NomadNet responds to path_requests by re-announcing, so a fresh
+# announce is the crispest possible signal that the next attempt has
+# a real chance. The old fixed 1.5s sleep was too short — path_request
+# round-trips through the mesh take 30-60s under typical conditions.
+# If an announce arrives before the timeout, we retry immediately.
+RETRY_ANNOUNCE_WAIT = 45
+
+# After the retry-attempt budget is exhausted with a retryable
+# error, wait once more for a fresh announce and, if one arrives,
+# do one bonus attempt. Observed a fetch fail at 189 s and the
+# destination's fresh announce arrive 7 s later; this window
+# rescues that pattern without loosening retry semantics for
+# genuinely unreachable destinations.
+FINAL_ANNOUNCE_WAIT = 45
+
+
+class _DestinationAnnounceWaiter:
+    """Announce handler that flips an event when an announce for a
+    specific ``nomadnetwork.node`` destination arrives.
+
+    fetch_page registers one of these per outbound fetch, uses it to
+    wake up its retry sleep whenever the destination re-announces,
+    and deregisters it in a ``finally``.
+    """
+
+    aspect_filter = "nomadnetwork.node"
+
+    def __init__(self, target_hash: bytes) -> None:
+        self._target = target_hash
+        self.event = threading.Event()
+
+    def received_announce(self, destination_hash, announced_identity, app_data) -> None:
+        if destination_hash == self._target:
+            self.event.set()
+
+    def wait_and_reset(self, timeout: float) -> bool:
+        """Wait for an announce or until ``timeout`` elapses. Returns
+        True if an announce arrived, False on timeout. Always clears
+        the flag so the next wait starts fresh.
+        """
+        got = self.event.wait(timeout=timeout)
+        self.event.clear()
+        return got
+
 # RNS sentinel value meaning "hop count unknown / unreachable"
 _HOPS_UNKNOWN = 128
 
@@ -1040,7 +1087,6 @@ class NodeBrowser:
         # genuinely-unreachable destination still fails within a
         # reasonable time budget.
         MAX_ATTEMPTS      = 3
-        RETRY_SLEEP       = 1.5
         RETRYABLE_ERRORS  = ("Link closed before response", "Page request failed")
 
         def _do_attempt(existing_link=None):
@@ -1350,37 +1396,85 @@ class NodeBrowser:
                 cached_link = None
 
         if final_result["content"] is None:
-            for attempt in range(MAX_ATTEMPTS):
-                result, link_obj = _do_attempt()
-                if result["content"] is not None:
-                    final_result = result
-                    # Cache the successfully-established link so the
-                    # next fetch to this destination skips establishment.
-                    if link_obj is not None:
-                        self._cache_link(dest_hash, link_obj)
-                    break
-                final_result = result
-                err = result.get("error") or ""
-                # Only retry on transient link failures. Path-discovery
-                # timeouts, hard-cap breaches, and stall/finalise errors
-                # imply either an unreachable destination or a stuck
-                # transfer — retrying would just wait through it again.
-                if err not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
-                    break
-                log.info(
-                    "fetch_page: retrying %s (attempt %d/%d after: %s)",
-                    destination_hash_hex[:16], attempt + 2, MAX_ATTEMPTS, err,
+            # Announce-waiter registered for the duration of the retry
+            # loop. Between attempts we fire a path_request and then
+            # wait for a fresh announce from the destination — the
+            # path_request triggers NomadNet nodes to re-announce, and
+            # the announce arriving is our cleanest signal that the
+            # mesh has produced a valid path for us to try.
+            waiter = _DestinationAnnounceWaiter(dest_hash)
+            try:
+                RNS.Transport.register_announce_handler(waiter)
+            except Exception:
+                log.debug(
+                    "fetch_page: could not register announce waiter for %s",
+                    destination_hash_hex[:16], exc_info=True,
                 )
-                # Refresh the path in case the advertised route has
-                # gone stale. RNS.Transport.request_path is idempotent
-                # and cheap; a fresh announce from the destination (or
-                # a shorter path via a different hop) can arrive
-                # before the next attempt.
+            try:
+                for attempt in range(MAX_ATTEMPTS):
+                    result, link_obj = _do_attempt()
+                    if result["content"] is not None:
+                        final_result = result
+                        # Cache the successfully-established link so the
+                        # next fetch to this destination skips establishment.
+                        if link_obj is not None:
+                            self._cache_link(dest_hash, link_obj)
+                        break
+                    final_result = result
+                    err = result.get("error") or ""
+                    # Only retry on transient link failures. Path-discovery
+                    # timeouts, hard-cap breaches, and stall/finalise errors
+                    # imply either an unreachable destination or a stuck
+                    # transfer — retrying would just wait through it again.
+                    if err not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
+                        break
+                    log.info(
+                        "fetch_page: retrying %s (attempt %d/%d after: %s)",
+                        destination_hash_hex[:16], attempt + 2, MAX_ATTEMPTS, err,
+                    )
+                    try:
+                        RNS.Transport.request_path(dest_hash)
+                    except Exception:
+                        pass
+                    if waiter.wait_and_reset(timeout=RETRY_ANNOUNCE_WAIT):
+                        log.info(
+                            "fetch_page: fresh announce arrived during "
+                            "retry wait for %s — retrying immediately",
+                            destination_hash_hex[:16],
+                        )
+
+                # Final salvage. If the retry budget exhausted with a
+                # retryable error, fire one more path_request and wait
+                # for a fresh announce; if one arrives, do one bonus
+                # attempt. Real-world case that motivated this:
+                # attempts failed at 189 s, a fresh announce arrived
+                # 7 s later and the diagnostics endpoint immediately
+                # showed has_path=true. The stock retry budget was
+                # just short of the mesh's round-trip response time.
+                if (
+                    final_result["content"] is None
+                    and (final_result.get("error") or "") in RETRYABLE_ERRORS
+                ):
+                    try:
+                        RNS.Transport.request_path(dest_hash)
+                    except Exception:
+                        pass
+                    if waiter.wait_and_reset(timeout=FINAL_ANNOUNCE_WAIT):
+                        log.info(
+                            "fetch_page: fresh announce arrived after "
+                            "retry budget for %s — one bonus attempt",
+                            destination_hash_hex[:16],
+                        )
+                        result, link_obj = _do_attempt()
+                        if result["content"] is not None:
+                            final_result = result
+                            if link_obj is not None:
+                                self._cache_link(dest_hash, link_obj)
+            finally:
                 try:
-                    RNS.Transport.request_path(dest_hash)
+                    RNS.Transport.deregister_announce_handler(waiter)
                 except Exception:
                     pass
-                time.sleep(RETRY_SLEEP)
 
         load_ms = int((time.monotonic() - t_start) * 1000)
 
