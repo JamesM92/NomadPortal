@@ -94,9 +94,19 @@ class _DestinationAnnounceWaiter:
     fetch_page registers one of these per outbound fetch, uses it to
     wake up its retry sleep whenever the destination re-announces,
     and deregisters it in a ``finally``.
+
+    ``receive_path_responses = True`` is load-bearing. RNS's
+    ``Transport`` handler-dispatch loop skips announces whose packet
+    context is ``PATH_RESPONSE`` unless the handler opts in via
+    this attribute. The announce we most want to catch — a
+    ``NomadNet`` node re-announcing in response to our own
+    ``request_path`` — arrives exactly as a path response, so
+    without this flag the waiter never wakes on the fresh-answer
+    case the retry loop is trying to catch.
     """
 
     aspect_filter = "nomadnetwork.node"
+    receive_path_responses = True
 
     def __init__(self, target_hash: bytes) -> None:
         self._target = target_hash
