@@ -67,6 +67,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dict and upgrades ``_sync_one`` to log a warning instead of
   swallowing the mismatch — future shape drifts won't be invisible.
 
+- **``fetch_page`` gave up ~7 seconds before the mesh answered
+  it.** Observed pattern: retry budget (3 × 120 s link + 1.5 s
+  backoff) exhausted at ~189 s with ``Link closed before response``;
+  the destination's fresh announce arrived 7 s later and
+  ``/api/nodes/<hash>/diagnostics`` immediately showed
+  ``has_path: true``. Root cause: the retry loop paced on a fixed
+  1.5 s sleep between attempts, but NomadNet's response to a
+  ``request_path`` (re-announce, then propagate back through the
+  mesh) can take 30-60 s under typical conditions.
+
+  Replaces the sleep with an event wait on a per-destination
+  ``nomadnetwork.node`` announce handler. Between attempts, the
+  retry fires a fresh ``request_path`` and blocks up to
+  ``RETRY_ANNOUNCE_WAIT`` (45 s) for a matching announce — if one
+  arrives, retry immediately; otherwise time out and try anyway.
+  After the retry budget exhausts with a retryable error, a final
+  ``FINAL_ANNOUNCE_WAIT`` (45 s) rescue window catches the exact
+  "announce arrived just after we gave up" case. Genuinely-
+  unreachable destinations still fail fast because non-retryable
+  errors (path timeout, hard-cap, stall) short-circuit the salvage.
+
 ### Changed
 
 - **Default ``LOG_LEVEL`` bumped from ``INFO`` to ``DEBUG``.** Set
