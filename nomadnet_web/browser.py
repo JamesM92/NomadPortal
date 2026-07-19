@@ -159,6 +159,24 @@ class NodeBrowser:
         self._link_cache: dict = {}   # dest_hash (bytes) -> RNS.Link
         self._link_cache_lock = threading.Lock()
 
+        # Per-destination fetch serialization. Multiple concurrent
+        # ``fetch_page(dest, ...)`` calls to the SAME destination
+        # would each fire their own Link handshake in parallel,
+        # which we observed the peer respond to poorly — three
+        # simultaneous Link requests from the same identity in the
+        # same second, all timing out. Serializing here means the
+        # second call waits for the first to establish (and cache)
+        # a link, then benefits from the cache. Different-
+        # destination fetches still run in parallel.
+        #
+        # Map: dest_hash (bytes) -> Lock. Locks are keyed lazily —
+        # first fetch to a destination creates its lock, later
+        # fetches reuse it. Memory footprint is one Lock per unique
+        # destination we've ever fetched, which is bounded by the
+        # nodes actually browsed.
+        self._inflight_fetches: dict = {}
+        self._inflight_fetches_lock = threading.Lock()
+
         if config_dir:
             self._nodes_file = os.path.join(
                 os.path.dirname(config_dir.rstrip("/")), "nodes.json"
@@ -965,6 +983,18 @@ class NodeBrowser:
                 "total_announces":  self._total_announces,
             }
 
+    def _get_fetch_lock(self, dest_hash: bytes) -> threading.Lock:
+        """Get-or-create the per-destination fetch mutex. Lazy —
+        first fetch to a given destination creates the lock, later
+        fetches to the same destination reuse and contend on it.
+        """
+        with self._inflight_fetches_lock:
+            lock = self._inflight_fetches.get(dest_hash)
+            if lock is None:
+                lock = threading.Lock()
+                self._inflight_fetches[dest_hash] = lock
+            return lock
+
     def fetch_page(
         self,
         destination_hash_hex: str,
@@ -977,11 +1007,11 @@ class NodeBrowser:
     ) -> tuple[Optional[bytes], Optional[str]]:
         """Fetch a page and update per-node stats (views, RX bytes, load time).
 
-        Uses a stall-based watchdog: as long as the node keeps sending
-        packets, the fetch keeps running and `progress_cb` (if provided)
-        is called with a float in [0,1]. If no packet arrives for
-        `timeout` seconds, the fetch is aborted — as "no response" if
-        nothing ever arrived, otherwise "lost connection".
+        Serializes concurrent fetches to the same destination behind
+        a per-destination mutex — see ``self._inflight_fetches``. The
+        actual work runs in ``_fetch_page_locked``; this thin wrapper
+        only handles readiness checks, dest_hash parsing, and the
+        lock. Different-destination fetches still run in parallel.
         """
         # RNS.Reticulum() is initialised in a background thread so the web
         # UI can serve while Transport comes up (~2-4 min on a busy
@@ -999,11 +1029,32 @@ class NodeBrowser:
                 return None, f"Reticulum transport is still coming up (~{remaining}s remaining)"
             return None, "Reticulum transport is still coming up"
 
-        RNS = self._rns
         try:
             dest_hash = bytes.fromhex(destination_hash_hex)
         except ValueError:
             return None, "Invalid destination hash"
+
+        with self._get_fetch_lock(dest_hash):
+            return self._fetch_page_locked(
+                destination_hash_hex, dest_hash, path, field_data,
+                timeout, progress_cb, sizes_cb, identify_with,
+            )
+
+    def _fetch_page_locked(
+        self,
+        destination_hash_hex: str,
+        dest_hash: bytes,
+        path: str = "/",
+        field_data: Optional[dict] = None,
+        timeout: int = STALL_TIMEOUT,
+        progress_cb=None,
+        sizes_cb=None,
+        identify_with=None,
+    ) -> tuple[Optional[bytes], Optional[str]]:
+        """Actual fetch implementation — runs under the
+        per-destination fetch mutex acquired by ``fetch_page``.
+        """
+        RNS = self._rns
 
         # Only update the node's status dot for the root/index page, not sub-pages.
         _norm = (path or "/").rstrip("/") or "/"

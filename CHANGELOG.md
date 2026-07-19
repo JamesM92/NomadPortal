@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dict and upgrades ``_sync_one`` to log a warning instead of
   swallowing the mismatch — future shape drifts won't be invisible.
 
+- **Concurrent ``fetch_page`` calls to the same destination now
+  serialize.** Observed pattern: three parallel fetches for pages
+  on ``49c45a`` each registered their own announce waiter; a
+  single announce arrival woke all three simultaneously and fired
+  three Link handshakes to the same peer in the same second. The
+  peer either dropped some of them or responded to only one; from
+  our side every handshake timed out. Adds a per-destination
+  ``threading.Lock`` (``NodeBrowser._inflight_fetches``) that
+  ``fetch_page`` acquires around the whole fetch. Second and
+  subsequent calls to the same destination wait for the first to
+  release, then benefit from its cached link. Different
+  destinations still fetch in parallel.
+
 - **``fetch_page`` gave up ~7 seconds before the mesh answered
   it.** Observed pattern: retry budget (3 × 120 s link + 1.5 s
   backoff) exhausted at ~189 s with ``Link closed before response``;
