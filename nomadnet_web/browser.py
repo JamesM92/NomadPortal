@@ -529,6 +529,45 @@ class NodeBrowser:
         except Exception:
             log.debug("request_path raised", exc_info=True)
 
+        # Force TCP reconnect on our TCPClientInterface(s). The sidecar
+        # probe test on 2026-07-18 showed that a fresh RNS instance in
+        # the same container namespace reaches destinations that the
+        # long-running RNS cannot at the same moment — same LAN, same
+        # source IP, same hub. That points at hub-side session state
+        # accumulating over hours of the same TCP connection into a
+        # shape that degrades routing for specific destinations. A
+        # fresh TCP session gets fresh-client treatment. This is the
+        # same mechanism that our zombie-interface patch already uses
+        # for recovery — close the socket, read_loop's reconnect()
+        # fires, kernel gives us a fresh source port, hub sees a new
+        # client session.
+        #
+        # We do this AFTER path state clearing so the fresh request_path
+        # above rides the OLD session's last gasps; the reconnect
+        # happens naturally when the next outbound packet hits a
+        # dead socket. This preserves the "give the mesh a chance to
+        # answer via the current session before we replace it"
+        # behaviour.
+        for iface in RNS.Transport.interfaces:
+            if not getattr(iface, "initiator", False):
+                continue
+            sock = getattr(iface, "socket", None)
+            if sock is None:
+                continue
+            try:
+                iface.online = False
+                sock.close()
+                log.warning(
+                    "default-node hard-reset: forced socket close on %s "
+                    "to trigger fresh TCP reconnect (fresh hub session)",
+                    iface.name,
+                )
+            except Exception:
+                log.debug(
+                    "hard-reset socket close raised on %s", iface.name,
+                    exc_info=True,
+                )
+
     def _browser_is_blocked_dest(self, hex_hash: str) -> bool:
         """Skip keepalive traffic to blocklisted destinations."""
         try:
