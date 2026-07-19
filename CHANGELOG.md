@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Container crash-loop with exit 141 on large ratchet
+  directories.** The entrypoint's ratchet-prune peek pipeline
+  (``find … | head -n 1``) SIGPIPEs on ``find`` when ``head``
+  reads its one line and closes. Under ``set -o pipefail`` +
+  ``set -e`` the outer shell exits before the SSL / gunicorn
+  setup, giving no log line to explain it — just repeated
+  restart-loop iterations of the earlier MTU warning.
+  Reproduced on a mirror deployment with 16,778 accumulated
+  ratchet files on NAS-backed ``/config``.
+
+  Replaces the peek with GNU find's ``-print -quit`` action so
+  no pipe is involved. Also wraps the count-based prune's
+  ``find | sort | head | cut | xargs`` pipeline in ``|| true``
+  to absorb the same class of SIGPIPE trap (deletion of the
+  first N files has already happened via xargs by the time
+  head closes).
+
 ## [0.9.28] - 2026-07-19
 
 ### Added
