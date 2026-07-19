@@ -49,6 +49,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Default-node hard-reset on repeated keepalive failure.** After
+  ``DEFAULT_NODE_HARD_RESET_FAILURES`` (3) consecutive failed
+  keepalives, the loop surgically clears RNS's cached state for that
+  specific destination — pops ``Transport.path_table[dh]``, pops
+  ``Transport.path_requests[dh]``, evicts our own cached Link — and
+  fires a fresh ``Transport.request_path``. Targets the "long-running
+  RNS Transport state degrades reachability for specific
+  destinations" pattern documented in
+  [[destination-table-cache-is-load-bearing]]: a fresh RNS instance
+  in the same container namespace can reach the destination fine but
+  the long-running one can't. Rather than restarting the whole RNS
+  instance, this clears state for just one destination and gives it a
+  chance to recover on the next keepalive tick. Does not affect other
+  destinations. If the mesh is genuinely down for this destination
+  the recovery attempts still fail; if the stale state was the
+  blocker, they now succeed.
+
 - **Warm-link keepalive for the default node.** A background thread
   fetches the operator-configured ``default_node``'s index page every
   ``DEFAULT_NODE_KEEPALIVE_S`` (240s, just under RNS's built-in
