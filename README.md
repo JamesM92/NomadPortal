@@ -454,6 +454,24 @@ All persistent data is stored in `./config/` (volume-mounted into the container)
 
 > **Back up `config/reticulum/identities/` regularly** — these files contain your RNS private keys and cannot be recovered if lost.
 
+### Storage backend performance
+
+**Keep `config/` on local disk.** Bind-mounting `config/` from network storage (NAS via NFS/SMB/CIFS, remote block storage, or anything else with non-trivial write latency) can degrade — or, in extreme cases, effectively break — mesh reachability. Symptoms range from occasional link handshake timeouts to complete inability to reach other nodes despite receiving their announces fine.
+
+**Why:** Several persistent stores (LXMF peer database, discovered-nodes registry, message history) are updated as mesh events arrive. Even after the batching improvements in the 0.9.x line, writes still land on the config directory in the hot path. If those writes take tens or hundreds of milliseconds per operation (typical of network filesystems under any real load), Python holds the GIL through the write and starves every other thread — including the ones supposed to be sending RNS Link handshakes on the wire.
+
+**What to do:**
+
+- Use a local SSD (or, on constrained hosts, a local rotational disk) for the `config/` bind mount
+- If your data-lifecycle policy requires the state to live on shared storage, snapshot from local disk to your NAS on a schedule (nightly rsync, ZFS send, etc.) rather than serving directly from it
+- If you're already on network storage and can't move, watch for these signals:
+  - `ss -tnp` on the host shows a large `Recv-Q` on the container's connection to your hub
+  - The interface's `txb` in `/api/_debug/state` is much smaller than `rxb` (say, more than 10 : 1)
+  - Frequent "Link establishment timed out" in the logs even though the destination just announced
+  - Other clients (MeshChat, Sideband) on the same LAN reach the same peers fine
+
+Volumes for `site/` (hosted pages and files) can safely live on network storage — that content is read-only from the server's perspective and updated on the operator's schedule, not on every mesh event.
+
 ## Security notes
 
 - Change `ADMIN_PASSWORD` before exposing the service to any network
