@@ -409,7 +409,7 @@ class NodeBrowser:
                 try:
                     content, error = self.fetch_page(default_hex, "/page/index.mu")
                     if content is not None:
-                        log.debug(
+                        log.info(
                             "default-node keepalive: %s ok (%d bytes)",
                             default_hex[:16], len(content),
                         )
