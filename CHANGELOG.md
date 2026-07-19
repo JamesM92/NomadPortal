@@ -51,20 +51,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Default-node hard-reset on repeated keepalive failure.** After
   ``DEFAULT_NODE_HARD_RESET_FAILURES`` (3) consecutive failed
-  keepalives, the loop surgically clears RNS's cached state for that
-  specific destination — pops ``Transport.path_table[dh]``, pops
-  ``Transport.path_requests[dh]``, evicts our own cached Link — and
-  fires a fresh ``Transport.request_path``. Targets the "long-running
-  RNS Transport state degrades reachability for specific
-  destinations" pattern documented in
-  [[destination-table-cache-is-load-bearing]]: a fresh RNS instance
-  in the same container namespace can reach the destination fine but
-  the long-running one can't. Rather than restarting the whole RNS
-  instance, this clears state for just one destination and gives it a
-  chance to recover on the next keepalive tick. Does not affect other
-  destinations. If the mesh is genuinely down for this destination
-  the recovery attempts still fail; if the stale state was the
-  blocker, they now succeed.
+  keepalives, the loop:
+
+  1. Surgically clears RNS's cached state for the specific
+     destination — pops ``Transport.path_table[dh]``, pops
+     ``Transport.path_requests[dh]``, evicts our own cached Link
+  2. Fires a fresh ``Transport.request_path`` on the current TCP
+     session (last-gasp attempt via the existing hub session)
+  3. Force-closes the TCPClient interface socket(s) so RNS's
+     read_loop reconnect fires. A fresh TCP session gets fresh-
+     client treatment from the hub, which the 2026-07-18 sidecar-
+     probe test proved is qualitatively different from the long-
+     running session's treatment. Same mechanism our zombie-interface
+     patch uses for transient RST recovery, but triggered
+     deliberately.
+
+  Targets the "long-running RNS state (or hub-side session state)
+  degrades reachability for specific destinations" pattern proven
+  during the 2026-07-19 investigation. A fresh RNS instance in the
+  same container namespace at the same second reaches destinations
+  that the long-running one can't — same LAN, same source IP, same
+  hub. Only difference: fresh TCP session. Rather than restarting
+  the whole container, we surgically reset the specific destination's
+  routing state AND reconnect our sole TCP interface. Doesn't affect
+  other interfaces (if you have multiple), other destinations, or
+  in-flight state on unrelated fetches (recovery only fires after
+  3 consecutive failures ≈ 12 min unreachable, at which point we
+  aren't doing anything useful anyway).
 
 - **Warm-link keepalive for the default node.** A background thread
   fetches the operator-configured ``default_node``'s index page every
