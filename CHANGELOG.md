@@ -94,6 +94,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bug the patch targeted may or may not be present upstream in
   1.3.9; leaving the patch in place is defensive.
 
+- **``LXMFPeerTracker`` no longer persists on every announce.**
+  Historical shape: every incoming ``lxmf.delivery`` announce
+  triggered ``json.dump`` of the full peer database (34k+ entries
+  in a real deployment) inline on the RNS read_loop thread. That
+  held the GIL through a multi-megabyte serialization and starved
+  every other thread of CPU. On NAS-backed ``/config`` the
+  per-write disk latency compounded it into full gridlock:
+  observed ``Recv-Q`` of 121 kB queued in the kernel receive
+  buffer, ``txb`` of 6.9 kB / ``rxb`` of 585 kB (85 : 1
+  asymmetry), and NomadPortal effectively unable to send Link
+  handshakes while MeshChat on the same LAN kept working.
+
+  Replaces the inline persist with a mark-dirty pattern: the
+  announce handler updates in-memory state and sets a flag; a
+  background daemon thread flushes to disk once per
+  ``PERSIST_INTERVAL_S`` (60 s default). Decouples announce
+  arrival rate from disk I/O rate. ``atexit`` flush covers clean
+  shutdown so a container stop doesn't lose the last window's
+  writes.
+
+  The acute symptom is separately mitigated by moving ``/config``
+  off NAS to local disk; this code fix removes the pathology
+  regardless of storage backend.
+
 - **Concurrent ``fetch_page`` calls to the same destination now
   serialize.** Observed pattern: three parallel fetches for pages
   on ``49c45a`` each registered their own announce waiter; a

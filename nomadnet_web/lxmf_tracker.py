@@ -5,8 +5,18 @@ Listens for RNS announces on the lxmf.delivery aspect and records every
 identity that announces — the same way NodeBrowser tracks NomadNet nodes.
 The display name comes from app_data (UTF-8 encoded name string) attached
 to the announce, if present.
+
+Persistence is batched. ``record()`` marks the in-memory state dirty and
+returns; a background thread flushes to disk every
+``PERSIST_INTERVAL_S`` seconds. Historically each announce persisted the
+entire 34k-peer database inline, which — on the RNS read_loop thread,
+holding the GIL through ``json.dump`` for a multi-megabyte dict —
+starved every other thread. NAS-backed ``/config`` made the same code
+grind to a halt with LINKREQUESTs never getting CPU to actually
+transmit. Batching decouples announce-arrival rate from disk I/O rate.
 """
 
+import atexit
 import json
 import logging
 import os
@@ -20,12 +30,33 @@ ASPECT = "lxmf.delivery"
 
 
 class LXMFPeerTracker:
+    # Persist at most this often. Announce arrivals mark dirty; the
+    # background persist thread flushes to disk once per interval.
+    # 60 s balances "state survives a container restart" against
+    # "we're not disk-thrashing on busy mesh chatter." Bump if disk
+    # I/O is somehow still a bottleneck; drop only if peer freshness
+    # after a hard crash matters more than steady-state throughput.
+    PERSIST_INTERVAL_S = 60
+
     def __init__(self, storage_dir: str):
         self._path  = os.path.join(storage_dir, "lxmf_peers.json")
         self._lock  = threading.Lock()
         self._peers: dict = {}
+        self._dirty = False
+        self._dirty_lock = threading.Lock()
+        self._stop_event = threading.Event()
         os.makedirs(storage_dir, exist_ok=True)
         self._load()
+
+        # Background persister — daemon so it dies with the process.
+        # Also register an atexit handler so a clean shutdown flushes
+        # any pending dirty state to disk before the process exits.
+        threading.Thread(
+            target=self._persist_loop,
+            daemon=True,
+            name="lxmf-tracker-persist",
+        ).start()
+        atexit.register(self._flush_if_dirty)
 
     # ------------------------------------------------------------------
     # Public API
@@ -63,9 +94,7 @@ class LXMFPeerTracker:
                 p["hops"] = p.get("last_known_hops")
 
         if needs_persist:
-            with self._lock:
-                snapshot = dict(self._peers)
-            self._persist(snapshot)
+            self._mark_dirty()
 
         return sorted(peers, key=lambda p: -p["last_seen"])
 
@@ -113,10 +142,9 @@ class LXMFPeerTracker:
                     "last_seen":      now,
                     "announce_count": 1,
                 }
-            snapshot = dict(self._peers)
 
         log.info("LXMF peer announce: %s (%s)", hash_hex[:16], name or "no name")
-        self._persist(snapshot)
+        self._mark_dirty()
 
     def _load(self) -> None:
         if not os.path.exists(self._path):
@@ -129,6 +157,45 @@ class LXMFPeerTracker:
             log.info("Loaded %d LXMF peers", len(self._peers))
         except Exception as exc:
             log.warning("Could not load LXMF peers: %s", exc)
+
+    def _mark_dirty(self) -> None:
+        """Flag the in-memory state as needing persistence. Called from
+        the announce handler thread (RNS's read_loop). Cheap — sets a
+        flag under a lock and returns. The actual disk write happens
+        later, on the persister thread.
+        """
+        with self._dirty_lock:
+            self._dirty = True
+
+    def _persist_loop(self) -> None:
+        """Background thread: every ``PERSIST_INTERVAL_S`` seconds,
+        flush any dirty state to disk. Uses ``Event.wait`` so an
+        atexit-triggered ``set()`` on ``_stop_event`` (added later if
+        needed) would break out promptly rather than sleeping through.
+        """
+        while not self._stop_event.is_set():
+            if self._stop_event.wait(timeout=self.PERSIST_INTERVAL_S):
+                break
+            self._flush_if_dirty()
+
+    def _flush_if_dirty(self) -> None:
+        """Snapshot + write if the dirty flag is set. Re-marks dirty
+        on write failure so the next tick tries again — matches the
+        old inline behaviour where a failed persist just meant we'd
+        try again on the next announce.
+        """
+        with self._dirty_lock:
+            if not self._dirty:
+                return
+            self._dirty = False
+        with self._lock:
+            snapshot = dict(self._peers)
+        try:
+            self._persist(snapshot)
+        except Exception as exc:
+            log.warning("LXMF peers persist failed, will retry: %s", exc)
+            with self._dirty_lock:
+                self._dirty = True
 
     def _persist(self, snapshot: dict) -> None:
         try:
