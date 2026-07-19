@@ -54,6 +54,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``PropagationSyncService`` to know which routers to sync each
   tick.
 
+### Fixed
+
+- **``PropagationSyncService`` silently skipped every sync.** The
+  ``active_routers()`` docstring promised each entry's dict would
+  carry ``{"router", "dest", "identity"}``, but
+  ``MessagingService._init_user_router`` stored only ``router`` and
+  ``dest``. ``PropagationSyncService._sync_one`` then hit
+  ``identity is None`` and returned without logging, so
+  ``syncs_per_user`` stayed empty even though the picked node and
+  the sync loop were both alive. Adds ``identity`` to the stored
+  dict and upgrades ``_sync_one`` to log a warning instead of
+  swallowing the mismatch — future shape drifts won't be invisible.
+
 ### Changed
 
 - **Default ``LOG_LEVEL`` bumped from ``INFO`` to ``DEBUG``.** Set
