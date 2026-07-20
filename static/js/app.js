@@ -2494,6 +2494,25 @@ function _initDisclaimer() {
     _lockedHash = effectiveDefault;
   }
 
+  // Make the top-left brand element navigate back to the default node's
+  // home page on click. Especially load-bearing for guests / kiosk mode:
+  // the address bar and node list may both be hidden by per-audience
+  // access controls, leaving the brand as the only reliable "home"
+  // affordance. Applied for everyone (not just guests) since it's a
+  // useful shortcut regardless of role. Click handler is attached once
+  // at boot — applyUISettings replaces .brand's innerHTML with the
+  // configured app title, but that only touches children, not the
+  // element's own listeners.
+  if (effectiveDefault) {
+    document.querySelectorAll('.brand').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.title = 'Home';
+      el.addEventListener('click', () => {
+        navigateTo(`hash://${effectiveDefault}/page/index.mu`);
+      });
+    });
+  }
+
   if (startUrl) {
     navigateTo(decodeURIComponent(startUrl));
   } else {

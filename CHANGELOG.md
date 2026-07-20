@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fingerprint (identify) button visible for guests.** The
+  ``#btn-identify`` CSS declared ``display: inline-flex`` on the id
+  selector, which beat the HTML ``hidden`` attribute (backed by the
+  browser stylesheet's lower-specificity ``[hidden] { display: none }``)
+  and left the button visible even when JS had explicitly set
+  ``btn.hidden = true``. Scoped the display rule to ``:not([hidden])``
+  so the hidden attribute now actually hides. Same class of bug may
+  live elsewhere in ``style.css`` wherever an id selector sets
+  ``display`` on an element that also toggles ``hidden``; noted
+  inline as an audit item.
+
+- **Brand element in the top-left didn't navigate anywhere on click.**
+  In guest / kiosk deployments where the address bar and node list are
+  hidden by per-audience access controls, this left visitors with no
+  reliable way to get back to the default node's home page after
+  navigating deeper. Wires up a click handler at boot that navigates
+  to ``hash://${default_node}/page/index.mu``, applied for everyone —
+  a useful shortcut regardless of role.
+
 - **``NodeBrowser`` persisted ``nodes.json`` on every
   ``nomadnetwork.node`` announce.** Same class of pathology as
   the LXMFPeerTracker inline persist that was fixed in v0.9.28.
