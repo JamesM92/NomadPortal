@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-23
+
+**The 1.0 milestone.** NomadPortal is now stable and usable enough
+in production that it earns the "1.0" name. The primary browses
+mesh destinations reliably and the mirror serves its hosted site
+to clients over the mesh — both running the same image, both
+soaking clean over multi-day windows. The reliability journey the
+0.9.x line traced (Phase 1 MeshChat parity, announce-driven
+retry, per-destination fetch dedup, propagation-node sync,
+version-alignment with the rest of the ecosystem, and — the
+final root-cause fix — batching per-event disk writes off the
+RNS event loop) all landed by v0.9.28 and the last few 0.9.x
+patches. This drop closes the remaining known reliability issues
+and cleans up two guest-facing UI bugs; taken with everything
+already shipped in the 0.9 line, it's the version worth pointing
+someone at.
+
+### Fixed
+
+- **Fingerprint (identify) button visible for guests.** The
+  ``#btn-identify`` CSS declared ``display: inline-flex`` on the id
+  selector, which beat the HTML ``hidden`` attribute (backed by the
+  browser stylesheet's lower-specificity ``[hidden] { display: none }``)
+  and left the button visible even when JS had explicitly set
+  ``btn.hidden = true``. Scoped the display rule to ``:not([hidden])``
+  so the hidden attribute now actually hides. Same class of bug may
+  live elsewhere in ``style.css`` wherever an id selector sets
+  ``display`` on an element that also toggles ``hidden``; noted
+  inline as an audit item.
+
+- **Brand element in the top-left didn't navigate anywhere on click.**
+  In guest / kiosk deployments where the address bar and node list are
+  hidden by per-audience access controls, this left visitors with no
+  reliable way to get back to the default node's home page after
+  navigating deeper. Wires up a click handler at boot that navigates
+  to ``hash://${default_node}/page/index.mu``, applied for everyone —
+  a useful shortcut regardless of role.
+
+- **``NodeBrowser`` persisted ``nodes.json`` on every
+  ``nomadnetwork.node`` announce.** Same class of pathology as
+  the LXMFPeerTracker inline persist that was fixed in v0.9.28.
+  Every incoming node-announce (and every fetch / ping stat
+  update) called ``_persist(snapshot)`` synchronously on the RNS
+  read_loop thread. On the mirror deployment (2k+ nodes) on
+  NAS-backed ``/config``, the same GIL-contention gridlock as
+  the peer tracker applies — but with a different visible
+  symptom: the mirror hosts a site and needs to send
+  ``LINK_PROOF`` back to clients accepting their inbound Link
+  handshakes; the read_loop thread being blocked in ``json.dump``
+  delays that response past the client's establishment timeout.
+  Clients see "Link establishment timed out" or "Timeout waiting
+  for RTT packet from link initiator" while trying to browse
+  the hosted site.
+
+  Applies the same debounce pattern: ``_mark_nodes_dirty()`` on
+  all hot-path callers (``_register_node``, ``_record_fetch``,
+  ``_record_ping``, hop-refresh in ``get_nodes``); a background
+  daemon thread flushes to disk every ``NODES_PERSIST_INTERVAL_S``
+  (60 s default). ``atexit`` hook covers clean shutdown.
+
+  This closes the second contributor to the NAS-config
+  reachability gridlock. The historical
+  ``[[reticulum-stack-pin]]`` symptom
+  ("Timeout waiting for RTT packet from link initiator")
+  originally attributed to a 1.3.x RNS regression may have
+  been this pathology all along, misattributed.
+
+- **Container crash-loop with exit 141 on large ratchet
+  directories.** The entrypoint's ratchet-prune peek pipeline
+  (``find … | head -n 1``) SIGPIPEs on ``find`` when ``head``
+  reads its one line and closes. Under ``set -o pipefail`` +
+  ``set -e`` the outer shell exits before the SSL / gunicorn
+  setup, giving no log line to explain it — just repeated
+  restart-loop iterations of the earlier MTU warning.
+  Reproduced on a mirror deployment with 16,778 accumulated
+  ratchet files on NAS-backed ``/config``.
+
+  Replaces the peek with GNU find's ``-print -quit`` action so
+  no pipe is involved. Also wraps the count-based prune's
+  ``find | sort | head | cut | xargs`` pipeline in ``|| true``
+  to absorb the same class of SIGPIPE trap (deletion of the
+  first N files has already happened via xargs by the time
+  head closes).
+
 ## [0.9.28] - 2026-07-19
 
 ### Added

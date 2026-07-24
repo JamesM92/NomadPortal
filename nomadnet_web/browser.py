@@ -5,6 +5,7 @@ Connects to the Reticulum network, discovers NomadNet nodes via announces,
 and fetches pages from them.
 """
 
+import atexit
 import json
 import logging
 import os
@@ -67,6 +68,17 @@ DEFAULT_NODE_HARD_RESET_FAILURES = 3
 # every click. 50 entries is far more than a browsing session touches
 # in practice; oldest is evicted (and torn down) when the cap is hit.
 LINK_CACHE_MAX_SIZE = 50
+
+# nodes.json persistence cadence. Discovered-node entries are updated
+# on every ``nomadnetwork.node`` announce, per-fetch stat changes, and
+# hop-count refreshes — historically all inline via ``_persist`` on
+# the RNS read_loop thread, which under NAS-backed ``/config`` and a
+# 2k+ node registry gridlocks the same way the LXMFPeerTracker did
+# before its own debounce. record-mark-dirty + background 60s flush
+# decouples announce arrival rate from disk I/O rate. Matches the
+# ``LXMFPeerTracker.PERSIST_INTERVAL_S`` cadence so both stores have
+# the same freshness guarantees on a hard crash.
+NODES_PERSIST_INTERVAL_S = 60
 
 # Between failed link attempts, wait for a fresh announce from the
 # target destination (signal that the mesh has updated its view of
@@ -209,6 +221,20 @@ class NodeBrowser:
         self._load_favorites()
         self._load_iface_stats()
         self._load_blocklist()
+
+        # Debounced persistence for nodes.json. Announce handlers and
+        # per-fetch stat updates mark dirty; a daemon thread flushes
+        # every ``NODES_PERSIST_INTERVAL_S`` seconds. See the constant's
+        # comment for the pathology this closes.
+        self._nodes_dirty = False
+        self._nodes_dirty_lock = threading.Lock()
+        self._nodes_stop_event = threading.Event()
+        threading.Thread(
+            target=self._nodes_persist_loop,
+            daemon=True,
+            name="nodebrowser-persist",
+        ).start()
+        atexit.register(self._flush_nodes_if_dirty)
 
         # Reticulum's constructor blocks for 60–300 seconds on real
         # deployments while it replays destination_table, brings up
@@ -932,9 +958,7 @@ class NodeBrowser:
                 node["name"] = self._hosted_name
 
         if needs_persist:
-            with self._lock:
-                snapshot = dict(self.nodes)
-            self._persist(snapshot)
+            self._mark_nodes_dirty()
 
         nodes.sort(key=lambda n: (
             not n["is_hosted"],
@@ -1836,11 +1860,10 @@ class NodeBrowser:
                 # and were a debug-grade feature; keep the behaviour intact.
                 node = self.nodes[hash_hex]
                 node["favorited"] = value
-                node_snapshot = dict(self.nodes)
         if user_sub:
             self._persist_favorites(fav_snapshot)
         else:
-            self._persist(node_snapshot)
+            self._mark_nodes_dirty()
         return True
 
     def get_favorites(self, user_sub: str = "") -> list:
@@ -1983,14 +2006,13 @@ class NodeBrowser:
                     "ever_load_ok":   False,
                     "favorited":      False,
                 }
-            snapshot = dict(self.nodes)
 
         log.info(
             "Node %s: %s (announces=%d)",
             hash_hex[:12], name,
             self.nodes[hash_hex].get("announce_count", 1),
         )
-        self._persist(snapshot)
+        self._mark_nodes_dirty()
 
     def _record_fetch(self, hash_hex: str, rx_bytes: int, load_ms: int,
                       ok: bool = True, update_status: bool = True):
@@ -2027,19 +2049,16 @@ class NodeBrowser:
                     load_ms if prev is None
                     else int(prev * 0.7 + load_ms * 0.3)
                 )
-            snapshot = dict(self.nodes)
 
-        self._persist(snapshot)
+        self._mark_nodes_dirty()
 
     def _record_ping(self, hash_hex: str, ping_ms: int):
         with self._lock:
             node = self.nodes.get(hash_hex)
-            if node:
-                node["last_ping_ms"] = ping_ms
-                snapshot = dict(self.nodes)
-            else:
+            if not node:
                 return
-        self._persist(snapshot)
+            node["last_ping_ms"] = ping_ms
+        self._mark_nodes_dirty()
 
     # ------------------------------------------------------------------
     # Persistence
@@ -2089,6 +2108,42 @@ class NodeBrowser:
             log.info("Loaded favorites for %d user(s)", len(self._favorites))
         except Exception as exc:
             log.warning("Could not load favorites file: %s", exc)
+
+    def _mark_nodes_dirty(self) -> None:
+        """Flag ``self.nodes`` as needing persistence. Callable from the
+        RNS read_loop thread — sets a flag under a lock and returns.
+        The actual disk write happens later, on the persister thread.
+        """
+        with self._nodes_dirty_lock:
+            self._nodes_dirty = True
+
+    def _nodes_persist_loop(self) -> None:
+        """Background thread: every ``NODES_PERSIST_INTERVAL_S`` seconds,
+        flush any dirty nodes state to disk. Uses ``Event.wait`` so a
+        clean shutdown that sets ``_nodes_stop_event`` breaks out
+        promptly rather than sleeping through.
+        """
+        while not self._nodes_stop_event.is_set():
+            if self._nodes_stop_event.wait(timeout=NODES_PERSIST_INTERVAL_S):
+                break
+            self._flush_nodes_if_dirty()
+
+    def _flush_nodes_if_dirty(self) -> None:
+        """Snapshot + write if the dirty flag is set. Re-marks dirty on
+        write failure so the next tick tries again.
+        """
+        with self._nodes_dirty_lock:
+            if not self._nodes_dirty:
+                return
+            self._nodes_dirty = False
+        with self._lock:
+            snapshot = dict(self.nodes)
+        try:
+            self._persist(snapshot)
+        except Exception as exc:
+            log.warning("nodes.json persist failed, will retry: %s", exc)
+            with self._nodes_dirty_lock:
+                self._nodes_dirty = True
 
     def _persist(self, snapshot: dict):
         try:

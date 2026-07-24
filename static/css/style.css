@@ -242,7 +242,15 @@ body {
 .icon-btn:hover { color: var(--accent); }
 .icon-btn.fav-active { color: var(--warn); }
 #btn-fav-page { font-size: 18px; padding: 0 6px; }
-#btn-identify { padding: 0 6px; display: inline-flex; align-items: center; }
+/* ``display: inline-flex`` on the id selector otherwise wins over
+   the HTML ``hidden`` attribute (which sets ``display: none`` via
+   the browser's default stylesheet with lower specificity), leaving
+   the fingerprint button visible for guests who shouldn't see it.
+   Scope the display rule to ``:not([hidden])`` so the hidden
+   attribute actually hides. Same class of bug lives elsewhere in
+   this file wherever an id selector sets ``display`` on an element
+   that also toggles ``hidden`` — worth auditing on the next pass. */
+#btn-identify:not([hidden]) { padding: 0 6px; display: inline-flex; align-items: center; }
 #btn-identify svg { display: block; }
 #btn-identify.identify-active { color: var(--accent); }
 

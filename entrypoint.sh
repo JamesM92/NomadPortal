@@ -179,7 +179,15 @@ if [ -d "$RATCHET_DIR" ]; then
   age_prune_active=0
   if [ "$RATCHET_MAX_AGE_DAYS" -gt 0 ] && [ "$count_before" -gt 0 ]; then
     # Peek — is there anything older than the age threshold?
-    aged_candidate=$(find "$RATCHET_DIR" -type f -mtime "+${RATCHET_MAX_AGE_DAYS}" 2>/dev/null | head -n 1)
+    # ``find -print -quit`` (GNU find) exits after emitting the first
+    # match, so we don't pipe an unbounded stream into ``head -n 1``.
+    # That pattern was the SIGPIPE trap: on a large ratchet directory
+    # (16k+ files observed on the mirror), ``head`` reads its one line
+    # and closes, ``find`` gets SIGPIPE writing line 2, ``set -o
+    # pipefail`` propagates 141, ``set -e`` exits the outer shell —
+    # and the container crash-loops with exit 141 right before the
+    # SSL / gunicorn setup, giving no log line to explain it.
+    aged_candidate=$(find "$RATCHET_DIR" -type f -mtime "+${RATCHET_MAX_AGE_DAYS}" -print -quit 2>/dev/null)
     [ -n "$aged_candidate" ] && age_prune_active=1
   fi
   count_over_cap=0
@@ -207,11 +215,18 @@ if [ -d "$RATCHET_DIR" ]; then
     # traffic (one extra round-trip on first link with an affected peer).
     if [ "$RATCHET_MAX_COUNT" -gt 0 ] && [ "$count_after_age" -gt "$RATCHET_MAX_COUNT" ]; then
       to_delete=$((count_after_age - RATCHET_MAX_COUNT))
+      # ``head -n "$to_delete"`` closes the pipe after N lines and
+      # ``sort`` gets SIGPIPE on the (N+1)th line — same class of
+      # SIGPIPE-under-pipefail trap as the peek pipeline above.
+      # ``|| true`` absorbs the failing pipeline's exit code; the
+      # deletion side-effect for the first N lines has already
+      # happened via xargs by the time head closes.
       find "$RATCHET_DIR" -type f -printf '%T@ %p\n' 2>/dev/null \
         | sort -n \
         | head -n "$to_delete" \
         | cut -d' ' -f2- \
-        | xargs -r rm -f
+        | xargs -r rm -f \
+        || true
       count_final=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
       echo "[startup] Count-based prune removed ${to_delete}; ${count_final} remaining"
     fi
