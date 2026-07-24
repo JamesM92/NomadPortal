@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-23
+
+**The 1.0 milestone.** NomadPortal is now stable and usable enough
+in production that it earns the "1.0" name. The primary browses
+mesh destinations reliably and the mirror serves its hosted site
+to clients over the mesh — both running the same image, both
+soaking clean over multi-day windows. The reliability journey the
+0.9.x line traced (Phase 1 MeshChat parity, announce-driven
+retry, per-destination fetch dedup, propagation-node sync,
+version-alignment with the rest of the ecosystem, and — the
+final root-cause fix — batching per-event disk writes off the
+RNS event loop) all landed by v0.9.28 and the last few 0.9.x
+patches. This drop closes the remaining known reliability issues
+and cleans up two guest-facing UI bugs; taken with everything
+already shipped in the 0.9 line, it's the version worth pointing
+someone at.
+
 ### Fixed
 
 - **Fingerprint (identify) button visible for guests.** The
