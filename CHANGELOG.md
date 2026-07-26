@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Path-based URL sync.** The browser URL now reflects the page
+  you're actually on — refresh preserves state, browser bookmarks
+  work for any NomadNet page, and share-links (copied from the
+  URL bar) are natural. Scheme:
+
+  | URL                              | Target                            |
+  |----------------------------------|-----------------------------------|
+  | ``/``                            | default node home                 |
+  | ``/page/foo.mu``                 | default node's ``/page/foo.mu``   |
+  | ``/file/x.pdf``                  | default node's ``/file/x.pdf``    |
+  | ``/n/<hash>``                    | external node's home              |
+  | ``/n/<hash>/page/foo.mu``        | external node's page              |
+
+  Default-node URLs collapse the hash (``/`` and ``/page/foo.mu``);
+  external nodes carry the hash under an ``/n/`` prefix.
+  Flask picks up a catch-all route that serves ``index.html`` for
+  any path not owned by a reserved prefix (``/api``, ``/admin``,
+  ``/auth``, ``/static``) so refresh / bookmarks / share-links
+  reach the SPA cleanly. The JS wires ``history.pushState`` into
+  ``navigateTo`` and handles browser back/forward via
+  ``popstate``. Legacy ``?url=`` query-param entry point still
+  works but is transparently rewritten to the pathname form on
+  first navigation.
+
 ## [1.0.0] - 2026-07-23
 
 **The 1.0 milestone.** NomadPortal is now stable and usable enough

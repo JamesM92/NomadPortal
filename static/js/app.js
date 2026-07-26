@@ -498,6 +498,86 @@ function _normaliseAddress(input) {
 }
 
 /**
+ * Convert a canonical `hash://<hash>/<path>` URL to the browser-URL
+ * form used in ``window.location.pathname``. Rules:
+ *   - Default-node URLs collapse the hash: ``hash://<default>/page/x``
+ *     becomes ``/page/x`` (bare path). Bookmark-friendly and matches
+ *     the URL you'd expect when you're "on the default site."
+ *   - Non-default hashes keep the hash under an ``/n/`` prefix:
+ *     ``hash://<other>/page/x`` becomes ``/n/<other>/page/x``.
+ *   - Root of the default node is ``/``.
+ * Returns null if the input isn't a recognisable ``hash://`` URL —
+ * caller shouldn't push those to browser history (fetchPage still
+ * runs, but the address bar stays whatever it was).
+ */
+function _urlToPathname(url) {
+  if (!url) return null;
+  const m = url.match(/^hash:\/\/([0-9a-f]+)(\/.*)?$/i) ||
+            url.match(/^hash:\/([0-9a-f]+)(\/.*)?$/i) ||
+            url.match(/^nomadnetwork:\/\/([0-9a-f]+)(\/.*)?$/i);
+  if (!m) return null;
+  const hash = m[1].toLowerCase();
+  let path = m[2] || '/';
+  if (path === '/') path = '';  // ``/`` and ``/page/index.mu`` render the same page; prefer the shorter
+  if (_defaultHash && hash === _defaultHash.toLowerCase()) {
+    return path || '/';
+  }
+  return '/n/' + hash + path;
+}
+
+/**
+ * Inverse of ``_urlToPathname``. Translates a browser
+ * ``window.location.pathname`` back to the canonical ``hash://...``
+ * URL that ``navigateTo`` expects. Uses ``_defaultHash`` for any
+ * path that isn't under ``/n/``.
+ *
+ * Returns null when we can't build a URL — either because the
+ * default hash isn't known yet (RNS still coming up) or the path
+ * matches one of the SPA's own reserved shells (``/page`` served
+ * as the SPA entry point). Callers fall back to their default
+ * boot behaviour in that case.
+ */
+function _pathnameToUrl(pathname) {
+  if (!pathname || pathname === '/') {
+    // Bare root — the default node's index. Only meaningful once
+    // we know the default hash; boot flow handles the null case.
+    if (!_defaultHash) return null;
+    return 'hash://' + _defaultHash + '/page/index.mu';
+  }
+  // Explicit external-node form: /n/<hash>[/path]
+  const ext = pathname.match(/^\/n\/([0-9a-f]{2,128})(\/.*)?$/i);
+  if (ext) {
+    const path = ext[2] || '/page/index.mu';
+    return 'hash://' + ext[1].toLowerCase() + path;
+  }
+  // /page served as SPA entry (from the ``?url=`` boot flow); not a real path
+  if (pathname === '/page' || pathname === '/page/') return null;
+  // Anything else is a default-node path — /page/foo.mu, /file/x.pdf, etc.
+  if (!_defaultHash) return null;
+  return 'hash://' + _defaultHash + pathname;
+}
+
+/**
+ * Push or replace the browser's URL to reflect the given canonical
+ * ``hash://`` URL. Silently no-ops if we can't translate the URL
+ * (see ``_urlToPathname``) so navigation to weird internal states
+ * doesn't blow away a good URL bar.
+ */
+function _syncBrowserUrl(url, replace) {
+  const pathname = _urlToPathname(url);
+  if (!pathname) return;
+  const current = window.location.pathname + window.location.search;
+  if (pathname === current) return;
+  try {
+    if (replace) {
+      window.history.replaceState({ url }, '', pathname);
+    } else {
+      window.history.pushState({ url }, '', pathname);
+    }
+  } catch (_) { /* pushState can throw under weird sandboxing */ }
+}
+
+/**
  * Convert a canonical `hash://<hash>/<path>` URL to the MeshChat-style
  * `<hash>:/<path>` shown in the address bar. Internal state keeps the
  * canonical form; only the user-facing display is shortened so users
@@ -756,6 +836,13 @@ async function navigateTo(url, pushHistory = true, extraFields = null) {
     _stopAutoReload();
     const dd = $('page-autoreload');
     if (dd) dd.value = '0';
+    // Reflect the target in the browser URL bar so refresh preserves
+    // state and users can bookmark specific pages. pushState only
+    // when this is a real (user-driven) navigation; ``pushHistory``
+    // being false already means "no new history entry" — reuse the
+    // signal here to match. Back/forward paths use replaceState via
+    // the popstate handler below.
+    _syncBrowserUrl(url, false);
   }
   updateNavButtons();
 
@@ -2513,11 +2600,45 @@ function _initDisclaimer() {
     });
   }
 
+  // Boot-time URL resolution. Priority:
+  //   1. Explicit ``?url=`` query param — preserved for the legacy
+  //      share-link format and for any callers that construct URLs
+  //      programmatically. Winning here means we still redirect
+  //      the browser to the clean pathname form after navigation
+  //      so the URL bar reflects reality.
+  //   2. ``window.location.pathname`` — the "user hit refresh on a
+  //      bookmarked page" case. ``_pathnameToUrl`` translates back
+  //      to the canonical ``hash://...`` form navigateTo expects.
+  //      Requires ``_defaultHash`` to be known (for bare-path
+  //      resolution); if it isn't, fall through to the default
+  //      boot flow.
+  //   3. Nothing — the default boot flow.
+  let _bootTarget = null;
   if (startUrl) {
-    navigateTo(decodeURIComponent(startUrl));
+    _bootTarget = decodeURIComponent(startUrl);
+    // Strip the legacy ``?url=`` from the URL bar before navigating,
+    // so back-button after subsequent navigation doesn't cycle back
+    // to a URL that would re-trigger the boot handler.
+    try { window.history.replaceState({}, '', '/'); } catch (_) {}
+  } else if (window.location.pathname !== '/') {
+    _bootTarget = _pathnameToUrl(window.location.pathname);
+  }
+  if (_bootTarget) {
+    navigateTo(_bootTarget);
   } else {
     await _bootDefaultNavigation(_siteInfo, effectiveDefault);
   }
+
+  // Handle browser back/forward. popstate fires when the user hits
+  // the browser's back/forward buttons on URLs we pushed via
+  // ``_syncBrowserUrl``. Translate the new pathname to a canonical
+  // URL and navigate without pushing new history (that's what
+  // popstate is — history's already moved).
+  window.addEventListener('popstate', (ev) => {
+    const targetUrl = (ev.state && ev.state.url) ||
+                       _pathnameToUrl(window.location.pathname);
+    if (targetUrl) navigateTo(targetUrl, false);
+  });
 
   setInterval(pollStatus, 15000);
 })();
