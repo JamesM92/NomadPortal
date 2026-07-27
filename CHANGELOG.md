@@ -33,6 +33,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   works but is transparently rewritten to the pathname form on
   first navigation.
 
+### Fixed
+
+- **``#sidebar-tabs`` visible after being set hidden.** Same class
+  of bug the v1.0.0 fingerprint icon fix caught: an id-selector
+  ``display: flex`` rule was beating the browser stylesheet's
+  ``[hidden] { display: none }``. Scoped the display rule to
+  ``:not([hidden])`` so ``applyUISettings``'s ``tabs.hidden = true``
+  (fires when the guest audience is denied both sidebar panels)
+  now actually hides the tab bar. Audit script confirmed no other
+  id-selector rules in ``style.css`` have this pattern.
+
+### Docs
+
+- **README documents the URL scheme** in a new "URL scheme"
+  section between "Diagnostics admin actions" and "Data
+  storage" — the path convention (``/``, ``/page/foo.mu``,
+  ``/n/<hash>/...``), the reserved backend prefixes, and the
+  legacy ``?url=`` rewrite behaviour. Bumped the feature bullet
+  at the top so path-based URLs are visible in the "at a glance"
+  list too.
+
 ## [1.0.0] - 2026-07-23
 
 **The 1.0 milestone.** NomadPortal is now stable and usable enough
