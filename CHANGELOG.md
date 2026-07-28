@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-28
+
+**First feature release after 1.0.** Path-based URLs give the
+browser refresh / bookmark / share-link behaviour operators
+expect from a web app. Plus a real download-lifecycle
+compatibility fix (DuckDuckGo Android) that came in from live
+use, and a second instance of the CSS ``hidden``-attribute
+override bug caught by the audit script we wrote after the
+v1.0.0 fingerprint fix.
+
 ### Added
 
 - **Path-based URL sync.** The browser URL now reflects the page
