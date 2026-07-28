@@ -46,6 +46,7 @@ NomadPortal is in **active trial-release development**. Features, configuration,
 - Mobile-responsive layout
 - Custom 404/500 error pages
 - Rate limiting and CSRF protection throughout
+- Path-based URLs — browser refresh preserves the current page, standard bookmarks work, and share-links copied from the URL bar reach the right node
 
 ## Quick Start
 
@@ -434,6 +435,21 @@ CI runs a Docker image build on every push and pull request — see [.github/wor
 
 - **Admin → Cache → "Clear all cached pages"** — drops the in-memory `PageCache` so the next fetch re-pulls from the source node.
 - **Admin → Cache → "Reset RNS cache"** — moves `config/reticulum/storage/` aside to a timestamped backup, triggers a graceful gunicorn worker reload, and re-initialises RNS against an empty state directory. Use when RNS hangs during startup (a stale multi-megabyte `destination_table` is the usual cause).
+
+## URL scheme
+
+The browser URL reflects the page you're viewing, so refresh preserves state and standard browser bookmarks work for any NomadNet page. The scheme collapses the default node's hash for cleaner URLs and reserves an `/n/` prefix for everything else:
+
+| URL                              | Target                               |
+|----------------------------------|--------------------------------------|
+| `/`                              | default node home                    |
+| `/page/foo.mu`                   | default node's `page/foo.mu`         |
+| `/file/x.pdf`                    | default node's `file/x.pdf`          |
+| `/n/<hash>`                      | external node's home                 |
+| `/n/<hash>/page/foo.mu`          | external node's page                 |
+| `/?url=hash%3A//<hash>/...`      | legacy entry point, transparently rewritten to the pathname form on first navigation |
+
+Reserved prefixes (won't be treated as SPA paths): `/api`, `/admin`, `/auth`, `/static`, `/healthz`, `/robots.txt`.
 
 ## Data storage
 

@@ -1699,18 +1699,45 @@ class NodeBrowser:
             j = self._jobs.get(job_id)
             return dict(j) if j else None
 
-    def drop_job(self, job_id: str) -> None:
-        """Evict a job entry — call after the client has retrieved the result."""
+    def drop_job(self, job_id: str, grace_seconds: int = 0) -> None:
+        """Evict a job entry — call after the client has retrieved the result.
+
+        ``grace_seconds`` defers the actual eviction to
+        ``cleanup_jobs()``, keeping the entry serveable for that
+        window. Load-bearing for browsers that re-request the
+        download URL from a separate context after the initial
+        page-context request — DuckDuckGo's Android download
+        manager does this (WebView fetches from the page, then
+        DDG's download-handler process re-requests the same URL
+        to actually persist the file). Without a grace window,
+        the second request hits 404 and DDG reports "Failed to
+        download. Check Internet connection." even though the
+        WebView successfully received all bytes.
+
+        ``grace_seconds=0`` (default) preserves the historical
+        behaviour: immediate eviction. Callers that know a legit
+        double-fetch is possible pass a small window (30-60 s).
+        """
         with self._jobs_lock:
-            self._jobs.pop(job_id, None)
+            if grace_seconds <= 0:
+                self._jobs.pop(job_id, None)
+                return
+            j = self._jobs.get(job_id)
+            if j is not None:
+                j["_drop_after"] = time.time() + grace_seconds
 
     def cleanup_jobs(self, max_age: int = 300) -> int:
-        """Evict completed jobs older than max_age seconds. Returns count removed."""
-        cutoff = time.time() - max_age
+        """Evict completed jobs older than max_age seconds OR past
+        their grace expiry set by ``drop_job(grace_seconds=…)``.
+        Returns count removed.
+        """
+        now = time.time()
+        cutoff = now - max_age
         with self._jobs_lock:
             stale = [
                 jid for jid, j in self._jobs.items()
-                if j.get("completed") and j["completed"] < cutoff
+                if (j.get("completed") and j["completed"] < cutoff)
+                or (j.get("_drop_after") and j["_drop_after"] < now)
             ]
             for jid in stale:
                 del self._jobs[jid]

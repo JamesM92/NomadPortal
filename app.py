@@ -46,7 +46,7 @@ import re
 import secrets
 import sys
 
-from flask import render_template
+from flask import abort, render_template
 
 from nomadnet_web import create_app
 from nomadnet_web.browser import NodeBrowser
@@ -263,6 +263,27 @@ def create_wsgi():
             200,
             {"Content-Type": "text/plain"},
         )
+
+    # Catch-all so the SPA can own the URL bar — /page/foo.mu,
+    # /file/x.pdf, and /n/<hash>/... all serve index.html and let
+    # the JS in static/js/app.js parse ``window.location.pathname``
+    # into a target and navigate to it. Path-based URLs give browser
+    # refresh + browser bookmarks + share-links "for free" without
+    # the query-string ugliness of ``/page?url=…``.
+    #
+    # Reserved-prefix check: a request to a path we don't have a
+    # specific route for (say ``/api/typo``) shouldn't get the SPA
+    # HTML — API clients expect a real 404 there. Anything under a
+    # known backend prefix that reached this fallback missed all
+    # its specific rules and is genuinely a 404. Static assets are
+    # served from ``/static`` by Flask itself, ahead of this.
+    _spa_reserved = ("api/", "admin/", "auth/", "static/")
+
+    @app.get("/<path:_path>")
+    def spa_fallback(_path):
+        if _path.startswith(_spa_reserved):
+            abort(404)
+        return render_template("index.html")
 
     if not flask_config["ADMIN_PASSWORD"]:
         _log.warning("ADMIN_PASSWORD is not set — local login is disabled.")

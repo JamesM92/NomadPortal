@@ -182,8 +182,13 @@ body {
   overflow: hidden;
 }
 
-/* Sidebar panel switcher (Nodes / Messages) */
-#sidebar-tabs {
+/* Sidebar panel switcher (Nodes / Messages). ``:not([hidden])`` on
+   the display rule so an id selector's specificity doesn't beat the
+   HTML ``hidden`` attribute — same class of bug that made the
+   fingerprint icon visible for guests in v1.0.0. This element is
+   set hidden by applyUISettings when the audience is guest-locked
+   out of both sidebar panels. */
+#sidebar-tabs:not([hidden]) {
   display: flex;
   flex-shrink: 0;
   background: var(--bg3);

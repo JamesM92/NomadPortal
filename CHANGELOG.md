@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-28
+
+**First feature release after 1.0.** Path-based URLs give the
+browser refresh / bookmark / share-link behaviour operators
+expect from a web app. Plus a real download-lifecycle
+compatibility fix (DuckDuckGo Android) that came in from live
+use, and a second instance of the CSS ``hidden``-attribute
+override bug caught by the audit script we wrote after the
+v1.0.0 fingerprint fix.
+
+### Added
+
+- **Path-based URL sync.** The browser URL now reflects the page
+  you're actually on — refresh preserves state, browser bookmarks
+  work for any NomadNet page, and share-links (copied from the
+  URL bar) are natural. Scheme:
+
+  | URL                              | Target                            |
+  |----------------------------------|-----------------------------------|
+  | ``/``                            | default node home                 |
+  | ``/page/foo.mu``                 | default node's ``/page/foo.mu``   |
+  | ``/file/x.pdf``                  | default node's ``/file/x.pdf``    |
+  | ``/n/<hash>``                    | external node's home              |
+  | ``/n/<hash>/page/foo.mu``        | external node's page              |
+
+  Default-node URLs collapse the hash (``/`` and ``/page/foo.mu``);
+  external nodes carry the hash under an ``/n/`` prefix.
+  Flask picks up a catch-all route that serves ``index.html`` for
+  any path not owned by a reserved prefix (``/api``, ``/admin``,
+  ``/auth``, ``/static``) so refresh / bookmarks / share-links
+  reach the SPA cleanly. The JS wires ``history.pushState`` into
+  ``navigateTo`` and handles browser back/forward via
+  ``popstate``. Legacy ``?url=`` query-param entry point still
+  works but is transparently rewritten to the pathname form on
+  first navigation.
+
+### Fixed
+
+- **File downloads fail on DuckDuckGo Android with "Failed to
+  download. Check Internet connection."** DDG's browser
+  architecture issues TWO requests for the same download URL: one
+  from the WebView (Chrome UA) that received the SPA-triggered
+  ``window.location.assign``, then a second from DDG's separate
+  download-manager process (``ddg_android`` UA) that actually
+  persists the file. The old ``drop_job(job_id)`` call after the
+  first successful serve dropped the in-memory job entry
+  immediately, so DDG's second request got 404 and DDG surfaced
+  a generic download-failed toast. Same class of second-request-
+  after-download exists in other privacy-focused browsers.
+
+  Extends ``NodeBrowser.drop_job`` with a ``grace_seconds``
+  parameter. The download endpoint now passes ``grace_seconds=60``
+  so the job stays serveable for 60 s after the first response.
+  ``cleanup_jobs`` evicts past-grace entries alongside the
+  existing max-age sweep. Historical behaviour (immediate drop)
+  is the default when ``grace_seconds`` is omitted or 0, so
+  other callers are unchanged.
+
+- **``#sidebar-tabs`` visible after being set hidden.** Same class
+  of bug the v1.0.0 fingerprint icon fix caught: an id-selector
+  ``display: flex`` rule was beating the browser stylesheet's
+  ``[hidden] { display: none }``. Scoped the display rule to
+  ``:not([hidden])`` so ``applyUISettings``'s ``tabs.hidden = true``
+  (fires when the guest audience is denied both sidebar panels)
+  now actually hides the tab bar. Audit script confirmed no other
+  id-selector rules in ``style.css`` have this pattern.
+
+### Docs
+
+- **README documents the URL scheme** in a new "URL scheme"
+  section between "Diagnostics admin actions" and "Data
+  storage" — the path convention (``/``, ``/page/foo.mu``,
+  ``/n/<hash>/...``), the reserved backend prefixes, and the
+  legacy ``?url=`` rewrite behaviour. Bumped the feature bullet
+  at the top so path-based URLs are visible in the "at a glance"
+  list too.
+
 ## [1.0.0] - 2026-07-23
 
 **The 1.0 milestone.** NomadPortal is now stable and usable enough

@@ -1126,7 +1126,15 @@ def api_file_download():
     if not mime_type:
         mime_type = "application/octet-stream"
 
-    _browser().drop_job(job_id)
+    # Delayed drop so browsers that re-request the download URL from
+    # a separate context can still get the file. DuckDuckGo Android
+    # is the concrete reproducer: WebView (Chrome UA) fetches the
+    # URL, then DDG's download-manager process (ddg_android UA)
+    # re-requests to persist the file. Without the grace window,
+    # request #2 gets 404 and DDG reports "Failed to download."
+    # 60 s is well beyond any browser's second-request latency and
+    # trivial on memory even for multi-MB files.
+    _browser().drop_job(job_id, grace_seconds=60)
 
     resp = Response(content, mimetype=mime_type)
     # RFC 5987 encoding for the filename — keeps non-ASCII names intact
