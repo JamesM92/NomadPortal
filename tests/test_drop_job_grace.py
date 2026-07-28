@@ -81,7 +81,7 @@ class TestGracePositive:
         assert j["content"] == b"payload"
 
     def test_grace_marker_is_a_future_timestamp(self, browser):
-        entry = browser._seed("job1")
+        browser._seed("job1")
         before = time.time()
         browser.drop_job("job1", grace_seconds=60)
         # Sanity: the marker actually lives in the shared dict
