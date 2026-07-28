@@ -35,6 +35,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **File downloads fail on DuckDuckGo Android with "Failed to
+  download. Check Internet connection."** DDG's browser
+  architecture issues TWO requests for the same download URL: one
+  from the WebView (Chrome UA) that received the SPA-triggered
+  ``window.location.assign``, then a second from DDG's separate
+  download-manager process (``ddg_android`` UA) that actually
+  persists the file. The old ``drop_job(job_id)`` call after the
+  first successful serve dropped the in-memory job entry
+  immediately, so DDG's second request got 404 and DDG surfaced
+  a generic download-failed toast. Same class of second-request-
+  after-download exists in other privacy-focused browsers.
+
+  Extends ``NodeBrowser.drop_job`` with a ``grace_seconds``
+  parameter. The download endpoint now passes ``grace_seconds=60``
+  so the job stays serveable for 60 s after the first response.
+  ``cleanup_jobs`` evicts past-grace entries alongside the
+  existing max-age sweep. Historical behaviour (immediate drop)
+  is the default when ``grace_seconds`` is omitted or 0, so
+  other callers are unchanged.
+
 - **``#sidebar-tabs`` visible after being set hidden.** Same class
   of bug the v1.0.0 fingerprint icon fix caught: an id-selector
   ``display: flex`` rule was beating the browser stylesheet's
