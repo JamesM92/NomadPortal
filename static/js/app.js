@@ -827,6 +827,11 @@ async function navigateTo(url, pushHistory = true, extraFields = null) {
     }
   }
 
+  // Navigating away from the node/message list should show the destination,
+  // not leave the full-page mobile sidebar covering it — close it now that
+  // we're committed to navigating (past the lockdown/warning checks above).
+  _closeMobileSidebar();
+
   addrBar.value = _displayAddress(url);
 
   if (pushHistory) {
@@ -2092,6 +2097,12 @@ function openConversation(hash) {
   }
   $('chat-list-view').hidden = true;
   $('chat-view').hidden      = false;
+  // On mobile, the "Announce identity" block and Chats/Users tab bar sit
+  // above the conversation and never shrink (flex-shrink: 0) — with the
+  // keyboard open there often wasn't enough height left over for
+  // #chat-log to show more than a sliver of the actual conversation.
+  // Hide both while a conversation is open; restored on back/delete.
+  $('sidebar-panel-messages').classList.add('chat-open');
   $('chat-dest-hidden').value = hash;
   renderChatLog(conv ? conv.messages : []);
 
@@ -2187,6 +2198,7 @@ $('btn-chat-back').addEventListener('click', () => {
   _currentConvHash = null;
   $('chat-view').hidden      = true;
   $('chat-list-view').hidden = false;
+  $('sidebar-panel-messages').classList.remove('chat-open');
   renderConversationList(_allConversations);
 });
 
@@ -2200,6 +2212,7 @@ $('btn-delete-chat').addEventListener('click', async () => {
     _currentConvHash = null;
     $('chat-view').hidden      = true;
     $('chat-list-view').hidden = false;
+    $('sidebar-panel-messages').classList.remove('chat-open');
     renderConversationList(_allConversations);
     _updateUnreadBadges(_allConversations.reduce((n, c) => n + c.unread, 0));
     setStatus('Conversation deleted.', 'ok');
@@ -2209,22 +2222,33 @@ $('btn-delete-chat').addEventListener('click', async () => {
 });
 
 $('btn-chat-send').addEventListener('click', _sendChatMessage);
+
+// Enter-to-send is wired through beforeinput, not keydown+preventDefault().
+// keydown-based interception is a well-documented way to break mobile IME
+// composition state: Gboard/Samsung Keyboard route ordinary typing through
+// the same composition machinery Enter uses, and calling preventDefault()
+// on that keydown stream desyncs the IME's internal cursor from the DOM's
+// real one for the rest of the typing session — every following character
+// then lands wherever the IME thinks the cursor still is (position 0),
+// which is exactly "text types in backwards". beforeinput's
+// 'insertLineBreak' only fires for a genuinely committed Enter — never
+// mid-composition — so intercepting there instead never touches the IME's
+// own event stream. Shift+Enter (newline, not send) isn't distinguishable
+// from beforeinput's event alone, so a side-channel keydown/keyup pair
+// tracks the modifier — those two listeners only ever set a flag, they
+// never call preventDefault(), so they don't reintroduce the problem.
+let _chatInputShiftHeld = false;
 $('chat-input').addEventListener('keydown', e => {
-  // Mobile IME guard: while a software keyboard's predictive-text/autocorrect
-  // composition is in progress, the keystroke that confirms a suggestion
-  // (often *also* Enter) fires this same keydown. Without this check, Enter
-  // was treated as "send" mid-composition — grabbing the textarea's value
-  // before the composed text had been committed. That produced messages
-  // truncated mid-word, and since the field wasn't cleared until the send
-  // actually completed, a real Enter moments later re-sent the rest as a
-  // second message — read together as "cut in half / double sent".
-  // e.isComposing is the standard signal; keyCode 229 is the legacy
-  // fallback some Android WebViews still use instead of isComposing.
-  if (e.isComposing || e.keyCode === 229) return;
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    _sendChatMessage();
-  }
+  if (e.key === 'Shift') _chatInputShiftHeld = true;
+});
+$('chat-input').addEventListener('keyup', e => {
+  if (e.key === 'Shift') _chatInputShiftHeld = false;
+});
+$('chat-input').addEventListener('beforeinput', e => {
+  if (e.inputType !== 'insertLineBreak') return;
+  if (_chatInputShiftHeld) return;   // Shift+Enter → let the newline through
+  e.preventDefault();
+  _sendChatMessage();
 });
 
 async function _sendChatMessage() {
@@ -2524,6 +2548,19 @@ function applyUISettings(s) {
 // ---------------------------------------------------------------------------
 // Mobile sidebar toggle
 // ---------------------------------------------------------------------------
+// Shared with navigateTo() so picking a node/favorite/link closes the
+// full-page mobile overlay and reveals the page that was just navigated to,
+// instead of leaving the list covering it. Safe to call unconditionally
+// (including on desktop, where the sidebar is never given 'mobile-open' in
+// the first place and #sidebar-backdrop doesn't exist) — both lookups
+// no-op harmlessly when there's nothing to close.
+function _closeMobileSidebar() {
+  const sidebar  = $('sidebar');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  const backdrop = $('sidebar-backdrop');
+  if (backdrop) backdrop.classList.remove('visible');
+}
+
 function _initMobileSidebar() {
   if (window.innerWidth > 640) return;
   const sidebar  = $('sidebar');
@@ -2540,11 +2577,10 @@ function _initMobileSidebar() {
   backdrop.id    = 'sidebar-backdrop';
   document.body.insertBefore(backdrop, document.body.firstChild);
 
-  function open()  { sidebar.classList.add('mobile-open');    backdrop.classList.add('visible'); }
-  function close() { sidebar.classList.remove('mobile-open'); backdrop.classList.remove('visible'); }
+  function open() { sidebar.classList.add('mobile-open'); backdrop.classList.add('visible'); }
 
-  toggle.addEventListener('click',   () => sidebar.classList.contains('mobile-open') ? close() : open());
-  backdrop.addEventListener('click', close);
+  toggle.addEventListener('click',   () => sidebar.classList.contains('mobile-open') ? _closeMobileSidebar() : open());
+  backdrop.addEventListener('click', _closeMobileSidebar);
 }
 
 // ---------------------------------------------------------------------------

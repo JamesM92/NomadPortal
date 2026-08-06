@@ -1080,6 +1080,17 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   }
   #sidebar-backdrop.visible { display: block; }
 
+  /* While a conversation is open, the "Announce identity" block and the
+     Chats/Users tab bar above it are dead weight — both are flex-shrink: 0
+     siblings of #tab-chats, so they never gave way to #chat-log even when
+     the keyboard shrank the available height, squeezing the conversation
+     itself down to a sliver. Hide them for the duration; openConversation()
+     adds .chat-open, the back/delete handlers remove it. */
+  #sidebar-panel-messages.chat-open #announce-section,
+  #sidebar-panel-messages.chat-open #msg-tabs {
+    display: none;
+  }
+
   /* Admin panel — stack nav vertically */
   #admin-topbar { flex-wrap: wrap; height: auto; padding: 8px; gap: 0; }
   .admin-brand  { border-right: none; border-bottom: 1px solid var(--border);
