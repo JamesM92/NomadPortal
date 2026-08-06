@@ -469,9 +469,12 @@ function _isTrustedHash(hash) {
 }
 
 function _extractNodeHash(url) {
-  const m = url.match(/hash:\/\/([0-9a-f]+)\//i) ||
-            url.match(/hash:\/([0-9a-f]+)\//i) ||
-            url.match(/nomadnetwork:\/\/([0-9a-f]+)\//i);
+  // Trailing slash is optional — `hash://<hash>` with no path (e.g. a bare
+  // hash typed into the address bar) must still match, otherwise the
+  // lockdown/external-warning check in navigateTo() never runs for it.
+  const m = url.match(/hash:\/\/([0-9a-f]+)(?:\/|$)/i) ||
+            url.match(/hash:\/([0-9a-f]+)(?:\/|$)/i) ||
+            url.match(/nomadnetwork:\/\/([0-9a-f]+)(?:\/|$)/i);
   return m ? m[1].toLowerCase() : null;
 }
 
@@ -823,6 +826,11 @@ async function navigateTo(url, pushHistory = true, extraFields = null) {
       }
     }
   }
+
+  // Navigating away from the node/message list should show the destination,
+  // not leave the full-page mobile sidebar covering it — close it now that
+  // we're committed to navigating (past the lockdown/warning checks above).
+  _closeMobileSidebar();
 
   addrBar.value = _displayAddress(url);
 
@@ -2089,6 +2097,12 @@ function openConversation(hash) {
   }
   $('chat-list-view').hidden = true;
   $('chat-view').hidden      = false;
+  // On mobile, the "Announce identity" block and Chats/Users tab bar sit
+  // above the conversation and never shrink (flex-shrink: 0) — with the
+  // keyboard open there often wasn't enough height left over for
+  // #chat-log to show more than a sliver of the actual conversation.
+  // Hide both while a conversation is open; restored on back/delete.
+  $('sidebar-panel-messages').classList.add('chat-open');
   $('chat-dest-hidden').value = hash;
   renderChatLog(conv ? conv.messages : []);
 
@@ -2104,6 +2118,25 @@ function openConversation(hash) {
     const totalUnread = _allConversations.reduce((n, c) => n + c.unread, 0);
     _updateUnreadBadges(totalUnread);
   }
+}
+
+// Robust "scroll to latest message". A single scrollTop = scrollHeight
+// right after a render or focus can land short of the true bottom on
+// mobile: if the on-screen keyboard is still animating open (the
+// visualViewport / 100dvh height is still settling) or the DOM just
+// changed, scrollHeight read in that same tick can be stale — so the
+// scroll lands wherever the bottom was a frame ago, e.g. the last
+// *received* message, one frame short of a just-sent one below it.
+// Re-applying across a couple of animation frames catches the settled
+// value instead of whatever layout looked like mid-transition.
+function _scrollChatToBottom() {
+  const log = $('chat-log');
+  if (!log) return;
+  log.scrollTop = log.scrollHeight;
+  requestAnimationFrame(() => {
+    log.scrollTop = log.scrollHeight;
+    requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+  });
 }
 
 function renderChatLog(messages) {
@@ -2131,7 +2164,7 @@ function renderChatLog(messages) {
     bubble.innerHTML = inner;
     log.appendChild(bubble);
   }
-  log.scrollTop = log.scrollHeight;
+  _scrollChatToBottom();
 }
 
 $('btn-rename-chat').addEventListener('click', () => {
@@ -2184,6 +2217,7 @@ $('btn-chat-back').addEventListener('click', () => {
   _currentConvHash = null;
   $('chat-view').hidden      = true;
   $('chat-list-view').hidden = false;
+  $('sidebar-panel-messages').classList.remove('chat-open');
   renderConversationList(_allConversations);
 });
 
@@ -2197,6 +2231,7 @@ $('btn-delete-chat').addEventListener('click', async () => {
     _currentConvHash = null;
     $('chat-view').hidden      = true;
     $('chat-list-view').hidden = false;
+    $('sidebar-panel-messages').classList.remove('chat-open');
     renderConversationList(_allConversations);
     _updateUnreadBadges(_allConversations.reduce((n, c) => n + c.unread, 0));
     setStatus('Conversation deleted.', 'ok');
@@ -2206,20 +2241,102 @@ $('btn-delete-chat').addEventListener('click', async () => {
 });
 
 $('btn-chat-send').addEventListener('click', _sendChatMessage);
+
+// Enter-to-send is wired through beforeinput, not keydown+preventDefault().
+// keydown-based interception is a well-documented way to break mobile IME
+// composition state: Gboard/Samsung Keyboard route ordinary typing through
+// the same composition machinery Enter uses, and calling preventDefault()
+// on that keydown stream desyncs the IME's internal cursor from the DOM's
+// real one for the rest of the typing session — every following character
+// then lands wherever the IME thinks the cursor still is (position 0),
+// which is exactly "text types in backwards". beforeinput's
+// 'insertLineBreak' only fires for a genuinely committed Enter — never
+// mid-composition — so intercepting there instead never touches the IME's
+// own event stream. Shift+Enter (newline, not send) isn't distinguishable
+// from beforeinput's event alone, so a side-channel keydown/keyup pair
+// tracks the modifier — those two listeners only ever set a flag, they
+// never call preventDefault(), so they don't reintroduce the problem.
+let _chatInputShiftHeld = false;
 $('chat-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    _sendChatMessage();
-  }
+  if (e.key === 'Shift') _chatInputShiftHeld = true;
+});
+$('chat-input').addEventListener('keyup', e => {
+  if (e.key === 'Shift') _chatInputShiftHeld = false;
+});
+$('chat-input').addEventListener('beforeinput', e => {
+  if (e.inputType !== 'insertLineBreak') return;
+  if (_chatInputShiftHeld) return;   // Shift+Enter → let the newline through
+  e.preventDefault();
+  _sendChatMessage();
 });
 
+// Mirrors the 64 KB cap /api/messages enforces server-side
+// (routes.py:api_message_send) so a message that's about to be rejected
+// says so up front instead of silently failing after a round trip — what
+// looked like "messages get truncated" was actually the sender's own copy
+// being clipped to a 120-char preview in storage (fixed separately in
+// messaging.py); this counter is for the one case where a real limit
+// exists and is worth surfacing.
+const CHAT_CONTENT_MAX     = 65536;
+const CHAT_CONTENT_WARN_AT = Math.floor(CHAT_CONTENT_MAX * 0.9);
+const CHAT_CONTENT_SHOW_AT = 500; // don't clutter the box for ordinary short replies
+
+function _updateChatCharCount() {
+  const el  = $('chat-char-count');
+  if (!el) return;
+  const len = $('chat-input').value.length;
+  if (len <= CHAT_CONTENT_SHOW_AT) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = `${len.toLocaleString()} / ${CHAT_CONTENT_MAX.toLocaleString()}`;
+  el.classList.toggle('chat-char-count-warn', len > CHAT_CONTENT_WARN_AT && len <= CHAT_CONTENT_MAX);
+  el.classList.toggle('chat-char-count-over', len > CHAT_CONTENT_MAX);
+}
+$('chat-input').addEventListener('input', _updateChatCharCount);
+
+// Scroll the conversation to the latest message the moment the reply box
+// is focused (about to type) — otherwise, if the log had been scrolled up
+// to read earlier history, opening the keyboard left that old scroll
+// position in view instead of the message you're actually replying to.
+$('chat-input').addEventListener('focus', _scrollChatToBottom);
+
+// The focus-time scroll above fires as the keyboard *starts* opening, but
+// on-screen keyboards animate in over a couple hundred ms, during which
+// the visual viewport (and #chat-log's height along with it, since body
+// is 100dvh) keeps changing. A scroll computed against any one frame of
+// that transition can settle short of the real bottom once the keyboard
+// finishes. Re-pinning on visualViewport's own resize event catches the
+// end of that transition specifically, rather than guessing at a delay.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    const view = $('chat-view');
+    if (view && !view.hidden) _scrollChatToBottom();
+  });
+}
+
 async function _sendChatMessage() {
+  const btn = $('btn-chat-send');
+  // Re-entrancy guard. The Enter-key handler above calls this function
+  // directly (not via a click on `btn`), so it doesn't get the browser's
+  // built-in double-activation protection a disabled <button> gives clicks.
+  // On a slow mobile connection a user hitting Enter twice before the first
+  // request resolves — or a mobile keyboard delivering a duplicate Enter
+  // keydown — re-entered this function while the field still held the same
+  // unsent content, sending it twice.
+  if (btn.disabled) return;
+
   const dest_hash = $('chat-dest-hidden').value;
   const content   = $('chat-input').value.trim();
 
   if (!dest_hash || !content) return;
+  if (content.length > CHAT_CONTENT_MAX) {
+    setStatus(
+      `Message is too long (${content.length.toLocaleString()} / ` +
+      `${CHAT_CONTENT_MAX.toLocaleString()} characters) — trim it before sending.`,
+      'error',
+    );
+    return;
+  }
 
-  const btn = $('btn-chat-send');
   btn.disabled = true;
   try {
     await apiFetch('/api/messages', {
@@ -2228,6 +2345,7 @@ async function _sendChatMessage() {
       body: JSON.stringify({ dest_hash, content }),
     });
     $('chat-input').value = '';
+    _updateChatCharCount();
     setStatus('Message queued — delivery in progress.', 'ok');
     refreshChats();
     setTimeout(refreshChats, 8000);
@@ -2445,7 +2563,14 @@ function applyUISettings(s) {
   // reload it.
   const nb = $('nav-bar');
   if (nb) {
-    const ab = pick(s.guests_address_bar, s.users_address_bar, s.admins_address_bar);
+    // Fail CLOSED: pick() returning a real state ('enabled'/'disabled'/
+    // 'hidden') means settings loaded fine — use it as-is. `undefined`
+    // only happens when the settings fetch failed; treat that as 'hidden'
+    // rather than leaving the address bar enabled by default. `null` is
+    // pick()'s explicit "no restriction" signal for super admins and must
+    // stay untouched.
+    const rawAb = pick(s.guests_address_bar, s.users_address_bar, s.admins_address_bar);
+    const ab = rawAb === null ? null : (rawAb || 'hidden');
     if (ab === 'hidden') {
       nb.querySelectorAll('input, button').forEach(el => {
         if (el.id !== 'btn-refresh-page') el.hidden = true;
@@ -2463,8 +2588,10 @@ function applyUISettings(s) {
   }
 
   // Sidebar panels — bool per audience. Super admin always sees.
-  const showNodes    = isSuper || pick(s.guests_nodes_panel,    s.users_nodes_panel,    s.admins_nodes_panel)    !== false;
-  const showMessages = isSuper || pick(s.guests_messages_panel, s.users_messages_panel, s.admins_messages_panel) !== false;
+  // Fail CLOSED on `undefined` (settings fetch failed) — require an
+  // explicit `true` rather than merely "not `false`".
+  const showNodes    = isSuper || pick(s.guests_nodes_panel,    s.users_nodes_panel,    s.admins_nodes_panel)    === true;
+  const showMessages = isSuper || pick(s.guests_messages_panel, s.users_messages_panel, s.admins_messages_panel) === true;
 
   if (!showNodes) {
     const tab = $('sidebar-tab-nodes');
@@ -2492,6 +2619,19 @@ function applyUISettings(s) {
 // ---------------------------------------------------------------------------
 // Mobile sidebar toggle
 // ---------------------------------------------------------------------------
+// Shared with navigateTo() so picking a node/favorite/link closes the
+// full-page mobile overlay and reveals the page that was just navigated to,
+// instead of leaving the list covering it. Safe to call unconditionally
+// (including on desktop, where the sidebar is never given 'mobile-open' in
+// the first place and #sidebar-backdrop doesn't exist) — both lookups
+// no-op harmlessly when there's nothing to close.
+function _closeMobileSidebar() {
+  const sidebar  = $('sidebar');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  const backdrop = $('sidebar-backdrop');
+  if (backdrop) backdrop.classList.remove('visible');
+}
+
 function _initMobileSidebar() {
   if (window.innerWidth > 640) return;
   const sidebar  = $('sidebar');
@@ -2508,11 +2648,10 @@ function _initMobileSidebar() {
   backdrop.id    = 'sidebar-backdrop';
   document.body.insertBefore(backdrop, document.body.firstChild);
 
-  function open()  { sidebar.classList.add('mobile-open');    backdrop.classList.add('visible'); }
-  function close() { sidebar.classList.remove('mobile-open'); backdrop.classList.remove('visible'); }
+  function open() { sidebar.classList.add('mobile-open'); backdrop.classList.add('visible'); }
 
-  toggle.addEventListener('click',   () => sidebar.classList.contains('mobile-open') ? close() : open());
-  backdrop.addEventListener('click', close);
+  toggle.addEventListener('click',   () => sidebar.classList.contains('mobile-open') ? _closeMobileSidebar() : open());
+  backdrop.addEventListener('click', _closeMobileSidebar);
 }
 
 // ---------------------------------------------------------------------------
@@ -2539,19 +2678,16 @@ function _initDisclaimer() {
 // ---------------------------------------------------------------------------
 (async function init() {
   setStatus('Connecting…', 'busy');
-  // Fetch settings in parallel with auth/nodes, but apply after auth resolves
-  // so visibility rules (_authState.logged_in / is_admin) are correct.
-  const [, , uiSettings] = await Promise.all([
-    refreshNodes(),
+  // Auth/settings/site-info are fetched (and lockdown state fully resolved)
+  // BEFORE refreshNodes() populates and renders the node list. Rendering the
+  // list first and locking it down afterward left a window — worse on
+  // mobile, where JS execution and network round-trips are slower relative
+  // to how quickly a visitor can tap — during which every node appeared
+  // unlocked and clickable regardless of the configured access mode.
+  const [, uiSettings] = await Promise.all([
     loadAuthState(),
-    apiFetch('/api/ui/settings').catch(() => ({})),
+    apiFetch('/api/ui/settings').catch(() => null),
   ]);
-  try { applyUISettings(uiSettings); } catch (_) {}
-  _initMobileSidebar();
-  _initDisclaimer();
-
-  const params = new URLSearchParams(location.search);
-  const startUrl = params.get('url');
 
   let _siteInfo = null;
   try { _siteInfo = await apiFetch('/api/site/info'); } catch (_) {}
@@ -2569,17 +2705,31 @@ function _initDisclaimer() {
     _defaultHash = uiSettings.default_node;
   }
 
-  // Activate lockdown BEFORE any navigation so navigateTo() can enforce it.
+  // Activate lockdown BEFORE any navigation (and before the node list is
+  // ever rendered — see refreshNodes() below) so navigateTo() and the node
+  // list can both enforce it from their very first render.
   // Super admin: never locked. Otherwise pick the per-audience field.
+  // Fail CLOSED: if /api/ui/settings couldn't be loaded at all (network
+  // hiccup — more common on mobile), uiSettings is null and the field
+  // lookup below is `undefined`, not `false` — treated as "locked" rather
+  // than silently granting unrestricted browsing.
   const _lockField =
     _authState.super_admin ? null :
     _authState.is_admin    ? 'admins_default_lock' :
     _authState.logged_in   ? 'users_default_lock' :
                              'guests_default_lock';
-  const _shouldLock = _lockField && !!(uiSettings && uiSettings[_lockField]);
+  const _shouldLock = !!_lockField && (uiSettings ? uiSettings[_lockField] : true) !== false;
   if (_shouldLock && effectiveDefault) {
     _lockedHash = effectiveDefault;
   }
+
+  try { applyUISettings(uiSettings || {}); } catch (_) {}
+  await refreshNodes();
+  _initMobileSidebar();
+  _initDisclaimer();
+
+  const params = new URLSearchParams(location.search);
+  const startUrl = params.get('url');
 
   // Make the top-left brand element navigate back to the default node's
   // home page on click. Especially load-bearing for guests / kiosk mode:

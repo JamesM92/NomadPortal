@@ -356,6 +356,16 @@ class MessagingService:
             "id":      msg_id,
             "dest":    dest_hash_hex,
             "title":   title,
+            # Full content, for the sender's own chat-log bubble (mirrors
+            # the "content" field _on_delivery() stores for received
+            # messages). "preview" alone used to be the only thing stored
+            # here — fine for the 120-char conversation-list snippet, but
+            # renderChatLog() falls back to it whenever "content" is
+            # missing, so every sent message rendered in the open
+            # conversation was silently clipped at 120 characters even
+            # though the full text was — and still is — what actually
+            # went out over LXMF.
+            "content": content or "",
             "preview": (content or "")[:120],
             "state":   "queued",
             "sent_at": time.time(),
