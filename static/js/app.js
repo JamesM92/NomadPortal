@@ -2251,6 +2251,38 @@ $('chat-input').addEventListener('beforeinput', e => {
   _sendChatMessage();
 });
 
+// Mirrors the 64 KB cap /api/messages enforces server-side
+// (routes.py:api_message_send) so a message that's about to be rejected
+// says so up front instead of silently failing after a round trip — what
+// looked like "messages get truncated" was actually the sender's own copy
+// being clipped to a 120-char preview in storage (fixed separately in
+// messaging.py); this counter is for the one case where a real limit
+// exists and is worth surfacing.
+const CHAT_CONTENT_MAX     = 65536;
+const CHAT_CONTENT_WARN_AT = Math.floor(CHAT_CONTENT_MAX * 0.9);
+const CHAT_CONTENT_SHOW_AT = 500; // don't clutter the box for ordinary short replies
+
+function _updateChatCharCount() {
+  const el  = $('chat-char-count');
+  if (!el) return;
+  const len = $('chat-input').value.length;
+  if (len <= CHAT_CONTENT_SHOW_AT) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = `${len.toLocaleString()} / ${CHAT_CONTENT_MAX.toLocaleString()}`;
+  el.classList.toggle('chat-char-count-warn', len > CHAT_CONTENT_WARN_AT && len <= CHAT_CONTENT_MAX);
+  el.classList.toggle('chat-char-count-over', len > CHAT_CONTENT_MAX);
+}
+$('chat-input').addEventListener('input', _updateChatCharCount);
+
+// Scroll the conversation to the latest message the moment the reply box
+// is focused (about to type) — otherwise, if the log had been scrolled up
+// to read earlier history, opening the keyboard left that old scroll
+// position in view instead of the message you're actually replying to.
+$('chat-input').addEventListener('focus', () => {
+  const log = $('chat-log');
+  if (log) log.scrollTop = log.scrollHeight;
+});
+
 async function _sendChatMessage() {
   const btn = $('btn-chat-send');
   // Re-entrancy guard. The Enter-key handler above calls this function
@@ -2266,6 +2298,14 @@ async function _sendChatMessage() {
   const content   = $('chat-input').value.trim();
 
   if (!dest_hash || !content) return;
+  if (content.length > CHAT_CONTENT_MAX) {
+    setStatus(
+      `Message is too long (${content.length.toLocaleString()} / ` +
+      `${CHAT_CONTENT_MAX.toLocaleString()} characters) — trim it before sending.`,
+      'error',
+    );
+    return;
+  }
 
   btn.disabled = true;
   try {
@@ -2275,6 +2315,7 @@ async function _sendChatMessage() {
       body: JSON.stringify({ dest_hash, content }),
     });
     $('chat-input').value = '';
+    _updateChatCharCount();
     setStatus('Message queued — delivery in progress.', 'ok');
     refreshChats();
     setTimeout(refreshChats, 8000);

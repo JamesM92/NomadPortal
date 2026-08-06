@@ -958,6 +958,17 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   outline: none;
 }
 .chat-input-row { display: flex; gap: 4px; align-items: flex-end; }
+/* Hidden until the compose box gets close to the server's 64 KB cap on
+   /api/messages content (routes.py) — no point cluttering the box for
+   every two-line reply, but silently failing/rejecting a message that
+   size someone actually typed (or pasted) needs a visible reason. */
+#chat-char-count {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: right;
+}
+#chat-char-count.chat-char-count-warn { color: var(--warn); }
+#chat-char-count.chat-char-count-over { color: var(--error); }
 #chat-input {
   flex: 1;
   background: var(--bg);
