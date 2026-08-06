@@ -2120,6 +2120,25 @@ function openConversation(hash) {
   }
 }
 
+// Robust "scroll to latest message". A single scrollTop = scrollHeight
+// right after a render or focus can land short of the true bottom on
+// mobile: if the on-screen keyboard is still animating open (the
+// visualViewport / 100dvh height is still settling) or the DOM just
+// changed, scrollHeight read in that same tick can be stale — so the
+// scroll lands wherever the bottom was a frame ago, e.g. the last
+// *received* message, one frame short of a just-sent one below it.
+// Re-applying across a couple of animation frames catches the settled
+// value instead of whatever layout looked like mid-transition.
+function _scrollChatToBottom() {
+  const log = $('chat-log');
+  if (!log) return;
+  log.scrollTop = log.scrollHeight;
+  requestAnimationFrame(() => {
+    log.scrollTop = log.scrollHeight;
+    requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+  });
+}
+
 function renderChatLog(messages) {
   const log = $('chat-log');
   if (!log) return;
@@ -2145,7 +2164,7 @@ function renderChatLog(messages) {
     bubble.innerHTML = inner;
     log.appendChild(bubble);
   }
-  log.scrollTop = log.scrollHeight;
+  _scrollChatToBottom();
 }
 
 $('btn-rename-chat').addEventListener('click', () => {
@@ -2278,10 +2297,21 @@ $('chat-input').addEventListener('input', _updateChatCharCount);
 // is focused (about to type) — otherwise, if the log had been scrolled up
 // to read earlier history, opening the keyboard left that old scroll
 // position in view instead of the message you're actually replying to.
-$('chat-input').addEventListener('focus', () => {
-  const log = $('chat-log');
-  if (log) log.scrollTop = log.scrollHeight;
-});
+$('chat-input').addEventListener('focus', _scrollChatToBottom);
+
+// The focus-time scroll above fires as the keyboard *starts* opening, but
+// on-screen keyboards animate in over a couple hundred ms, during which
+// the visual viewport (and #chat-log's height along with it, since body
+// is 100dvh) keeps changing. A scroll computed against any one frame of
+// that transition can settle short of the real bottom once the keyboard
+// finishes. Re-pinning on visualViewport's own resize event catches the
+// end of that transition specifically, rather than guessing at a delay.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    const view = $('chat-view');
+    if (view && !view.hidden) _scrollChatToBottom();
+  });
+}
 
 async function _sendChatMessage() {
   const btn = $('btn-chat-send');
