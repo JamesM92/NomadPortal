@@ -469,9 +469,12 @@ function _isTrustedHash(hash) {
 }
 
 function _extractNodeHash(url) {
-  const m = url.match(/hash:\/\/([0-9a-f]+)\//i) ||
-            url.match(/hash:\/([0-9a-f]+)\//i) ||
-            url.match(/nomadnetwork:\/\/([0-9a-f]+)\//i);
+  // Trailing slash is optional — `hash://<hash>` with no path (e.g. a bare
+  // hash typed into the address bar) must still match, otherwise the
+  // lockdown/external-warning check in navigateTo() never runs for it.
+  const m = url.match(/hash:\/\/([0-9a-f]+)(?:\/|$)/i) ||
+            url.match(/hash:\/([0-9a-f]+)(?:\/|$)/i) ||
+            url.match(/nomadnetwork:\/\/([0-9a-f]+)(?:\/|$)/i);
   return m ? m[1].toLowerCase() : null;
 }
 
@@ -2207,6 +2210,17 @@ $('btn-delete-chat').addEventListener('click', async () => {
 
 $('btn-chat-send').addEventListener('click', _sendChatMessage);
 $('chat-input').addEventListener('keydown', e => {
+  // Mobile IME guard: while a software keyboard's predictive-text/autocorrect
+  // composition is in progress, the keystroke that confirms a suggestion
+  // (often *also* Enter) fires this same keydown. Without this check, Enter
+  // was treated as "send" mid-composition — grabbing the textarea's value
+  // before the composed text had been committed. That produced messages
+  // truncated mid-word, and since the field wasn't cleared until the send
+  // actually completed, a real Enter moments later re-sent the rest as a
+  // second message — read together as "cut in half / double sent".
+  // e.isComposing is the standard signal; keyCode 229 is the legacy
+  // fallback some Android WebViews still use instead of isComposing.
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     _sendChatMessage();
@@ -2214,12 +2228,21 @@ $('chat-input').addEventListener('keydown', e => {
 });
 
 async function _sendChatMessage() {
+  const btn = $('btn-chat-send');
+  // Re-entrancy guard. The Enter-key handler above calls this function
+  // directly (not via a click on `btn`), so it doesn't get the browser's
+  // built-in double-activation protection a disabled <button> gives clicks.
+  // On a slow mobile connection a user hitting Enter twice before the first
+  // request resolves — or a mobile keyboard delivering a duplicate Enter
+  // keydown — re-entered this function while the field still held the same
+  // unsent content, sending it twice.
+  if (btn.disabled) return;
+
   const dest_hash = $('chat-dest-hidden').value;
   const content   = $('chat-input').value.trim();
 
   if (!dest_hash || !content) return;
 
-  const btn = $('btn-chat-send');
   btn.disabled = true;
   try {
     await apiFetch('/api/messages', {
@@ -2445,7 +2468,14 @@ function applyUISettings(s) {
   // reload it.
   const nb = $('nav-bar');
   if (nb) {
-    const ab = pick(s.guests_address_bar, s.users_address_bar, s.admins_address_bar);
+    // Fail CLOSED: pick() returning a real state ('enabled'/'disabled'/
+    // 'hidden') means settings loaded fine — use it as-is. `undefined`
+    // only happens when the settings fetch failed; treat that as 'hidden'
+    // rather than leaving the address bar enabled by default. `null` is
+    // pick()'s explicit "no restriction" signal for super admins and must
+    // stay untouched.
+    const rawAb = pick(s.guests_address_bar, s.users_address_bar, s.admins_address_bar);
+    const ab = rawAb === null ? null : (rawAb || 'hidden');
     if (ab === 'hidden') {
       nb.querySelectorAll('input, button').forEach(el => {
         if (el.id !== 'btn-refresh-page') el.hidden = true;
@@ -2463,8 +2493,10 @@ function applyUISettings(s) {
   }
 
   // Sidebar panels — bool per audience. Super admin always sees.
-  const showNodes    = isSuper || pick(s.guests_nodes_panel,    s.users_nodes_panel,    s.admins_nodes_panel)    !== false;
-  const showMessages = isSuper || pick(s.guests_messages_panel, s.users_messages_panel, s.admins_messages_panel) !== false;
+  // Fail CLOSED on `undefined` (settings fetch failed) — require an
+  // explicit `true` rather than merely "not `false`".
+  const showNodes    = isSuper || pick(s.guests_nodes_panel,    s.users_nodes_panel,    s.admins_nodes_panel)    === true;
+  const showMessages = isSuper || pick(s.guests_messages_panel, s.users_messages_panel, s.admins_messages_panel) === true;
 
   if (!showNodes) {
     const tab = $('sidebar-tab-nodes');
@@ -2539,19 +2571,16 @@ function _initDisclaimer() {
 // ---------------------------------------------------------------------------
 (async function init() {
   setStatus('Connecting…', 'busy');
-  // Fetch settings in parallel with auth/nodes, but apply after auth resolves
-  // so visibility rules (_authState.logged_in / is_admin) are correct.
-  const [, , uiSettings] = await Promise.all([
-    refreshNodes(),
+  // Auth/settings/site-info are fetched (and lockdown state fully resolved)
+  // BEFORE refreshNodes() populates and renders the node list. Rendering the
+  // list first and locking it down afterward left a window — worse on
+  // mobile, where JS execution and network round-trips are slower relative
+  // to how quickly a visitor can tap — during which every node appeared
+  // unlocked and clickable regardless of the configured access mode.
+  const [, uiSettings] = await Promise.all([
     loadAuthState(),
-    apiFetch('/api/ui/settings').catch(() => ({})),
+    apiFetch('/api/ui/settings').catch(() => null),
   ]);
-  try { applyUISettings(uiSettings); } catch (_) {}
-  _initMobileSidebar();
-  _initDisclaimer();
-
-  const params = new URLSearchParams(location.search);
-  const startUrl = params.get('url');
 
   let _siteInfo = null;
   try { _siteInfo = await apiFetch('/api/site/info'); } catch (_) {}
@@ -2569,17 +2598,31 @@ function _initDisclaimer() {
     _defaultHash = uiSettings.default_node;
   }
 
-  // Activate lockdown BEFORE any navigation so navigateTo() can enforce it.
+  // Activate lockdown BEFORE any navigation (and before the node list is
+  // ever rendered — see refreshNodes() below) so navigateTo() and the node
+  // list can both enforce it from their very first render.
   // Super admin: never locked. Otherwise pick the per-audience field.
+  // Fail CLOSED: if /api/ui/settings couldn't be loaded at all (network
+  // hiccup — more common on mobile), uiSettings is null and the field
+  // lookup below is `undefined`, not `false` — treated as "locked" rather
+  // than silently granting unrestricted browsing.
   const _lockField =
     _authState.super_admin ? null :
     _authState.is_admin    ? 'admins_default_lock' :
     _authState.logged_in   ? 'users_default_lock' :
                              'guests_default_lock';
-  const _shouldLock = _lockField && !!(uiSettings && uiSettings[_lockField]);
+  const _shouldLock = !!_lockField && (uiSettings ? uiSettings[_lockField] : true) !== false;
   if (_shouldLock && effectiveDefault) {
     _lockedHash = effectiveDefault;
   }
+
+  try { applyUISettings(uiSettings || {}); } catch (_) {}
+  await refreshNodes();
+  _initMobileSidebar();
+  _initDisclaimer();
+
+  const params = new URLSearchParams(location.search);
+  const startUrl = params.get('url');
 
   // Make the top-left brand element navigate back to the default node's
   // home page on click. Especially load-bearing for guests / kiosk mode:

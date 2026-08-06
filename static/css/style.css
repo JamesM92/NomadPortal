@@ -44,7 +44,15 @@ body {
   font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.5;
+  /* 100vh is the LARGEST possible viewport on mobile — it ignores the
+     on-screen keyboard, so opening it (e.g. to type a reply) shrank the
+     visible area without the body resizing, pushing #chat-input and the
+     tail of the conversation down behind the keyboard. 100dvh tracks the
+     actual visible viewport and updates live as the keyboard opens/closes;
+     the 100vh line stays first as a fallback for browsers that don't
+     support dvh (the later declaration wins where it's supported). */
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1030,7 +1038,9 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   #status-indicator { order: 4; }
   #user-area { order: 5; border-left: none; padding-left: 0; }
 
-  /* Sidebar overlays content on mobile */
+  /* Sidebar overlays content on mobile, full-page — capping it to 85%/300px
+     left a sliver of the underlying page visible and made the node/message
+     list cramped on phone-width screens. */
   #layout { position: relative; }
   #sidebar {
     position: absolute;
@@ -1038,8 +1048,8 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
     z-index: 20;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
-    width: 85%;
-    max-width: 300px;
+    width: 100%;
+    max-width: none;
   }
   #sidebar.mobile-open { transform: translateX(0); box-shadow: 4px 0 16px rgba(0,0,0,.5); }
 
