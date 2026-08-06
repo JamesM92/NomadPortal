@@ -1208,6 +1208,22 @@ function renderPageContent() {
         return;
       }
       if (href.startsWith('http://') || href.startsWith('https://')) {
+        // NomadNet page content is untrusted (HTML-escaped, no JS
+        // execution path — see the trust model in README.md), but a
+        // plain-text link label can still claim to be anything while
+        // pointing at an arbitrary clearnet URL: a classic phishing
+        // pattern, and worse here since it's also the one way a mesh
+        // page can walk a visitor off the mesh entirely without them
+        // necessarily noticing. Always confirm — regardless of login/
+        // admin state, unlike the once-per-session external-*node*
+        // warning in navigateTo() — and show the real destination, not
+        // just whatever the link text says.
+        const go = window.confirm(
+          'This link leaves NomadPortal and opens an external website ' +
+          '(outside the Reticulum mesh) in a new tab:\n\n' + href +
+          '\n\nOnly continue if you trust this destination.'
+        );
+        if (!go) return;
         window.open(href, '_blank', 'noopener,noreferrer');
         return;
       }
