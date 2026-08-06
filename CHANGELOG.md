@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-06
+
+**Mobile pass.** A round of fixes from actually operating NomadPortal on a
+phone — guest access-control hardening, a mobile IME bug that made typed
+replies come out backwards, and several layout issues where the on-screen
+keyboard fought with the chat UI for space.
+
+### Fixed
+
+- **Guest access-control fail-open on the client.** Server-side gating
+  (`_can_browse`/`_can_interact` in `routes.py`) was already correct — this
+  closes three client-side gaps that made the guest UI misleadingly
+  permissive, worst on a slow mobile connection where the failure modes are
+  most likely to actually trigger:
+  - The node list rendered (and was clickable) *before* lockdown state was
+    computed on boot. Boot now resolves auth/settings/lockdown before
+    `refreshNodes()` ever renders the list.
+  - Per-audience restrictions (address bar, nodes/messages panels, lockdown)
+    failed **open** when `/api/ui/settings` failed to load. Now fail closed.
+  - `_extractNodeHash()`'s regex required a trailing `/` after the hash, so
+    a bare `hash://<hash>` with no path skipped the lockdown/external-warning
+    check entirely.
+
+- **Chat replies typed backwards on mobile.** Enter-to-send was wired
+  through `keydown` + `preventDefault()`, which is a documented way to
+  desync a mobile IME's (Gboard, Samsung Keyboard) internal composition
+  cursor from the DOM's real one — those keyboards route ordinary typing
+  through the same composition machinery Enter uses. Once desynced, every
+  following character landed at the IME's stale cursor position (0) instead
+  of the real one. Rewired through `beforeinput`'s `insertLineBreak`, which
+  only fires for a genuinely committed Enter and never touches the IME's
+  event stream; Shift+Enter is preserved via a side-channel keydown/keyup
+  pair that only ever sets a flag.
+
+- **Messages double-sent or cut in half.** Same IME interaction: the
+  keystroke that confirmed a predictive-text suggestion could be read as
+  "send" mid-composition, grabbing a not-yet-committed value. Folded into
+  the `beforeinput` fix above, plus a re-entrancy guard on the send handler
+  so a duplicate Enter delivery from some keyboards can't fire twice.
+
+- **Own sent messages truncated to 120 characters.** `messaging.py` only
+  ever stored a 120-char `preview` for sent messages, never the full
+  `content` — received messages already stored full content, so this was a
+  sent-side-only gap. The chat log falls back to `preview` whenever
+  `content` is missing, so every sent message shown in your own open
+  conversation was silently clipped, even though the full text was (and
+  still is) what actually went out over LXMF.
+
+- **Mobile sidebar overlay capped at 85%/300px** instead of filling the
+  screen, and didn't close itself after picking a node — left the list
+  covering the page that was just navigated to. Now full-width, and
+  `navigateTo()` closes it once navigation is committed.
+
+- **Chat view hidden behind the on-screen keyboard.** `body` used
+  `height: 100vh`, which is sized for the keyboard-*closed* viewport on
+  mobile and doesn't shrink when the keyboard opens — the reply box and
+  the tail of the conversation ended up underneath it. Switched to
+  `100dvh` (with `100vh` kept as a fallback). Additionally, the "Announce
+  identity" block and Chats/Users tab bar above the conversation never
+  shrank, squeezing `#chat-log` down to a sliver on short mobile
+  viewports — both now hide while a conversation is open.
+
+- **Chat didn't scroll to the latest message when composing a reply,**
+  or landed short of a just-sent message. A single `scrollTop =
+  scrollHeight` right after a render/focus reads `scrollHeight` against
+  whatever layout looks like in that exact tick — mid-way through the
+  keyboard's open animation, that can be stale. Now re-applied across a
+  couple of animation frames after render/focus, plus a `visualViewport`
+  `resize` listener that re-pins to bottom once the keyboard's own
+  animation actually finishes.
+
+### Added
+
+- **Live character counter** on the chat reply box, appearing past 500
+  characters and tracking the real 64 KB cap `/api/messages` enforces
+  server-side, so an over-limit message is caught before sending instead
+  of failing after a round trip.
+
 ## [1.1.0] - 2026-07-28
 
 **First feature release after 1.0.** Path-based URLs give the
