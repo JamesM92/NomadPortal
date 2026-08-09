@@ -9,6 +9,7 @@ of whether they are currently logged in.
 """
 
 import logging
+import mimetypes
 import os
 import threading
 import time
@@ -50,6 +51,29 @@ _IMAGE_EXT_TO_MIME = {
     "jpg":  "image/jpeg", "jpeg": "image/jpeg",
     "png":  "image/png",  "gif":  "image/gif",
     "webp": "image/webp", "svg":  "image/svg+xml",
+}
+
+
+# ``audio_mode`` component of ``FIELD_AUDIO (0x07)`` → MIME type +
+# file extension. MeshChat's own recorder produces ``"opus"``. Other
+# clients may send container-wrapped forms (webm audio, ogg, mp3);
+# we accept those too so playback works via the recipient's
+# ``<audio>`` element. Unknown modes fall back to
+# ``application/octet-stream`` at the call site so at least the
+# blob can be downloaded even if the browser can't decode it.
+_AUDIO_MODE_TO_MIME = {
+    "opus":  "audio/opus",  "ogg":  "audio/ogg",  "oga": "audio/ogg",
+    "mp3":   "audio/mpeg",  "mpeg": "audio/mpeg",
+    "wav":   "audio/wav",   "wave": "audio/wav",
+    "webm":  "audio/webm",  "m4a":  "audio/mp4",  "mp4": "audio/mp4",
+    "aac":   "audio/aac",   "flac": "audio/flac",
+}
+_AUDIO_MODE_TO_EXT = {
+    "opus":  "opus", "ogg":  "ogg",  "oga":  "oga",
+    "mp3":   "mp3",  "mpeg": "mp3",
+    "wav":   "wav",  "wave": "wav",
+    "webm":  "webm", "m4a":  "m4a",  "mp4":  "mp4",
+    "aac":   "aac",  "flac": "flac",
 }
 
 
@@ -351,7 +375,9 @@ class MessagingService:
 
         fields     = getattr(message, "fields", None) or {}
         appearance = fields.get(0x04)  # FIELD_ICON_APPEARANCE
+        files      = fields.get(0x05)  # FIELD_FILE_ATTACHMENTS
         image      = fields.get(0x06)  # FIELD_IMAGE
+        audio      = fields.get(0x07)  # FIELD_AUDIO
 
         # --------------------------------------------------------------
         # Contact-icon extraction (0x04 always icon; 0x06 icon-only when
@@ -378,11 +404,18 @@ class MessagingService:
             log.debug("Icon extraction skipped: %s", exc)
 
         # --------------------------------------------------------------
-        # Attachment extraction — inline image only in this step (v1.3.0
-        # step 2). Files + audio land in step 3.
+        # Attachment extraction (v1.3.0 steps 2 + 3). Each accepted
+        # field appends one or more entries to ``attachments`` and
+        # writes the blob under a per-message ``idx``. Ordering:
+        # image first (0x06), then files (0x05 — array of files), then
+        # audio (0x07). Matches MeshChat's own send-side ordering,
+        # which — while not a wire-protocol requirement — is what
+        # existing peers produce, so a chat-log rendered the same way
+        # in both apps looks the same.
         # --------------------------------------------------------------
         attachments = []
         if has_content and self._attachments:
+            # FIELD_IMAGE (0x06) — single inline image
             try:
                 if (isinstance(image, list) and len(image) >= 2
                         and isinstance(image[1], (bytes, bytearray))):
@@ -399,7 +432,68 @@ class MessagingService:
                         "size":     len(image[1]),
                     })
             except Exception as exc:
-                log.warning("Attachment persist failed for %s: %s",
+                log.warning("Image attachment persist failed for %s: %s",
+                            msg_id[:16] if msg_id else "?", exc)
+
+            # FIELD_FILE_ATTACHMENTS (0x05) — array of [name, bytes]
+            # tuples. Each entry becomes its own attachment slot.
+            # Extension is derived from the sender's filename; mime is
+            # guessed by extension or falls back to
+            # ``application/octet-stream``.
+            if isinstance(files, list):
+                for f in files:
+                    try:
+                        if (not isinstance(f, (list, tuple))
+                                or len(f) < 2
+                                or not isinstance(f[1], (bytes, bytearray))):
+                            continue
+                        raw_name = f[0]
+                        filename = raw_name if isinstance(raw_name, str) else "file"
+                        # Extension → MIME. mimetypes.guess_type gives a
+                        # good default for most non-image, non-audio
+                        # types (pdf, txt, zip, docx, ...). Explicit
+                        # fallback so we always send a Content-Type.
+                        mime, _ = mimetypes.guess_type(filename)
+                        if not mime:
+                            mime = "application/octet-stream"
+                        idx = len(attachments)
+                        self._attachments.write(msg_id, idx, filename, bytes(f[1]))
+                        attachments.append({
+                            "kind":     "file",
+                            "idx":      idx,
+                            "filename": filename,
+                            "mime":     mime,
+                            "size":     len(f[1]),
+                        })
+                    except Exception as exc:
+                        log.warning("File attachment persist failed for %s: %s",
+                                    msg_id[:16] if msg_id else "?", exc)
+
+            # FIELD_AUDIO (0x07) — [audio_mode_str, audio_bytes].
+            # ``audio_mode`` is a codec/container identifier from the
+            # sender (MeshChat uses ``"opus"`` for its recordings).
+            # We map it to a real MIME so the recipient's <audio>
+            # element can decode. Unknown modes fall back to
+            # ``application/octet-stream`` so at minimum the byte
+            # can be downloaded, even if the browser can't play it.
+            try:
+                if (isinstance(audio, list) and len(audio) >= 2
+                        and isinstance(audio[1], (bytes, bytearray))):
+                    mode = (audio[0] or "").lower() if isinstance(audio[0], str) else ""
+                    mime = _AUDIO_MODE_TO_MIME.get(mode, "application/octet-stream")
+                    ext = _AUDIO_MODE_TO_EXT.get(mode, "")
+                    filename = f"audio.{ext}" if ext else "audio"
+                    idx = len(attachments)
+                    self._attachments.write(msg_id, idx, filename, bytes(audio[1]))
+                    attachments.append({
+                        "kind":     "audio",
+                        "idx":      idx,
+                        "filename": filename,
+                        "mime":     mime,
+                        "size":     len(audio[1]),
+                    })
+            except Exception as exc:
+                log.warning("Audio attachment persist failed for %s: %s",
                             msg_id[:16] if msg_id else "?", exc)
 
         entry = {

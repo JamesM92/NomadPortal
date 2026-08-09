@@ -154,6 +154,161 @@ class TestIconVsAttachmentHeuristic:
         assert "attachments" not in entry
 
 
+class TestFileAttachments:
+    """FIELD_FILE_ATTACHMENTS (0x05) — array of [name, bytes] tuples.
+    Each entry becomes its own attachment slot in the message entry.
+    (v1.3.0 step 3.)
+    """
+
+    def test_single_file_attachment(self, svc):
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="ba" * 16, source="ca" * 16,
+            title=b"", content=b"here's the spec",
+            fields={0x05: [["spec.pdf", b"%PDF-1.4 payload"]]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert len(entry["attachments"]) == 1
+        f0 = entry["attachments"][0]
+        assert f0["kind"] == "file"
+        assert f0["filename"] == "spec.pdf"
+        assert f0["mime"] == "application/pdf"
+        assert att.read(entry["id"], 0) == b"%PDF-1.4 payload"
+
+    def test_multiple_file_attachments_get_sequential_indexes(self, svc):
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="bb" * 16, source="cb" * 16,
+            title=b"", content=b"three docs",
+            fields={0x05: [
+                ["a.pdf", b"PDF"],
+                ["b.txt", b"plain"],
+                ["c.zip", b"PK\x03\x04"],
+            ]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert [a["idx"] for a in entry["attachments"]] == [0, 1, 2]
+        assert [a["filename"] for a in entry["attachments"]] == [
+            "a.pdf", "b.txt", "c.zip",
+        ]
+        # All blobs distinct + readable
+        assert att.read(entry["id"], 0) == b"PDF"
+        assert att.read(entry["id"], 1) == b"plain"
+        assert att.read(entry["id"], 2) == b"PK\x03\x04"
+
+    def test_unknown_extension_falls_back_to_octet_stream(self, svc):
+        # Extension mimetypes.guess_type doesn't know → sane default
+        # so the browser can still download the blob.
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="bc" * 16, source="cc" * 16,
+            title=b"", content=b"weird ext",
+            fields={0x05: [["mystery.blorp", b"data"]]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert entry["attachments"][0]["mime"] == "application/octet-stream"
+
+    def test_malformed_file_entry_is_skipped(self, svc):
+        # A garbage entry in the array (not a [name, bytes] pair)
+        # doesn't crash the receive path — just gets skipped, other
+        # entries in the same message still land.
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="bd" * 16, source="cd" * 16,
+            title=b"", content=b"mixed",
+            fields={0x05: [
+                "not-a-tuple",         # garbage
+                ["ok.txt", b"good"],   # real
+                ["only-name"],         # too short
+                [None, b"no-name"],    # non-str name — accepted, falls back to "file"
+            ]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        # Two attachments landed (the good.txt and the None-name one)
+        assert len(entry["attachments"]) == 2
+
+    def test_image_and_files_both_land(self, svc):
+        # Both fields present — image lands as idx 0, files after.
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="be" * 16, source="ce" * 16,
+            title=b"", content=b"mixed bag",
+            fields={
+                0x06: ["jpg", _FAKE_JPEG],
+                0x05: [["note.txt", b"content"]],
+            },
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert len(entry["attachments"]) == 2
+        assert entry["attachments"][0]["kind"] == "image"
+        assert entry["attachments"][1]["kind"] == "file"
+
+
+class TestAudioAttachment:
+    """FIELD_AUDIO (0x07) — [audio_mode_str, audio_bytes]. audio_mode
+    is a codec/container identifier (e.g. ``"opus"``, ``"webm"``).
+    (v1.3.0 step 3.)
+    """
+
+    def test_opus_audio_attachment(self, svc):
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="e0" * 16, source="d0" * 16,
+            title=b"", content=b"voice note",
+            fields={0x07: ["opus", b"OggS\x00opus_frames_here"]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert len(entry["attachments"]) == 1
+        a0 = entry["attachments"][0]
+        assert a0["kind"]     == "audio"
+        assert a0["mime"]     == "audio/opus"
+        assert a0["filename"] == "audio.opus"
+
+    def test_webm_audio_attachment(self, svc):
+        # Browsers' MediaRecorder often emits webm audio — check we
+        # accept and label it correctly.
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="e1" * 16, source="d1" * 16,
+            title=b"", content=b"voice note",
+            fields={0x07: ["webm", b"webm audio bytes"]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert entry["attachments"][0]["mime"] == "audio/webm"
+
+    def test_unknown_audio_mode_still_persists(self, svc):
+        # An unknown codec still saves the bytes (with an
+        # application/octet-stream MIME so the browser can at least
+        # download the blob).
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="e2" * 16, source="d2" * 16,
+            title=b"", content=b"weird codec",
+            fields={0x07: ["weirdcodec", b"raw bytes"]},
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        assert entry["attachments"][0]["mime"] == "application/octet-stream"
+        assert entry["attachments"][0]["filename"] == "audio"
+
+    def test_all_three_kinds_together(self, svc):
+        # Image + files + audio all in one message — order in the
+        # attachments array is image, files, audio (matches MeshChat's
+        # own send-side ordering).
+        service, msg, att = svc
+        service._on_delivery(_MockMessage(
+            msg_id="e3" * 16, source="d3" * 16,
+            title=b"", content=b"kitchen sink",
+            fields={
+                0x06: ["png", _FAKE_PNG],
+                0x05: [["note.txt", b"n"], ["doc.pdf", b"p"]],
+                0x07: ["opus", b"o"],
+            },
+        ), user_sub="user1")
+        entry = msg.received_messages()[0]
+        kinds = [a["kind"] for a in entry["attachments"]]
+        assert kinds == ["image", "file", "file", "audio"]
+
+
 class TestNoAttachmentStore:
     """MessagingService without an attachment_store still processes
     inbound messages — just doesn't persist blobs."""

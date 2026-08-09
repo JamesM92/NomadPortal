@@ -2155,15 +2155,28 @@ function _scrollChatToBottom() {
   });
 }
 
+// Human-readable byte size for attachment labels ("148 KB", "1.2 MB").
+// Reuses the same rounding as _fmtBytes elsewhere in the file but
+// scoped locally so this rendering doesn't couple to it.
+function _fmtAttachmentSize(bytes) {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024)                return `${bytes} B`;
+  if (bytes < 1024 * 1024)         return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // Render a single attachment as HTML for inclusion in a chat bubble.
-// Image kinds get an inline <img> pointed at the auth-gated attachment
-// endpoint (which serves the blob with the right Content-Type). Files
-// + audio land in step 3 of v1.3.0 chat-uploads — see
-// docs/design/chat-uploads.md — for now anything not an image renders
-// as a filename label placeholder.
+// Kind-specific rendering (image inline, audio player, file link) —
+// see docs/design/chat-uploads.md. All three kinds resolve to the
+// same auth-gated endpoint (GET /api/messages/<id>/attachments/<idx>)
+// which serves the blob with the correct Content-Type stored on the
+// message metadata.
 function _renderAttachment(msgId, att) {
-  const url = `/api/messages/${encodeURIComponent(msgId)}/attachments/${att.idx}`;
-  const alt = esc(att.filename || 'attachment');
+  const url  = `/api/messages/${encodeURIComponent(msgId)}/attachments/${att.idx}`;
+  const alt  = esc(att.filename || 'attachment');
+  const size = _fmtAttachmentSize(att.size);
+  const sizeLabel = size ? ` <span style="color:var(--text-dim);">${esc(size)}</span>` : '';
+
   if (att.kind === 'image') {
     // ``loading="lazy"`` so a long chat history doesn't hammer the
     // server with parallel image requests at scroll-into-view time.
@@ -2178,13 +2191,31 @@ function _renderAttachment(msgId, att) {
       `</div>`
     );
   }
-  // Non-image kinds — placeholder until step 3. Renders as a link
-  // rather than an image so it doesn't just show a broken image icon.
+  if (att.kind === 'audio') {
+    // Native <audio controls> — the browser handles play/pause/seek/
+    // volume for free. ``preload="none"`` avoids fetching the blob
+    // until the user actually hits play, which matters for long
+    // chats with many audio clips.
+    const mime = esc(att.mime || 'audio/mpeg');
+    return (
+      `<div class="chat-attachment chat-attachment-audio">` +
+        `<div style="font-size:11px;color:var(--text-dim);margin-bottom:2px;">` +
+          `🎧 ${alt}${sizeLabel}` +
+        `</div>` +
+        `<audio controls preload="none" style="width:100%;max-width:320px;">` +
+          `<source src="${url}" type="${mime}">` +
+          `Your browser can't play this audio format.` +
+        `</audio>` +
+      `</div>`
+    );
+  }
+  // Generic file — download link with filename + size.
   return (
     `<div class="chat-attachment chat-attachment-file">` +
       `<a href="${url}" target="_blank" rel="noopener noreferrer" ` +
+         `download="${alt}" ` +
          `style="color:var(--accent);text-decoration:underline;">` +
-        `📎 ${alt}` +
+        `📎 ${alt}${sizeLabel}` +
       `</a>` +
     `</div>`
   );

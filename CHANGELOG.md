@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Inbound file and audio attachments in chat** (v1.3.0 step 3).
+  ``_on_delivery`` now also extracts ``FIELD_FILE_ATTACHMENTS``
+  (0x05, array of ``[filename, bytes]`` tuples) and ``FIELD_AUDIO``
+  (0x07, ``[audio_mode_str, bytes]`` — MeshChat sends ``"opus"``,
+  ``"webm"``, ``"mp3"``, etc. as the codec identifier). Files land
+  with their original filename; audio lands as ``audio.<ext>`` with
+  the codec-derived MIME (``audio/opus``, ``audio/webm``, …) and
+  falls back to ``application/octet-stream`` for unknown codecs so
+  the download link still works. Malformed entries in the
+  file-array are skipped rather than crashing the receive path.
+  Frontend renders audio with ``<audio controls preload="none">``
+  and files as a 📎 download link with human-formatted byte size.
+  All three attachment kinds (image / file / audio) can coexist in
+  one message and are rendered in that order. 9 new pytest cases
+  cover single/multiple files, unknown extensions, malformed
+  entries, image+files+audio coexistence, and codec MIME mapping.
+
 - **Inbound image attachments in chat** (v1.3.0 step 2). When an
   LXMF message arrives with a ``FIELD_IMAGE`` field AND has text
   content (title or body), the image is persisted to the
