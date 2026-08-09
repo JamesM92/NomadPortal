@@ -18,6 +18,7 @@ from .identity_store import IdentityStore
 from .messaging import MessagingService
 from .lxmf_sync import PropagationSyncService
 from .message_store import MessageStore
+from .attachment_store import AttachmentStore
 from .contact_store import ContactStoreManager
 from .user_store import UserStore
 from .lxmf_tracker import LXMFPeerTracker
@@ -73,11 +74,18 @@ def create_app(
         """
         _deferred_rns_actions.append((name, fn))
 
-    msg_store = MessageStore(config_dir)
+    # Attachment blob store — holds message-attachment bytes on disk
+    # (images, audio, files) so ``messages.json`` doesn't inflate with
+    # base64-encoded blobs. Wired into MessageStore so eviction fires
+    # automatically on delete_conversation and MAX_MESSAGES overflow.
+    # See ``docs/design/chat-uploads.md`` for the full lifecycle.
+    att_store = AttachmentStore(config_dir)
+    msg_store = MessageStore(config_dir, attachment_store=att_store)
     con_store = ContactStoreManager(config_dir)
-    app.config["IDENTITY_STORE"] = IdentityStore(rns_dir)
-    app.config["MESSAGE_STORE"]  = msg_store
-    app.config["CONTACT_STORE"]  = con_store
+    app.config["IDENTITY_STORE"]   = IdentityStore(rns_dir)
+    app.config["MESSAGE_STORE"]    = msg_store
+    app.config["ATTACHMENT_STORE"] = att_store
+    app.config["CONTACT_STORE"]    = con_store
     messaging = MessagingService(
         storage_path=os.path.join(rns_dir, "lxmf"),
         message_store=msg_store,

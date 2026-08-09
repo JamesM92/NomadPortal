@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **``AttachmentStore`` — on-disk blob store for LXMF message
+  attachments** (foundation for v1.3.0 chat file / image / audio
+  uploads; see ``docs/design/chat-uploads.md``). Bytes land on
+  disk under ``config/attachments/<msg_id>/<idx>.<ext>``;
+  ``messages.json`` keeps only lightweight metadata (kind /
+  filename / mime / size / disk path) so it doesn't inflate with
+  base64-encoded blobs (the same NAS/GIL pathology v0.9.x fixed
+  on the peer + node trackers). Store owns write/read/evict.
+  Wired into ``MessageStore`` so ``delete_conversation`` and the
+  silent ``MAX_MESSAGES`` overflow both evict the corresponding
+  blobs — no orphans accumulate. Path-traversal defenses on
+  untrusted ``msg_id`` / ``filename`` inputs: hex-only msg_id
+  sanitizer, whitelist-based extension check. 22 pytest cases
+  cover write/read/evict lifecycle, path-traversal defenses,
+  and MessageStore integration. Wiring only in this drop — no
+  UI, no LXMF-field integration yet; those land in the next
+  chat-uploads steps.
+
 - **`` `FT<6hex> `` / `` `BT<6hex> `` 24-bit exact-color demo on the
   site examples page.** NomadNet's reference parser accepts these
   for exact colors and Micron2HTML 1.1.1 restored the parser
