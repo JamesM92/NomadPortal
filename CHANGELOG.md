@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`` `FT<6hex> `` / `` `BT<6hex> `` 24-bit exact-color demo on the
+  site examples page.** NomadNet's reference parser accepts these
+  for exact colors and Micron2HTML 1.1.1 restored the parser
+  branch (Micron2HTML dropped it in an earlier version citing
+  MeshChat compatibility). The examples page now shows the demo
+  with a "discouraged for general use" note in red — MeshChat
+  doesn't render the T-form and every byte counts on a mesh, so
+  the 3-hex `` `Fxxx `` shorthand remains the always-portable
+  default.
+
+### Dependencies
+
+- **``Micron2HTML`` bumped 1.0.8 → 1.1.1** for the ``FT<6hex>``
+  parser and the NomadNet-parity table + anchor features that
+  landed in 1.1.0.
+
 ### Fixed
 
 - **Sideband-users' contact icons rendered as flat grey.** The

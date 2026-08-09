@@ -38,5 +38,8 @@ pyyaml==6.0.3
 gunicorn==26.0.0
 pytest==9.1.1
 
-# Renderer — published to PyPI from v1.0.7 onwards
-Micron2HTML==1.0.8
+# Renderer — published to PyPI from v1.0.7 onwards.
+# 1.1.1 adds NomadNet parity + restores the ``FT<6hex>`` /
+# ``BT<6hex>`` 24-bit exact-color escape (see the site examples
+# page for the demo and the portability caveat).
+Micron2HTML==1.1.1

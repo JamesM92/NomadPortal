@@ -621,6 +621,24 @@ Plain. `!Bold`! and back. `*Italic`* and back. `_Underline`_ and back.
 
 -=
 
+>>24-bit exact colours (`\`FT<6hex>` / `\`BT<6hex>`)
+
+NomadNet's reference parser accepts a longer form for exact
+24-bit colour: `\`FTrrggbb` for foreground and `\`BTrrggbb` for
+background. Micron2HTML supports it too.
+
+`FT8b4513`!Saddle brown`!`f  `FT4b0082`!Indigo`!`f  `FT2c3e50`!Slate`!`f  `BT8b4513 saddle brown bg `b
+
+`F933`!Discouraged for general use.`!`f MeshChat's Micron parser doesn't
+render this form — pages relying on `\`FT<6hex>` look wrong in
+MeshChat. Every byte counts on a mesh, and the 3-hex `\`Fxxx`
+shorthand costs half as many characters *and* renders correctly
+in every mainstream client. Reach for `\`FT<6hex>` only when
+exact colour genuinely matters and you know your audience is
+rendering with NomadNet or Micron2HTML.
+
+-=
+
 >>Alignment
 
 `l Left aligned (default)
