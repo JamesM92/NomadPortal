@@ -154,9 +154,11 @@ Each step is a separate commit; the full batch ships as `v1.3.0` (minor bump —
 
 ---
 
-## Open questions for operator review
+## Operator decisions — locked 2026-08-09
 
-1. **500 KB cap OK?** Or want a different default? Anything above 1 MB pushes into "not a great mesh experience" territory.
-2. **Audio codec preference?** Just accept whatever the browser produces from `<audio>` capture? Or transcode to Opus server-side? Transcoding needs an ffmpeg dependency in the container.
-3. **Sent-message attachment retention** — keep attachments in the "sent" tab forever, or evict after N days to reclaim disk? Received messages have the existing message-store lifecycle; sent messages don't currently expire.
-4. **Contact-icon path collision** — my assumption is MeshChat uses `FIELD_IMAGE` for icons ONLY on announce, and as an inline attachment ONLY on chat messages, but should be verified against a real MeshChat send with both cases.
+All four open questions from the initial draft resolved:
+
+1. **Size cap: 500 KB** per attachment AND per message total. Configurable via `LXMF_ATTACHMENT_MAX_BYTES` env var (default `524288`).
+2. **Audio codec: pass-through** — send whatever the browser's `MediaRecorder` produces (webm/mp4-containered audio). Zero server codec dependencies. Recipient's browser plays via `<audio controls>`. If bandwidth becomes an observed issue later, add server-side Opus transcode as a follow-up.
+3. **Sent-message attachment retention: forever** — matches current text-message lifecycle. No eviction. Reconsider if disk usage becomes an issue in practice (admin toggle can be added later).
+4. **Contact-icon vs message-attachment split: proceed on assumption** — my read of MeshChat is that `FIELD_IMAGE` on an announce is a contact icon, `FIELD_IMAGE` on a chat message with text content is an attachment. If wrong, symptom will be obvious during receive-side testing (icon flipping on inbound messages, or attachments not rendering) and the fix is localized to `_on_delivery` in `messaging.py`. Not worth blocking build on a verification round-trip.
