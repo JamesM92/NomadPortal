@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sideband-users' contact icons rendered as flat grey.** The
+  ``FIELD_ICON_APPEARANCE`` (0x04) color values can arrive in two
+  shapes in the wild: MeshChat and this app send raw ``bytes(3)``,
+  but Sideband (the LXMF library's reference client) sends
+  ``[r, g, b]`` (or ``[r, g, b, a]``) as 0-1 floats — its
+  ``DEFAULT_APPEARANCE`` is ``["account", [0,0,0,1], [1,1,1,1]]``.
+  Our converter only accepted the bytes shape; Sideband's float
+  sequence fell through to the ``#888888`` fallback, so every
+  Sideband-user's contact showed the same grey circle regardless
+  of their actual chosen colors. Adds ``_appearance_color_to_hex``
+  that handles both shapes and clamps out-of-range channels.
+  Ported from the ``python-core`` of the NomadPortal-Android
+  sister project, which hit this exact interop failure.
+
+  14 pytest cases cover the bytes shape, the float shape (with
+  and without alpha), grey fallback for unknown inputs, and the
+  channel clamping semantics — so the regression can't sneak
+  back in silently.
+
 ## [1.2.0] - 2026-08-06
 
 **Mobile pass.** A round of fixes from actually operating NomadPortal on a

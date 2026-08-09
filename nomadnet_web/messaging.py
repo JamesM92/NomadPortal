@@ -41,20 +41,55 @@ def _detect_image_mime(data: bytes) -> str:
     return "image/png"
 
 
+def _channel_to_255(v):
+    """One color channel — accepts either an int already in 0-255
+    or a 0-1 float (Sideband's shape). Clamped to bounds either way.
+    """
+    if isinstance(v, bool):
+        return 255 if v else 0
+    if isinstance(v, int):
+        return max(0, min(255, v))
+    if isinstance(v, float):
+        return max(0, min(255, round(v * 255)))
+    return 128
+
+
+def _appearance_color_to_hex(value) -> str:
+    """LXMF FIELD_ICON_APPEARANCE color → '#rrggbb'. Two shapes exist
+    in the wild:
+
+    - MeshChat / this app: raw 3-byte ``bytes`` object, no alpha —
+      sent via ``bytes.fromhex(rrggbb)``.
+    - Sideband (LXMF library's reference client): a ``[r, g, b]`` or
+      ``[r, g, b, a]`` sequence of 0-1 floats. Its
+      DEFAULT_APPEARANCE is ``["account", [0,0,0,1], [1,1,1,1]]``.
+
+    Historically our converter only accepted the bytes shape, so
+    Sideband-users' colors rendered as a flat grey ``#888888``
+    circle. Ported from the ``python-core`` of the
+    NomadPortal-Android sister project, which hit this interop
+    failure explicitly. Unknown shapes still fall back to grey.
+    """
+    if isinstance(value, (bytes, bytearray)) and len(value) >= 3:
+        return "#%02x%02x%02x" % (value[0], value[1], value[2])
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        r, g, b = (_channel_to_255(value[i]) for i in range(3))
+        return "#%02x%02x%02x" % (r, g, b)
+    return "#888888"
+
+
 def _render_appearance_svg(name, fg, bg) -> tuple:
     """Render LXMF FIELD_ICON_APPEARANCE to (base64_svg, mime).
 
-    appearance is [icon_name, fg_color_bytes(3), bg_color_bytes(3)]. We produce
-    a 32×32 colored circle with the first letter of the icon name as a glyph
-    placeholder — material-symbol rendering would require shipping a webfont.
+    ``fg`` / ``bg`` are colors in either MeshChat's ``bytes(3)`` or
+    Sideband's ``[r,g,b]`` float shape (see
+    ``_appearance_color_to_hex``). Produces a 32×32 colored circle
+    with the first letter of the icon name as a glyph placeholder —
+    material-symbol rendering would require shipping a webfont.
     """
     import base64
-    def _hex(c):
-        if isinstance(c, (bytes, bytearray)) and len(c) >= 3:
-            return "#%02x%02x%02x" % (c[0], c[1], c[2])
-        return "#888888"
-    fg_hex  = _hex(fg)
-    bg_hex  = _hex(bg)
+    fg_hex  = _appearance_color_to_hex(fg)
+    bg_hex  = _appearance_color_to_hex(bg)
     initial = ((name[:1] if isinstance(name, str) else "") or "?").upper()
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
