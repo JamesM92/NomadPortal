@@ -1247,6 +1247,74 @@ def api_conversation_delete(hash_hex: str):
     return jsonify({"ok": True, "removed": removed})
 
 
+@bp.get("/api/messages/<msg_id>/attachments/<int:idx>")
+@login_required
+def api_message_attachment(msg_id: str, idx: int):
+    """Stream an inbound message's attachment blob.
+
+    Auth-gated to the message's owner — a peer can't guess a
+    (msg_id, idx) tuple to exfiltrate someone else's attachment
+    because the ownership check gates access. Bytes are served from
+    ``AttachmentStore`` (see ``docs/design/chat-uploads.md``);
+    ``messages.json`` carries only the metadata that lets us find
+    the right blob + emit the correct ``Content-Type``.
+    """
+    from flask import Response
+
+    msg_store = current_app.config.get("MESSAGE_STORE")
+    att_store = current_app.config.get("ATTACHMENT_STORE")
+    if msg_store is None or att_store is None:
+        abort(404)
+
+    # Find the message + verify ownership + verify the attachment slot
+    # is real. Scanning `received_messages()` is O(N=500) worst case;
+    # trivial for a message store this size and avoids a schema change
+    # to key messages by id.
+    uid = current_user.id
+    entry = next(
+        (m for m in msg_store.received_messages()
+         if m.get("id") == msg_id and m.get("owner") == uid),
+        None,
+    )
+    # Sent messages can also carry attachments once step 4 lands;
+    # allow the endpoint to serve them too for symmetry.
+    if entry is None:
+        entry = next(
+            (m for m in msg_store.sent_messages()
+             if m.get("id") == msg_id and m.get("owner") == uid),
+            None,
+        )
+    if entry is None:
+        abort(404)
+
+    atts = entry.get("attachments") or []
+    if idx < 0 or idx >= len(atts):
+        abort(404)
+    meta = atts[idx]
+
+    data = att_store.read(msg_id, idx)
+    if data is None:
+        # Message metadata says the attachment should exist but the
+        # blob is gone — inconsistent state (manual disk cleanup,
+        # corrupted store). Return 404 rather than a confusing 500.
+        log.warning("Attachment metadata but no blob: %s/%s", msg_id[:16], idx)
+        abort(404)
+
+    resp = Response(data, mimetype=meta.get("mime") or "application/octet-stream")
+    # Inline disposition so images render in-page rather than
+    # triggering a download. If we ever add a "download this
+    # attachment" button, that can call the same endpoint with a
+    # ``?download=1`` query param and swap to ``attachment``.
+    filename = meta.get("filename") or f"attachment-{idx}"
+    safe_ascii  = filename.encode("ascii", "replace").decode("ascii")
+    quoted_utf8 = urllib.parse.quote(filename, safe="")
+    resp.headers["Content-Disposition"] = (
+        f'inline; filename="{safe_ascii}"; filename*=UTF-8\'\'{quoted_utf8}'
+    )
+    resp.headers["Content-Length"] = str(len(data))
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Identity  (login required)
 # ---------------------------------------------------------------------------

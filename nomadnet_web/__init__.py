@@ -90,6 +90,7 @@ def create_app(
         storage_path=os.path.join(rns_dir, "lxmf"),
         message_store=msg_store,
         contact_store=con_store,
+        attachment_store=att_store,
     )
     app.config["MESSAGING"] = messaging
 

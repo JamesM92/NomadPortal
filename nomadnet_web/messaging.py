@@ -41,6 +41,18 @@ def _detect_image_mime(data: bytes) -> str:
     return "image/png"
 
 
+# Map the ``image_type_str`` component of ``FIELD_IMAGE (0x06)`` to a
+# canonical MIME type. MeshChat sends the file's extension (``"jpg"``,
+# ``"png"``, ``"webp"``, ...) — not always the MIME. Falls back to
+# byte-sniffing via ``_detect_image_mime`` when the extension is
+# unrecognized or the sender didn't include one.
+_IMAGE_EXT_TO_MIME = {
+    "jpg":  "image/jpeg", "jpeg": "image/jpeg",
+    "png":  "image/png",  "gif":  "image/gif",
+    "webp": "image/webp", "svg":  "image/svg+xml",
+}
+
+
 def _channel_to_255(v):
     """One color channel — accepts either an int already in 0-255
     or a 0-1 float (Sideband's shape). Clamped to bounds either way.
@@ -102,10 +114,17 @@ def _render_appearance_svg(name, fg, bg) -> tuple:
 
 
 class MessagingService:
-    def __init__(self, storage_path: str, message_store=None, contact_store=None):
+    def __init__(self, storage_path: str, message_store=None,
+                 contact_store=None, attachment_store=None):
         self._storage        = storage_path
         self._msg_store      = message_store
         self._contact_mgr    = contact_store  # ContactStoreManager (param kept for compat)
+        # Blob store for inbound message attachments (images, audio,
+        # files). Optional so tests and older callers can construct
+        # without one; when None, inbound attachments are dropped
+        # (their metadata isn't recorded in the message entry).
+        # See ``docs/design/chat-uploads.md``.
+        self._attachments    = attachment_store
         self._lock           = threading.Lock()
         self._identity_store = None
         # user_sub -> {"router": LXMRouter, "dest": Destination}
@@ -301,7 +320,23 @@ class MessagingService:
     # ------------------------------------------------------------------
 
     def _on_delivery(self, message, user_sub: str = "") -> None:
-        """Called by a user's LXMRouter when an inbound message arrives."""
+        """Called by a user's LXMRouter when an inbound message arrives.
+
+        Extracts contact-icon updates and message attachments from the
+        LXMF ``fields`` dict. Icon-vs-attachment split — see
+        ``docs/design/chat-uploads.md``:
+
+        - ``FIELD_ICON_APPEARANCE`` (0x04) is a vector descriptor and
+          is ALWAYS a contact-icon update (never an attachment).
+        - ``FIELD_IMAGE`` (0x06) is treated as a contact icon when the
+          message has no text content (announce-shaped delivery) and
+          as an inline image attachment when the message DOES have
+          text (chat-shaped delivery). Falsifies to receive-side
+          testing if this heuristic doesn't match MeshChat's actual
+          behaviour in the wild.
+        """
+        import base64
+
         source_hex = message.source_hash.hex() if message.source_hash else ""
         msg_id     = message.hash.hex()         if message.hash         else ""
 
@@ -310,20 +345,21 @@ class MessagingService:
                 return ""
             return val.decode("utf-8", errors="replace") if isinstance(val, bytes) else str(val)
 
-        # Extract icon from LXMF fields. Two formats are supported:
-        #   FIELD_ICON_APPEARANCE (0x04) = [icon_name_str, fg_bytes(3), bg_bytes(3)]
-        #     — the MeshChat vector-icon descriptor. Rendered server-side to an SVG.
-        #   FIELD_IMAGE          (0x06) = [image_type_str, image_bytes]
-        #     — a raw image. Stored directly with detected MIME type.
-        # Some older clients may also send raw bytes under 0x04; we accept that too.
+        title       = _decode(message.title)
+        content     = _decode(message.content)
+        has_content = bool(title.strip() or content.strip())
+
+        fields     = getattr(message, "fields", None) or {}
+        appearance = fields.get(0x04)  # FIELD_ICON_APPEARANCE
+        image      = fields.get(0x06)  # FIELD_IMAGE
+
+        # --------------------------------------------------------------
+        # Contact-icon extraction (0x04 always icon; 0x06 icon-only when
+        # the message carries no text — announce-shaped delivery)
+        # --------------------------------------------------------------
         icon_b64  = None
         icon_mime = "image/png"
         try:
-            import base64
-            fields = getattr(message, "fields", None) or {}
-            appearance = fields.get(0x04)
-            image      = fields.get(0x06)
-
             if isinstance(appearance, list) and len(appearance) >= 3:
                 icon_b64, icon_mime = _render_appearance_svg(
                     appearance[0], appearance[1], appearance[2]
@@ -331,31 +367,59 @@ class MessagingService:
             elif isinstance(appearance, (bytes, bytearray)) and appearance:
                 icon_b64  = base64.b64encode(appearance).decode("ascii")
                 icon_mime = _detect_image_mime(appearance)
-            elif isinstance(image, list) and len(image) >= 2 and isinstance(image[1], (bytes, bytearray)):
+            elif (not has_content and isinstance(image, list)
+                    and len(image) >= 2
+                    and isinstance(image[1], (bytes, bytearray))):
+                # No text content → this FIELD_IMAGE is a contact icon.
                 icon_b64  = base64.b64encode(image[1]).decode("ascii")
                 ext = (image[0] or "").lower() if isinstance(image[0], str) else ""
-                icon_mime = {
-                    "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                    "png": "image/png",  "gif":  "image/gif",
-                    "webp":"image/webp", "svg":  "image/svg+xml",
-                }.get(ext, _detect_image_mime(image[1]))
+                icon_mime = _IMAGE_EXT_TO_MIME.get(ext, _detect_image_mime(image[1]))
         except Exception as exc:
             log.debug("Icon extraction skipped: %s", exc)
+
+        # --------------------------------------------------------------
+        # Attachment extraction — inline image only in this step (v1.3.0
+        # step 2). Files + audio land in step 3.
+        # --------------------------------------------------------------
+        attachments = []
+        if has_content and self._attachments:
+            try:
+                if (isinstance(image, list) and len(image) >= 2
+                        and isinstance(image[1], (bytes, bytearray))):
+                    ext = (image[0] or "").lower() if isinstance(image[0], str) else ""
+                    mime = _IMAGE_EXT_TO_MIME.get(ext, _detect_image_mime(image[1]))
+                    filename = f"image.{ext}" if ext else "image"
+                    idx = len(attachments)
+                    self._attachments.write(msg_id, idx, filename, bytes(image[1]))
+                    attachments.append({
+                        "kind":     "image",
+                        "idx":      idx,
+                        "filename": filename,
+                        "mime":     mime,
+                        "size":     len(image[1]),
+                    })
+            except Exception as exc:
+                log.warning("Attachment persist failed for %s: %s",
+                            msg_id[:16] if msg_id else "?", exc)
 
         entry = {
             "id":          msg_id,
             "source":      source_hex,
-            "title":       _decode(message.title),
-            "content":     _decode(message.content),
+            "title":       title,
+            "content":     content,
             "received_at": time.time(),
             "read":        False,
             "owner":       user_sub,
         }
+        if attachments:
+            entry["attachments"] = attachments
 
         log.info(
-            "Received LXMF message from %s: %s",
+            "Received LXMF message from %s: %s (%d attachment%s)",
             source_hex[:16] if source_hex else "?",
             entry["title"] or "(no subject)",
+            len(attachments),
+            "" if len(attachments) == 1 else "s",
         )
 
         if self._msg_store:

@@ -2155,6 +2155,41 @@ function _scrollChatToBottom() {
   });
 }
 
+// Render a single attachment as HTML for inclusion in a chat bubble.
+// Image kinds get an inline <img> pointed at the auth-gated attachment
+// endpoint (which serves the blob with the right Content-Type). Files
+// + audio land in step 3 of v1.3.0 chat-uploads — see
+// docs/design/chat-uploads.md — for now anything not an image renders
+// as a filename label placeholder.
+function _renderAttachment(msgId, att) {
+  const url = `/api/messages/${encodeURIComponent(msgId)}/attachments/${att.idx}`;
+  const alt = esc(att.filename || 'attachment');
+  if (att.kind === 'image') {
+    // ``loading="lazy"`` so a long chat history doesn't hammer the
+    // server with parallel image requests at scroll-into-view time.
+    // Click opens full-size in a new tab.
+    return (
+      `<div class="chat-attachment chat-attachment-image">` +
+        `<a href="${url}" target="_blank" rel="noopener noreferrer">` +
+          `<img src="${url}" alt="${alt}" loading="lazy" ` +
+               `style="max-width:100%;max-height:300px;` +
+               `border-radius:4px;display:block;">` +
+        `</a>` +
+      `</div>`
+    );
+  }
+  // Non-image kinds — placeholder until step 3. Renders as a link
+  // rather than an image so it doesn't just show a broken image icon.
+  return (
+    `<div class="chat-attachment chat-attachment-file">` +
+      `<a href="${url}" target="_blank" rel="noopener noreferrer" ` +
+         `style="color:var(--accent);text-decoration:underline;">` +
+        `📎 ${alt}` +
+      `</a>` +
+    `</div>`
+  );
+}
+
 function renderChatLog(messages) {
   const log = $('chat-log');
   if (!log) return;
@@ -2171,6 +2206,14 @@ function renderChatLog(messages) {
     let inner = '';
     if (m.title) inner += `<div class="chat-title">${esc(m.title)}</div>`;
     inner += `<div class="chat-content">${esc(content)}</div>`;
+    // Inline any attachments below the content. Only received-message
+    // attachments render today (step 2); sent-message attachments
+    // land in step 4 when the send path exists.
+    if (Array.isArray(m.attachments) && m.attachments.length) {
+      for (const att of m.attachments) {
+        inner += _renderAttachment(m.id, att);
+      }
+    }
     inner += `<div class="chat-meta"><span class="chat-time">${formatAge(m.time)}</span>`;
     if (m.direction === 'sent') {
       const cls = m.state === 'delivered' ? 'ok' : m.state === 'failed' ? 'fail' : 'pend';

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Inbound image attachments in chat** (v1.3.0 step 2). When an
+  LXMF message arrives with a ``FIELD_IMAGE`` field AND has text
+  content (title or body), the image is persisted to the
+  ``AttachmentStore`` and rendered inline in the chat bubble.
+  Contact-icon path stays intact — ``FIELD_IMAGE`` without text
+  content is still treated as an icon-update announce.
+  ``FIELD_ICON_APPEARANCE`` (0x04) is always an icon regardless.
+  New endpoint ``GET /api/messages/<msg_id>/attachments/<idx>``
+  serves the blob with the correct ``Content-Type`` and
+  ``Content-Disposition: inline``; auth-gated to the message's
+  owner. Frontend renders images at ``max-width:100%;
+  max-height:300px`` inside the bubble with ``loading="lazy"`` so
+  scrolling a long history doesn't stampede the endpoint. Click
+  opens full-size in a new tab. 7 pytest cases cover the icon-vs-
+  attachment heuristic, MIME resolution (extension + byte-sniff
+  fallback), and the no-attachment-store code path.
+
 - **``AttachmentStore`` — on-disk blob store for LXMF message
   attachments** (foundation for v1.3.0 chat file / image / audio
   uploads; see ``docs/design/chat-uploads.md``). Bytes land on
