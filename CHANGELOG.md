@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Outbound chat attachments — paperclip UI + multipart send**
+  (v1.3.0 step 4). Composer gains a 📎 button that opens a native
+  file picker (multi-select, ``image/*,audio/*,*/*``); staged
+  attachments render as chips with filename + size + × remove, plus
+  a live "N files, X KB / 500 KB" counter that turns red when the
+  cap is hit. Send switches transparently to ``multipart/form-data``
+  when any attachment is staged; text-only sends still use JSON.
+  Server (``POST /api/messages``) sniffs ``Content-Type`` and dual-
+  paths — new multipart branch enforces the 500 KB per-attachment /
+  per-message total cap AND the 10-attachment count cap; returns
+  413 with a specific error on overflow (no silent truncation).
+  Cap is overridable via the ``LXMF_ATTACHMENT_MAX_BYTES`` env var
+  (default 524288). ``MessagingService.send_message`` now accepts
+  ``attachments=[{data, filename, mime}, ...]``; each blob is
+  written to the ``AttachmentStore`` under the outbound msg_id
+  before the delivery thread starts (so a sender-side chat log can
+  render the bubble even if the RNS delivery fails). LXMF field
+  assembly at delivery time: MIME → kind (image / audio / file)
+  routes to ``FIELD_IMAGE`` (0x06) / ``FIELD_AUDIO`` (0x07) /
+  ``FIELD_FILE_ATTACHMENTS`` (0x05) — image and audio are
+  singletons, extras of either kind demote into the file array
+  (matches MeshChat's send-side structure). ``MAX_CONTENT_LENGTH``
+  raised 512 KB → 1 MB to accommodate the multipart envelope
+  around a 500 KB attachment; the tighter per-endpoint cap still
+  enforces the design's 500 KB rule. 16 new pytest cases cover
+  the MIME classifier, single/multi-kind persistence, missing-MIME
+  fallback, empty-list handling, non-bytes skip, and reverse-map
+  parity with the receive-side extension → MIME tables.
+
 - **Inbound file and audio attachments in chat** (v1.3.0 step 3).
   ``_on_delivery`` now also extracts ``FIELD_FILE_ATTACHMENTS``
   (0x05, array of ``[filename, bytes]`` tuples) and ``FIELD_AUDIO``

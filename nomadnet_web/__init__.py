@@ -259,8 +259,15 @@ def create_app(
             x_host=1,
         )
 
-    # Request size cap — prevents oversized JSON/form bodies
-    app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB
+    # Request size cap — prevents oversized JSON/form bodies. Raised
+    # from 512 KB to accommodate chat-attachment multipart uploads:
+    # the design caps message attachments at 500 KB total (see
+    # docs/design/chat-uploads.md and _MAX_ATTACHMENT_TOTAL_BYTES in
+    # routes.py) but multipart form encoding adds ~1-2% overhead, plus
+    # the message body / title / boundary framing. 1 MB gives comfy
+    # headroom; the per-endpoint cap in routes.py still enforces the
+    # tighter 500 KB attachment rule.
+    app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # 1 MB
 
     https_mode = cfg.get("HTTPS_REDIRECT", False)
 

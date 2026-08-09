@@ -323,7 +323,22 @@
           <div id="chat-log"></div>
           <div id="chat-compose">
             <input type="hidden" id="chat-dest-hidden">
+            <!-- Hidden file picker driven by the paperclip button below.
+                 accept="*/*" so the user can attach any file type; MIME
+                 routing (image → FIELD_IMAGE, audio → FIELD_AUDIO, else
+                 FIELD_FILE_ATTACHMENTS) happens server-side. -->
+            <input type="file" id="chat-attach-input" multiple hidden
+                   accept="image/*,audio/*,*/*">
+            <!-- Attachment chips list — one entry per staged attachment,
+                 with a × button to remove. Populated by _updateAttachChips. -->
+            <div id="chat-attach-list" hidden></div>
             <div class="chat-input-row">
+              <button id="btn-chat-attach"
+                      title="Attach file (image, audio, or any file — 500 KB cap)"
+                      style="background:none;border:none;font-size:16px;
+                             cursor:pointer;padding:2px 6px;color:var(--text-dim);">
+                📎
+              </button>
               <textarea id="chat-input" rows="2" placeholder="Message… (Enter to send)"></textarea>
               <button id="btn-chat-send">&#10140;</button>
             </div>

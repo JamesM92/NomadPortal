@@ -77,6 +77,61 @@ _AUDIO_MODE_TO_EXT = {
 }
 
 
+# Reverse of ``_IMAGE_EXT_TO_MIME`` for the send side. Given a MIME
+# type of an outbound image (browser-supplied via <input type="file">),
+# return the short extension string MeshChat expects in the first slot
+# of ``FIELD_IMAGE = [image_type_str, image_bytes]``. Unknown or non-
+# image MIMEs return "" so the caller can fall back to a filename-
+# derived hint.
+_MIME_TO_IMAGE_EXT = {
+    "image/jpeg":   "jpg",
+    "image/pjpeg":  "jpg",
+    "image/png":    "png",
+    "image/gif":    "gif",
+    "image/webp":   "webp",
+    "image/svg+xml": "svg",
+}
+
+# Reverse of ``_AUDIO_MODE_TO_MIME`` for the send side. Picks the
+# canonical ``audio_mode_str`` MeshChat sends in slot 0 of
+# ``FIELD_AUDIO = [audio_mode_str, audio_bytes]``. Where multiple
+# extensions map to the same MIME (opus / ogg / mp4 / mp3), the value
+# below is the one MeshChat's own recorder + player expect. Unknown
+# audio MIMEs return "" and the caller demotes the attachment to
+# ``FIELD_FILE_ATTACHMENTS`` rather than guessing.
+_MIME_TO_AUDIO_MODE = {
+    "audio/opus":       "opus",
+    "audio/ogg":        "ogg",
+    "audio/mpeg":       "mp3",
+    "audio/mp3":        "mp3",
+    "audio/wav":        "wav",
+    "audio/x-wav":      "wav",
+    "audio/wave":       "wav",
+    "audio/webm":       "webm",
+    "audio/mp4":        "m4a",
+    "audio/x-m4a":      "m4a",
+    "audio/aac":        "aac",
+    "audio/flac":       "flac",
+    "audio/x-flac":     "flac",
+}
+
+
+def _classify_attachment_kind(mime: str) -> str:
+    """MIME → outbound attachment kind. ``"image"`` if the browser
+    handed us an image the recipient can render inline, ``"audio"``
+    if likewise for audio, ``"file"`` otherwise. Falls through to
+    ``"file"`` for image/audio MIMEs the wire format can't carry
+    natively (e.g. ``image/heic`` — no MeshChat parser) so those
+    still transfer as a generic download rather than being dropped.
+    """
+    m = (mime or "").lower()
+    if m in _MIME_TO_IMAGE_EXT:
+        return "image"
+    if m in _MIME_TO_AUDIO_MODE:
+        return "audio"
+    return "file"
+
+
 def _channel_to_255(v):
     """One color channel — accepts either an int already in 0-255
     or a 0-1 float (Sideband's shape). Clamped to bounds either way.
@@ -317,12 +372,23 @@ class MessagingService:
         content: str,
         title: str = "",
         user_sub: str = "",
+        attachments: Optional[list] = None,
     ) -> tuple[bool, str]:
+        """Queue an outbound LXMF message.
+
+        ``attachments`` is an optional list of dicts of the form
+        ``{"data": bytes, "filename": str, "mime": str}``. Callers
+        (currently the ``POST /api/messages`` multipart branch in
+        ``routes.py``) are responsible for enforcing per-attachment
+        and total-message size caps upstream; this layer trusts what
+        it's given and just persists / wire-formats it.
+        """
         return self._send(
             dest_hash_hex=dest_hash_hex,
             title=title,
             content=content,
             user_sub=user_sub,
+            attachments=attachments or None,
         )
 
     def sent_messages(self) -> list:
@@ -528,8 +594,18 @@ class MessagingService:
         title: str,
         content: str,
         user_sub: str = "",
+        attachments: Optional[list] = None,
     ) -> tuple[bool, str]:
-        """Queue a message for background delivery and return immediately."""
+        """Queue a message for background delivery and return immediately.
+
+        ``attachments`` — see ``send_message`` docstring. Each item
+        gets persisted to the ``AttachmentStore`` under a slot index,
+        classified into ``FIELD_IMAGE`` / ``FIELD_AUDIO`` /
+        ``FIELD_FILE_ATTACHMENTS`` at wire-format time (see
+        ``_deliver`` below), and recorded in the sent-message
+        metadata so the sender's own chat log can render the same
+        bubbles the recipient sees.
+        """
         import uuid
 
         user_data = self._get_user_router(user_sub)
@@ -545,6 +621,39 @@ class MessagingService:
             return False, "Invalid destination hash"
 
         msg_id = str(uuid.uuid4())
+
+        # ------------------------------------------------------------------
+        # Persist attachment blobs before we start the delivery thread,
+        # while we still hold the raw bytes. On disk goes the payload;
+        # the ``attachments`` metadata list goes into ``messages.json``
+        # so the sent-tab chat-log renders each bubble with the same
+        # attachment chips the recipient will see.
+        # ------------------------------------------------------------------
+        att_meta: list[dict] = []
+        if attachments and self._attachments:
+            for a in attachments:
+                data = a.get("data") or b""
+                if not isinstance(data, (bytes, bytearray)):
+                    continue
+                filename = a.get("filename") or "file"
+                mime     = (a.get("mime") or "").lower() \
+                           or "application/octet-stream"
+                kind     = _classify_attachment_kind(mime)
+                idx      = len(att_meta)
+                try:
+                    self._attachments.write(msg_id, idx, filename, bytes(data))
+                except Exception as exc:
+                    log.warning("Outbound attachment persist failed for %s: %s",
+                                msg_id[:16], exc)
+                    continue
+                att_meta.append({
+                    "kind":     kind,
+                    "idx":      idx,
+                    "filename": filename,
+                    "mime":     mime,
+                    "size":     len(data),
+                })
+
         entry = {
             "id":      msg_id,
             "dest":    dest_hash_hex,
@@ -564,6 +673,8 @@ class MessagingService:
             "sent_at": time.time(),
             "owner":   user_sub,
         }
+        if att_meta:
+            entry["attachments"] = att_meta
         if self._msg_store:
             self._msg_store.save_sent(entry)
 
@@ -606,6 +717,52 @@ class MessagingService:
                             _hex_to_bytes(icon.get("fg", "#ffffff")),
                             _hex_to_bytes(icon.get("bg", "#5ba3c9")),
                         ]
+
+                # Attachments: route each persisted blob into the LXMF
+                # field the recipient expects for its kind. Ordering:
+                # image → FIELD_IMAGE (singleton — first one wins;
+                # additional images demoted to FIELD_FILE_ATTACHMENTS),
+                # audio → FIELD_AUDIO (singleton — same rule), rest →
+                # FIELD_FILE_ATTACHMENTS array. Matches MeshChat's own
+                # send-side structure so a two-image message shows
+                # image-one inline and image-two in the file chip list
+                # on both ends.
+                if att_meta and self._attachments:
+                    image_slot = None
+                    audio_slot = None
+                    file_slots = []
+                    for meta in att_meta:
+                        blob = self._attachments.read(msg_id, meta["idx"])
+                        if blob is None:
+                            log.warning(
+                                "Missing blob for outbound msg %s idx %d — "
+                                "skipping this attachment",
+                                msg_id[:8], meta["idx"],
+                            )
+                            continue
+                        kind = meta.get("kind")
+                        mime = meta.get("mime", "")
+                        name = meta.get("filename") or "file"
+                        if kind == "image" and image_slot is None:
+                            ext = _MIME_TO_IMAGE_EXT.get(mime.lower(), "")
+                            image_slot = [ext, blob]
+                        elif kind == "audio" and audio_slot is None:
+                            mode = _MIME_TO_AUDIO_MODE.get(mime.lower(), "")
+                            if mode:
+                                audio_slot = [mode, blob]
+                            else:
+                                # Unknown audio codec — demote to a file
+                                # attachment so at least the recipient
+                                # can download the bytes.
+                                file_slots.append([name, blob])
+                        else:
+                            file_slots.append([name, blob])
+                    if image_slot is not None:
+                        fields[0x06] = image_slot
+                    if audio_slot is not None:
+                        fields[0x07] = audio_slot
+                    if file_slots:
+                        fields[0x05] = file_slots
 
                 # Prefer OPPORTUNISTIC (single encrypted packet, no link needed).
                 # LXMessage automatically falls back to DIRECT if the content

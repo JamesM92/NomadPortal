@@ -1179,6 +1179,41 @@ def api_auth_status():
 # Messaging  (login required)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Chat attachment caps  (see docs/design/chat-uploads.md, "Locked decisions")
+# ---------------------------------------------------------------------------
+# LXMF is transported as RNS Resources; there's no hard protocol cap on
+# message size but transfer time on multi-hop mesh links makes multi-MB
+# payloads impractical. The 500 KB per-attachment / per-message cap
+# below is comfortable headroom over a well-compressed JPEG (~50-200
+# KB) or a ~90-second Opus voice note at 32 kbps (~360 KB), while
+# staying inside a handful of RNS packet round-trips on a healthy link.
+# Overridable via env var so operators on faster links can raise it,
+# or on slower links can tighten it. Same value gates both dimensions
+# so the semantics stay simple.
+
+def _attachment_max_bytes() -> int:
+    """Read the configured per-attachment / per-message attachment cap.
+
+    Env var ``LXMF_ATTACHMENT_MAX_BYTES`` overrides the 500 KB default
+    (524288). Bad values fall back to the default rather than crashing
+    request handling — an operator typo shouldn't wedge messaging.
+    """
+    import os
+    raw = os.environ.get("LXMF_ATTACHMENT_MAX_BYTES", "").strip()
+    if raw:
+        try:
+            n = int(raw)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    return 500 * 1024
+
+
+_MAX_ATTACHMENT_COUNT = 10
+
+
 @bp.post("/api/messages")
 @login_required
 def api_message_send():
@@ -1193,10 +1228,69 @@ def api_message_send():
         if ui and not ui.get_all().get("users_can_message", True):
             return jsonify({"error": "LXMF messaging is disabled by the administrator"}), 403
 
-    data      = request.get_json(silent=True) or {}
-    dest_hash = data.get("dest_hash", "")
-    title     = data.get("title", "")
-    content   = data.get("content", "")
+    # Two request shapes accepted:
+    #   1. Text-only (existing) — Content-Type: application/json,
+    #      body: {"dest_hash", "title", "content"}.
+    #   2. With attachments (v1.3.0 step 4) — Content-Type:
+    #      multipart/form-data with the same three text fields plus
+    #      one or more file parts named "attachments".
+    ct = (request.content_type or "").lower()
+    is_multipart = ct.startswith("multipart/form-data")
+
+    attachments = None
+
+    if is_multipart:
+        dest_hash = request.form.get("dest_hash", "")
+        title     = request.form.get("title", "")
+        content   = request.form.get("content", "")
+        files     = request.files.getlist("attachments")
+
+        if len(files) > _MAX_ATTACHMENT_COUNT:
+            return jsonify({
+                "error": f"too many attachments (max {_MAX_ATTACHMENT_COUNT})"
+            }), 413
+
+        cap = _attachment_max_bytes()
+        total = 0
+        parsed = []
+        for f in files:
+            if not f or not f.filename:
+                continue
+            data = f.read()
+            n = len(data)
+            if n > cap:
+                return jsonify({
+                    "error": (
+                        f"attachment '{f.filename}' is {n} bytes; "
+                        f"per-file cap is {cap}"
+                    )
+                }), 413
+            total += n
+            if total > cap:
+                return jsonify({
+                    "error": (
+                        f"total attachment size exceeds {cap} bytes"
+                    )
+                }), 413
+            # ``mimetype`` on FileStorage is the browser-supplied Content-Type
+            # from the multipart part. Trust it as a hint — the wire format
+            # doesn't care about MIME per se, only about which LXMF field
+            # slot to use, and the frontend's <input type="file"> gives us
+            # the browser's best guess. Fall back to octet-stream so an
+            # ancient client that omits the header still works.
+            parsed.append({
+                "data":     data,
+                "filename": f.filename,
+                "mime":     (f.mimetype or "application/octet-stream").lower(),
+            })
+
+        if parsed:
+            attachments = parsed
+    else:
+        data      = request.get_json(silent=True) or {}
+        dest_hash = data.get("dest_hash", "")
+        title     = data.get("title", "")
+        content   = data.get("content", "")
 
     if not dest_hash:
         abort(400, description="dest_hash is required")
@@ -1207,8 +1301,16 @@ def api_message_send():
     if len(content) > 65536:
         abort(400, description="content exceeds 64 KB")
 
+    # Reject empty sends — no text AND no attachments is not a message.
+    if not (content or "").strip() and not attachments:
+        abort(400, description="message must have content or an attachment")
+
     messaging = current_app.config["MESSAGING"]
-    ok, result = messaging.send_message(dest_hash, content, title=title, user_sub=current_user.id)
+    ok, result = messaging.send_message(
+        dest_hash, content,
+        title=title, user_sub=current_user.id,
+        attachments=attachments,
+    )
     if not ok:
         return jsonify({"error": result}), 503
     return jsonify({"ok": True, "message_id": result})

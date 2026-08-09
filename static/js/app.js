@@ -2403,6 +2403,121 @@ if (window.visualViewport) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Chat attachments (v1.3.0 step 4 — paperclip UI)
+// ---------------------------------------------------------------------------
+// Staged before send; cleared after a successful POST /api/messages. Kept
+// as a plain array (not a FormData) because FormData is write-only in
+// browsers — we'd have no way to render chips / remove entries after
+// staging. When the send fires, we build a fresh FormData from this list.
+//
+// Size caps mirror routes.py (_MAX_ATTACHMENT_COUNT, _attachment_max_bytes).
+// The server re-checks defensively; the browser-side check exists to give
+// the user a clear rejection ("this file is too big") instead of a 413.
+
+const CHAT_ATTACH_MAX_BYTES = 500 * 1024;   // 500 KB per attachment
+const CHAT_ATTACH_MAX_TOTAL = 500 * 1024;   // 500 KB total per message
+const CHAT_ATTACH_MAX_COUNT = 10;
+let _stagedAttachments = [];   // {file: File, size: number}
+
+function _fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function _stagedTotalBytes() {
+  return _stagedAttachments.reduce((sum, s) => sum + s.size, 0);
+}
+
+function _renderAttachChips() {
+  const container = $('chat-attach-list');
+  if (!container) return;
+  if (!_stagedAttachments.length) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  container.hidden = false;
+  const total = _stagedTotalBytes();
+  const over  = total > CHAT_ATTACH_MAX_TOTAL;
+  const chips = _stagedAttachments.map((s, i) => `
+    <span class="attach-chip" style="display:inline-flex;align-items:center;
+                                     gap:4px;background:var(--bg);
+                                     border:1px solid var(--border);
+                                     padding:2px 6px;margin:2px;
+                                     border-radius:4px;font-size:11px;
+                                     max-width:200px;">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="${esc(s.file.name)}">
+        ${esc(s.file.name)}
+      </span>
+      <span style="color:var(--text-dim);">${_fmtBytes(s.size)}</span>
+      <button type="button" data-attach-idx="${i}"
+              style="background:none;border:none;color:var(--text-dim);
+                     cursor:pointer;padding:0 2px;font-size:12px;line-height:1;"
+              title="Remove">×</button>
+    </span>
+  `).join('');
+  const counterColor = over ? 'var(--error, #d33)' : 'var(--text-dim)';
+  container.innerHTML = `
+    <div style="padding:2px 4px;">
+      ${chips}
+      <div style="font-size:10px;color:${counterColor};padding:2px 4px;">
+        ${_stagedAttachments.length} file${_stagedAttachments.length === 1 ? '' : 's'},
+        ${_fmtBytes(total)} / ${_fmtBytes(CHAT_ATTACH_MAX_TOTAL)}
+      </div>
+    </div>
+  `;
+  container.querySelectorAll('button[data-attach-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-attach-idx'), 10);
+      _stagedAttachments.splice(idx, 1);
+      _renderAttachChips();
+    });
+  });
+}
+
+function _clearStagedAttachments() {
+  _stagedAttachments = [];
+  const input = $('chat-attach-input');
+  if (input) input.value = '';
+  _renderAttachChips();
+}
+
+// Wire up the paperclip button + file input
+{
+  const attachBtn   = $('btn-chat-attach');
+  const attachInput = $('chat-attach-input');
+  if (attachBtn && attachInput) {
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => {
+      const picked = Array.from(attachInput.files || []);
+      for (const file of picked) {
+        if (_stagedAttachments.length >= CHAT_ATTACH_MAX_COUNT) {
+          setStatus(
+            `Too many attachments — max ${CHAT_ATTACH_MAX_COUNT} per message.`,
+            'error',
+          );
+          break;
+        }
+        if (file.size > CHAT_ATTACH_MAX_BYTES) {
+          setStatus(
+            `"${file.name}" is ${_fmtBytes(file.size)} — cap is ` +
+            `${_fmtBytes(CHAT_ATTACH_MAX_BYTES)}.`,
+            'error',
+          );
+          continue;
+        }
+        _stagedAttachments.push({ file, size: file.size });
+      }
+      _renderAttachChips();
+      // Reset the input so the same file can be re-picked after removal.
+      attachInput.value = '';
+    });
+  }
+}
+
 async function _sendChatMessage() {
   const btn = $('btn-chat-send');
   // Re-entrancy guard. The Enter-key handler above calls this function
@@ -2416,8 +2531,10 @@ async function _sendChatMessage() {
 
   const dest_hash = $('chat-dest-hidden').value;
   const content   = $('chat-input').value.trim();
+  const hasAttach = _stagedAttachments.length > 0;
 
-  if (!dest_hash || !content) return;
+  // Empty send guard — either text OR attachments required.
+  if (!dest_hash || (!content && !hasAttach)) return;
   if (content.length > CHAT_CONTENT_MAX) {
     setStatus(
       `Message is too long (${content.length.toLocaleString()} / ` +
@@ -2426,15 +2543,38 @@ async function _sendChatMessage() {
     );
     return;
   }
+  if (hasAttach && _stagedTotalBytes() > CHAT_ATTACH_MAX_TOTAL) {
+    setStatus(
+      `Total attachment size ${_fmtBytes(_stagedTotalBytes())} exceeds ` +
+      `${_fmtBytes(CHAT_ATTACH_MAX_TOTAL)} cap.`,
+      'error',
+    );
+    return;
+  }
 
   btn.disabled = true;
   try {
-    await apiFetch('/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dest_hash, content }),
-    });
+    if (hasAttach) {
+      // Multipart branch — the server-side endpoint sniffs
+      // request.content_type and switches parsers. Don't set
+      // Content-Type manually: the browser must fill in the
+      // multipart boundary parameter for us.
+      const fd = new FormData();
+      fd.append('dest_hash', dest_hash);
+      fd.append('content', content);
+      for (const s of _stagedAttachments) {
+        fd.append('attachments', s.file, s.file.name);
+      }
+      await apiFetch('/api/messages', { method: 'POST', body: fd });
+    } else {
+      await apiFetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dest_hash, content }),
+      });
+    }
     $('chat-input').value = '';
+    _clearStagedAttachments();
     _updateChatCharCount();
     setStatus('Message queued — delivery in progress.', 'ok');
     refreshChats();
