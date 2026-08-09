@@ -144,13 +144,15 @@ If the user attaches multiple items: single image → `FIELD_IMAGE`, single audi
 
 Small enough steps that each stands alone and can be tested:
 
-1. **Blob-store scaffolding** — the `config/attachments/` directory, the write/read helpers, the eviction hook wired into the existing message-delete flow. No UI changes. Verify via unit tests.
-2. **Receive path — images inline** — extend `_on_delivery` to persist `FIELD_IMAGE` attachments and render in the chat bubble. Test by having MeshChat send us an image. Contact-icon path stays intact.
-3. **Receive path — files + audio** — same as (2) but for `FIELD_FILE_ATTACHMENTS` and `FIELD_AUDIO`. Test by MeshChat sending each type.
-4. **Send path** — the `📎` UI, size caps, `multipart/form-data` endpoint, LXMF field assembly. Test by sending to MeshChat and confirming their side renders correctly.
-5. **Docs + release notes** — update the site examples page (chat-attachment demo), README feature bullet, CHANGELOG.
+1. **Blob-store scaffolding** — the `config/attachments/` directory, the write/read helpers, the eviction hook wired into the existing message-delete flow. No UI changes. Verify via unit tests. **✅ shipped 2026-08-08 (commit `76fafa5`)** — 22 pytest cases in `tests/test_attachment_store.py`.
+2. **Receive path — images inline** — extend `_on_delivery` to persist `FIELD_IMAGE` attachments and render in the chat bubble. Test by having MeshChat send us an image. Contact-icon path stays intact. **✅ shipped 2026-08-08 (commit `0b97bf0`)** — 7 pytest cases in `tests/test_receive_attachments.py`; new endpoint `GET /api/messages/<msg_id>/attachments/<idx>`.
+3. **Receive path — files + audio** — same as (2) but for `FIELD_FILE_ATTACHMENTS` and `FIELD_AUDIO`. Test by MeshChat sending each type. **✅ shipped 2026-08-08 (commit `63bd254`)** — 9 more pytest cases (16 total in the file); audio-mode → MIME lookup with fallback.
+4. **Send path** — the `📎` UI, size caps, `multipart/form-data` endpoint, LXMF field assembly. Test by sending to MeshChat and confirming their side renders correctly. **✅ shipped 2026-08-09 (commit `7e30ba3`)** — 16 pytest cases in `tests/test_send_attachments.py`; `POST /api/messages` dual-pathed on Content-Type; MIME → field routing (image/audio singleton, extras + generics → FIELD_FILE_ATTACHMENTS); env var `LXMF_ATTACHMENT_MAX_BYTES` override.
+5. **Docs + release notes** — README feature bullet, CHANGELOG. Site examples-page demo skipped (page is for Micron markup features, not chat UI). **✅ shipped 2026-08-09** — README bullet + CHANGELOG entries for steps 1-4 under `[Unreleased]`; awaiting `[Unreleased] → [1.3.0]` flip at release time.
 
-Each step is a separate commit; the full batch ships as `v1.3.0` (minor bump — new user-facing feature). Total scope: probably 2-3 focused sessions.
+Each step is a separate commit; the full batch ships as `v1.3.0` (minor bump — new user-facing feature). Total scope: 4 focused sessions in the end (steps 1+2 in one session, then one session per remaining step).
+
+**MeshChat interop verification is still TODO** — every step above landed under the assumption that our field extraction / assembly matches MeshChat's wire format, but end-to-end round-trip testing with a real MeshChat instance hasn't happened yet. If mismatch surfaces, the fix is localized to `_MIME_TO_IMAGE_EXT` / `_MIME_TO_AUDIO_MODE` in `messaging.py`.
 
 ---
 

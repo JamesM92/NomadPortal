@@ -26,6 +26,13 @@ NomadPortal is in **active trial-release development**. Features, configuration,
 - **Optional virus scanning** for downloaded files via ClamAV (off by
   default; flag-before-download confirm when no scan ran)
 - Send and receive LXMF messages, with per-user inboxes and per-user contact books
+- **Chat attachments** — attach images, audio, or arbitrary files to
+  outbound LXMF messages (📎 button in the chat composer); inbound
+  images render inline in the bubble, audio plays via the browser's
+  `<audio>` control, files download with a paperclip link. 500 KB
+  per attachment / per message total, overridable via
+  `LXMF_ATTACHMENT_MAX_BYTES`. Wire-compatible with MeshChat's
+  `FIELD_IMAGE` / `FIELD_AUDIO` / `FIELD_FILE_ATTACHMENTS`.
 - Manage RNS identities and announce to the mesh
 - Contact book with MeshChat icon support
 - Node discovery via Reticulum announces
