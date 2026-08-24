@@ -1462,9 +1462,30 @@ def api_identity_rename(identity_id: str):
     new_name = (data.get("name") or "").strip()
     if not new_name:
         return jsonify({"ok": False, "error": "Name is required"}), 400
-    if _id_store().rename(identity_id, new_name):
-        return jsonify({"ok": True})
-    return jsonify({"ok": False, "error": "Identity not found"}), 404
+
+    # Ownership check. IdentityStore.rename() itself has none — without
+    # this, identity_id being taken straight from the URL meant any
+    # logged-in user could rename *any other user's* LXMF identity just
+    # by knowing/obtaining its hex ID (visible in plenty of places: a
+    # message's source hash, a contact record, an admin panel). Only the
+    # owning user may rename their own identity; no admin feature relies
+    # on renaming someone else's (checked — nothing in admin_routes.py
+    # or the admin templates calls this route for another user).
+    entry = _id_store().get(identity_id)
+    if entry is None:
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+    if entry.get("user_sub") != current_user.id:
+        return jsonify({"ok": False, "error": "Not authorized to rename this identity"}), 403
+
+    if not _id_store().rename(identity_id, new_name):
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+
+    # Live-refresh so an announce made right after this doesn't still
+    # carry the old name — see MessagingService.refresh_router_display_name
+    # for the real bug this closes (a rename alone is dead code for any
+    # announce until the next process restart).
+    current_app.config["MESSAGING"].refresh_router_display_name(current_user.id, new_name)
+    return jsonify({"ok": True})
 
 
 _HEX24_RE = re.compile(r"^[0-9a-f]+$")

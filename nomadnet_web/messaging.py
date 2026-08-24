@@ -394,6 +394,46 @@ class MessagingService:
         data = self._get_user_router(user_sub)
         return data["dest"].hexhash if data else None
 
+    def refresh_router_display_name(self, user_sub: str, name: str) -> None:
+        """Applies a rename to the *live* router's destination immediately
+        (if one is running for ``user_sub``), so an announce made right
+        after a rename doesn't still carry the old name.
+
+        Real bug, found on the NomadPortal-Android sister project via a
+        live on-device report ("the announce is sending out with the
+        hash and not the assigned name"), root-caused by reading
+        LXMRouter.py directly: ``LXMRouter.announce()`` does *not*
+        consult ``Destination.default_app_data`` — it always calls
+        ``delivery_destination.announce(app_data=
+        self.get_announce_app_data(destination_hash), ...)`` with an
+        explicit ``app_data`` argument that unconditionally wins.
+        ``get_announce_app_data()`` in turn reads the plain
+        ``delivery_destination.display_name`` attribute, set once at
+        ``register_delivery_identity(identity, display_name=...)`` time
+        (see ``_init_user_router()`` above) and never touched again by
+        anything short of this method. Without it, a rename persists to
+        disk correctly (identity_store.rename()) but never changes what
+        any *live* announce actually carries — mesh peers keep seeing
+        the identity's original name until the next full process
+        restart re-registers the delivery identity with the new
+        persisted name. ``display_name`` has no dedicated setter; this
+        is a plain attribute assignment, confirmed directly against
+        ``register_delivery_identity()``'s own body.
+
+        Best-effort and silent about "nothing to refresh": a no-op if no
+        live router exists yet for ``user_sub`` (e.g. renaming before
+        first login) isn't an error, just nothing to do — the next
+        ``_init_user_router()`` call picks up the new name from disk
+        regardless.
+        """
+        data = self._user_routers.get(user_sub)
+        if data is None:
+            return
+        try:
+            data["dest"].display_name = name
+        except Exception as exc:
+            log.warning("Renamed identity but couldn't update live display_name: %s", exc)
+
     def do_announce(self, user_sub: str = "") -> tuple[bool, str]:
         """Announce via the user's LXMRouter so app_data (display name) is included."""
         data = self._get_user_router(user_sub)
