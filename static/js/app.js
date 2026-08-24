@@ -2906,6 +2906,34 @@ function _initDisclaimer() {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+// Top-left brand → navigate back to the default node's home page on
+// click. Especially load-bearing for guests / kiosk mode ("Locked" access
+// preset): the address bar and node list are both hidden by per-audience
+// access controls in that mode, leaving the brand as the only reliable
+// "home" affordance at all — it has to actually work, not just usually
+// work. Attached synchronously here, before init()'s async boot sequence
+// (auth/settings/site-info fetches) even starts, rather than gated behind
+// it: the old code only wired this up once those awaits resolved, so a
+// tap on the logo before boot finished — plausible on any slow/mesh-
+// adjacent connection, and kiosk touchscreens are exactly the case where
+// an impatient tap on the one available affordance is likely — did
+// nothing, silently, forever (the listener didn't exist yet, and nothing
+// ever re-attached it later). Reads _defaultHash/_hostedHash live at
+// click time instead of a value captured once during boot, so it
+// self-heals the moment either populates, however long boot takes.
+document.querySelectorAll('.brand').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.title = 'Home';
+  el.addEventListener('click', () => {
+    const home = _defaultHash || _hostedHash;
+    if (!home) {
+      setStatus('No home page configured yet.', 'error');
+      return;
+    }
+    navigateTo(`hash://${home}/page/index.mu`);
+  });
+});
+
 (async function init() {
   setStatus('Connecting…', 'busy');
   // Auth/settings/site-info are fetched (and lockdown state fully resolved)
@@ -2960,25 +2988,6 @@ function _initDisclaimer() {
 
   const params = new URLSearchParams(location.search);
   const startUrl = params.get('url');
-
-  // Make the top-left brand element navigate back to the default node's
-  // home page on click. Especially load-bearing for guests / kiosk mode:
-  // the address bar and node list may both be hidden by per-audience
-  // access controls, leaving the brand as the only reliable "home"
-  // affordance. Applied for everyone (not just guests) since it's a
-  // useful shortcut regardless of role. Click handler is attached once
-  // at boot — applyUISettings replaces .brand's innerHTML with the
-  // configured app title, but that only touches children, not the
-  // element's own listeners.
-  if (effectiveDefault) {
-    document.querySelectorAll('.brand').forEach(el => {
-      el.style.cursor = 'pointer';
-      el.title = 'Home';
-      el.addEventListener('click', () => {
-        navigateTo(`hash://${effectiveDefault}/page/index.mu`);
-      });
-    });
-  }
 
   // Boot-time URL resolution. Priority:
   //   1. Explicit ``?url=`` query param — preserved for the legacy
