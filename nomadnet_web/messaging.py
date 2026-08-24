@@ -293,6 +293,28 @@ class MessagingService:
                 identity_id[:16], registered.hexhash[:16],
                 user_sub[:16] if user_sub else "anon",
             )
+
+            # RNS path discovery is announce-based with no other mechanism —
+            # a destination that has never announced is unreachable by
+            # anyone, full stop. Without this, a brand-new identity (or one
+            # whose last announce has aged out of peers' routing tables)
+            # sat unreachable until the user discovered and clicked the
+            # manual Announce button themselves; a message sent to them in
+            # the meantime just failed after PATH_WAIT with no obvious
+            # reason why. This fires on every process restart too (routers
+            # are rebuilt in-memory on each boot via setup_delivery()/
+            # setup_user(), not just on first creation) — deliberately, not
+            # just for new identities: it doubles as the periodic
+            # re-announce that keeps an existing user's path from going
+            # stale on their peers' end. Best-effort; a failure here
+            # shouldn't take down router registration.
+            try:
+                router.announce(registered.hash)
+            except Exception as exc:
+                log.warning(
+                    "Bootstrap announce failed for %s: %s", identity_id[:16], exc,
+                )
+
             return data
 
         except Exception as exc:
