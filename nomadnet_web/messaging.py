@@ -15,6 +15,8 @@ import threading
 import time
 from typing import Optional
 
+from . import mdi_icons
+
 log = logging.getLogger(__name__)
 
 PATH_WAIT = 10  # seconds to wait for identity recall after path request
@@ -174,19 +176,43 @@ def _render_appearance_svg(name, fg, bg) -> tuple:
 
     ``fg`` / ``bg`` are colors in either MeshChat's ``bytes(3)`` or
     Sideband's ``[r,g,b]`` float shape (see
-    ``_appearance_color_to_hex``). Produces a 32×32 colored circle
-    with the first letter of the icon name as a glyph placeholder —
-    material-symbol rendering would require shipping a webfont.
+    ``_appearance_color_to_hex``). Produces a 32×32 colored circle.
+
+    When ``name`` resolves against the real Material Design Icons
+    catalog (``mdi_icons.py`` — the same namespace Sideband/MeshChat
+    actually pick icon names from), draws the real icon shape inset
+    within the circle. Real MeshChat/Sideband contacts routinely send
+    genuine MDI names (``"hiking"``, ``"account-supervisor"``, ...), so
+    this is the common case, not the fallback — the previous behaviour
+    (always drawing just the icon name's first letter as text; a real
+    webfont would've been needed for anything richer) is now only the
+    degraded path for a name the catalog doesn't recognize, matching how
+    the NomadPortal-Android sister project resolved the same gap.
     """
     import base64
-    fg_hex  = _appearance_color_to_hex(fg)
-    bg_hex  = _appearance_color_to_hex(bg)
-    initial = ((name[:1] if isinstance(name, str) else "") or "?").upper()
+    fg_hex = _appearance_color_to_hex(fg)
+    bg_hex = _appearance_color_to_hex(bg)
+
+    icon_path = mdi_icons.get_path(name) if isinstance(name, str) else None
+    if icon_path:
+        # MDI's own viewBox is 24x24; inset it to 20x20 centered in the
+        # 32x32 circle (6px margin each side) rather than edge-to-edge —
+        # matches the visual weight of a typical avatar-with-icon look.
+        glyph_svg = (
+            f'<g transform="translate(6,6) scale({20/24:.4f})">'
+            f'<path d="{icon_path}" fill="{fg_hex}"/></g>'
+        )
+    else:
+        initial = ((name[:1] if isinstance(name, str) else "") or "?").upper()
+        glyph_svg = (
+            f'<text x="16" y="22" text-anchor="middle" font-size="18" '
+            f'font-family="sans-serif" font-weight="bold" fill="{fg_hex}">{initial}</text>'
+        )
+
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
         f'<circle cx="16" cy="16" r="16" fill="{bg_hex}"/>'
-        f'<text x="16" y="22" text-anchor="middle" font-size="18" '
-        f'font-family="sans-serif" font-weight="bold" fill="{fg_hex}">{initial}</text>'
+        f'{glyph_svg}'
         '</svg>'
     )
     return base64.b64encode(svg.encode("utf-8")).decode("ascii"), "image/svg+xml"
