@@ -31,6 +31,15 @@ jobs:
       - name: Ruff check
         run: ruff check --select F,E9 .
 
+      # Shell scripts had no syntax check at all until now — entrypoint.sh
+      # in particular is 400+ lines handling SSL cert generation, MTU
+      # detection, and container startup, and is otherwise only ever
+      # exercised implicitly by the docker-build job's smoke test (which
+      # won't reach every branch). `bash -n` catches a real syntax error
+      # (unmatched quote/paren, bad heredoc, etc.) for free.
+      - name: Shell syntax check
+        run: find . -name "*.sh" -not -path "./.git/*" -print0 | xargs -0 -n1 bash -n
+
   test:
     name: Test
     runs-on: ubuntu-latest
