@@ -107,7 +107,27 @@
       color: var(--accent); font-size: 13px; padding: 0 2px; flex-shrink: 0;
     }
 
+    /* Same fix as #icon-picker-modal below, for a pre-existing instance
+       of the identical bug: an inline display:flex on #icon-editor beat
+       the browser's default [hidden]{display:none}, so the icon editor
+       panel was permanently visible (and its Cancel button inert) the
+       moment #sidebar-panel-messages itself became visible, regardless
+       of whether "Edit your icon" had actually been clicked. */
+    #icon-editor { display: flex; }
+    #icon-editor[hidden] { display: none; }
+
     /* ---- Icon picker (search + category chips + icon grid) ---- */
+    /* display:flex as a real rule (not inline on the element) so
+       #icon-picker-modal[hidden]'s higher-specificity override below
+       actually wins — an inline style attribute would beat any CSS rule
+       targeting [hidden], including this one, and the modal would stay
+       visible (and un-closeable) regardless of the hidden attribute.
+       Exact same pattern #msg-modal above already uses correctly. */
+    #icon-picker-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #icon-picker-modal[hidden] { display: none; }
     #icon-picker-categories {
       display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
       padding-bottom: 6px; margin-bottom: 4px; flex-shrink: 0;
@@ -264,7 +284,7 @@
         <!-- Icon editor (hidden by default) -->
         <div id="icon-editor" hidden
              style="margin-top:8px;padding:8px;background:var(--bg3);border-radius:3px;
-                    display:flex;flex-direction:column;gap:6px;">
+                    flex-direction:column;gap:6px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span id="icon-editor-preview"
                   style="width:36px;height:36px;border-radius:50%;flex-shrink:0;"></span>
@@ -303,9 +323,7 @@
              fetched lazily on first open — see _ensureMdiCatalog() in
              app.js). Sits above icon-editor (z-index) since it opens
              from within it. -->
-        <div id="icon-picker-modal" hidden
-             style="position:fixed;inset:0;background:rgba(0,0,0,.7);
-                    display:flex;align-items:center;justify-content:center;z-index:200;">
+        <div id="icon-picker-modal" hidden>
           <div class="modal-box" style="width:480px;max-width:95vw;max-height:82vh;
                                          display:flex;flex-direction:column;padding:20px 22px;">
             <div class="modal-title" style="margin-bottom:10px;">Choose an icon</div>
