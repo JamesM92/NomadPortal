@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """NomadPortal showcase landing page (executable Micron page).
 
-The site_server runs this script when the file has the execute bit set;
-stdout becomes the page body. We use that to print a small request-context
-block at the top, then hand off to the static showcase content below.
+The site_server runs this script when the file has the execute bit set.
+stdout becomes the page body. This script prints a small request-context
+block at the top, then continues with the static showcase content below.
 
 Env vars set by site_server:
   node_destination  — this node's destination hex hash
@@ -115,9 +115,9 @@ sys.stdout.write(r"""`c`F4af╔════════════════�
 
 A web-based browser for `[NomadNet`https://github.com/markqvist/NomadNet] nodes,
 packaged in Docker. Browse distributed NomadNet content, send LXMF messages,
-and manage identities — all from a standard web browser.
+and manage identities, all from a standard web browser.
 
-Built on `[Reticulum`https://reticulum.network] and `[LXMF`https://github.com/markqvist/LXMF].
+NomadPortal runs on `[Reticulum`https://reticulum.network] and `[LXMF`https://github.com/markqvist/LXMF].
 
 -=
 
@@ -162,13 +162,13 @@ print()
 sys.stdout.write(r""">`F600`!Disclaimer`!`f
 
 This software is provided `!"as is"`!, without warranty of any kind. The author
-accepts `Ffa4no risk and no liability`f for any use, misuse, or consequences
-arising from the use of this project.
+accepts `Ffa4no risk and no liability`f for any use, misuse, or consequence
+from this project.
 
 Anyone who installs, runs, hosts, or otherwise uses this software does so
-`!entirely at their own risk and on their own responsibility`! — including but
-not limited to compliance with applicable laws, the content accessed or
-transmitted through it, and any harm resulting from its operation.
+`!entirely at their own risk and on their own responsibility`!. This includes
+compliance with applicable laws, the content accessed or sent through it,
+and any harm from its operation.
 
 """)
 
@@ -237,7 +237,7 @@ sys.stdout.write(r"""
 
 `F4af`!1. Clone and configure`!`f
 
-Clone the repository and edit `!docker-compose.yml`! — set at minimum:
+Clone the repository and edit `!docker-compose.yml`!. Set at minimum:
 
 `=
   ADMIN_PASSWORD: your-strong-password-here
@@ -249,8 +249,8 @@ Clone the repository and edit `!docker-compose.yml`! — set at minimum:
 `F4af`!2. Configure Reticulum interfaces`!`f
 
 Edit `!config/reticulum/config`! to add your network interfaces.
-The default config connects to the public RNS testnet over TCP —
-remove or replace it for a private network.
+The default config connects to the public RNS testnet over TCP.
+Remove or replace it for a private network.
 
 -~
 
@@ -263,12 +263,12 @@ remove or replace it for a private network.
 `=
 
 Then open `F4af`!https://localhost:8443`!`f in your browser.
-Accept the self-signed certificate warning — HTTP on port `F4af8080`f redirects automatically.
+Accept the self-signed certificate warning. HTTP on port `F4af8080`f redirects automatically.
 
 -=
 
 >`!Configuration`!
-All options are set via environment variables in `!docker-compose.yml`!.
+All options are set through environment variables in `!docker-compose.yml`!.
 
 >>Core
 
@@ -304,9 +304,9 @@ All options are set via environment variables in `!docker-compose.yml`!.
   OIDC_ADMIN_SUBJECTS   Comma-separated admin subject claims
 `=
 
-Users on neither admin list are treated as standard users. Bootstrap
-with the local `!ADMIN_USERNAME`! / `!ADMIN_PASSWORD`! account, then
-promote OIDC users from `!Admin → Users`!.
+A user on neither admin list is a standard user. Bootstrap with the local
+`!ADMIN_USERNAME`! / `!ADMIN_PASSWORD`! account, then promote OIDC users
+from `!Admin → Users`!.
 
 -~
 
@@ -353,8 +353,8 @@ The node is detected automatically when `!./site/pages/`! exists.
 
 >>Executable Pages
 
-Pages with the execute bit set (`!chmod +x`!) are run as scripts.
-The script's stdout is served as the page content.
+A page with the execute bit set (`!chmod +x`!) runs as a script.
+The script's stdout serves as the page content.
 
 Available environment variables:
 
@@ -370,7 +370,7 @@ Available environment variables:
 
 >>Adding Python packages
 
-Drop a `!site/requirements.txt`! file in the volume — the entrypoint
+Drop a `!site/requirements.txt`! file in the volume. The entrypoint
 runs `!pip install --target /site/lib -r site/requirements.txt`! on
 every start. Installed packages persist across restarts.
 
@@ -390,15 +390,16 @@ Inside an executable .mu page:
   print(f"`F4af`!API: {r.status_code}`!`f")
 `=
 
-First start after editing requirements is slower (pip downloads). Subsequent
-starts are near-instant — pip skips already-satisfied entries.
+The first start after you edit requirements is slower, because pip
+downloads the packages. Later starts are near-instant. pip skips
+entries that are already satisfied.
 
 -~
 
 >>Persistent state and databases
 
-For local persistence use `!site/data/`! and Python's stdlib `!sqlite3`!
-— no extra packages needed:
+For local persistence, use `!site/data/`! and Python's stdlib `!sqlite3`!.
+No extra packages are needed:
 
 `=
   #!/usr/bin/env python3
@@ -409,14 +410,14 @@ For local persistence use `!site/data/`! and Python's stdlib `!sqlite3`!
       print(f"{name}: {pts}")
 `=
 
-For external databases, add the driver to `!requirements.txt`! and
+For an external database, add the driver to `!requirements.txt`! and
 connect over the host network from inside the script. NomadPortal does
-not embed any database — `!site/data/`! is just a writable directory in
+not embed any database. `!site/data/`! is just a writable directory in
 the bind-mounted volume.
 
-`Ffa4! Trust model:`f executable pages run with the same privileges as
+`Ffa4! Trust model:`f an executable page runs with the same privileges as
 the NomadPortal process. Anything in `!site/pages/`! and `!requirements.txt`!
-is fully trusted — only put scripts and packages there that you trust.
+is fully trusted. Put only scripts and packages there that you trust.
 
 -~
 
@@ -517,8 +518,8 @@ Tests for the Micron rendering library live in the
 -=
 
 >`!Operator Guidance`!
-NomadPortal acts as a `*conduit`* to the mesh — content from other
-nodes passes through your server but is not created or modified by you.
+NomadPortal acts as a `*conduit`* to the mesh. Content from other
+nodes passes through your server, but you do not create or modify it.
 
 >>Recommended defaults for public hosting
 
@@ -526,9 +527,9 @@ nodes passes through your server but is not created or modified by you.
 `F4a4◆`f Nodes/Messages sidebars: `!Logged-in users only`!
 `F4a4◆`f Address bar: `!Hidden for guests`!
 
-Unlocking guest access means visitors can browse the full NomadNet
-network freely. That network is unmoderated — a content warning dialog
-is shown before each external node is visited.
+If you unlock guest access, a visitor can browse the full NomadNet
+network freely. That network is unmoderated. NomadPortal shows a
+content warning dialog before a visitor navigates to an external node.
 
 -~
 
@@ -582,8 +583,8 @@ is shown before each external node is visited.
 `Fbbb The Micron to HTML library used by this project`f
 
 `[Ansi2MicronMU`https://github.com/JamesM92/Ansi2MicronMU]
-`Fbbb Convert ANSI terminal output to Micron — pair with executable `!.mu`! pages
-to expose existing CLI tools (git log, htop, etc.) on your NomadNet site`f
+`Fbbb Convert ANSI terminal output to Micron. Pair it with an executable
+`!.mu`! page to show an existing CLI tool (git log, htop, etc.) on your NomadNet site`f
 
 -=
 
@@ -902,8 +903,8 @@ ANSI colour piped through `[Ansi2MicronMU`https://github.com/JamesM92/Ansi2Micro
 `f
 -=
 
-`c`F4af`!End of showcase — if everything above matches MeshChat, parity is good.`!`f
-`c`F4afNomadPortal intentionally deviates in two places: larger font (16.64 vs 16px) and no line-wrap (horizontal scroll instead).`f
+`c`F4af`!End of showcase. If everything above matches MeshChat, parity is good.`!`f
+`c`F4afNomadPortal deviates in two places on purpose: a larger font (16.64px vs 16px) and no line-wrap (horizontal scroll instead).`f
 
 -=
 
