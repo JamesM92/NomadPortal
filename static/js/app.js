@@ -23,10 +23,67 @@ let _identifiedNodes = new Set();
 let _lastPage = { url: '', hash: '', path: '', html: '', micron: '' };
 
 // ---------------------------------------------------------------------------
-// Contact icon — real image from FIELD_ICON_APPEARANCE, or nothing
+// Identicon — deterministic per-hash fallback avatar (GitHub/Columba-
+// style symmetric dot grid), used whenever a node or contact has no
+// explicit icon. Ported from the NomadPortal-Android sister project's
+// Identicon.kt (itself ported from Columba, torlando-tech/columba) —
+// same algorithm, re-expressed as an SVG string instead of a Compose
+// Canvas, for direct innerHTML insertion (inline SVG, not a data: URI —
+// keeps it crisp at any size and able to use this app's own CSS
+// variables for the background, unlike _contactIcon's <img> path for a
+// server-rendered icon).
+//
+// hash[0..2] become the primary color's RGB, hash[3..5] the secondary's
+// (raw byte values, no palette/HSL). A 5-row grid only computes its left
+// 3 columns — hash[(row*3+col) % hash.length] — a dot is drawn (primary
+// if that byte is even, secondary if odd) whenever the byte exceeds 127,
+// then columns 0-1 are mirrored onto columns 4-3 for left-right symmetry
+// (column 2 is the untouched center axis). A hash under 6 bytes can't
+// feed both colors, so it renders a plain grey circle instead, matching
+// the degenerate case in the original.
+// ---------------------------------------------------------------------------
+function _identiconSvg(hashHex, size = 24) {
+  const hex   = (hashHex || '').replace(/[^0-9a-f]/gi, '');
+  const bytes = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
+
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ` +
+               `width="${size}" height="${size}" style="display:block;flex-shrink:0;border-radius:50%;">`;
+
+  if (bytes.length < 6) {
+    return `${open}<circle cx="16" cy="16" r="16" fill="#808080"/></svg>`;
+  }
+
+  const primary   = `rgb(${bytes[0]},${bytes[1]},${bytes[2]})`;
+  const secondary = `rgb(${bytes[3]},${bytes[4]},${bytes[5]})`;
+  const cell = 32 / 5;
+  let dots = '';
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      const val = bytes[(row * 3 + col) % bytes.length];
+      if (val <= 127) continue;
+      const color = (val % 2 === 0) ? primary : secondary;
+      const r  = (cell / 2.5).toFixed(2);
+      const cy = (row * cell + cell / 2).toFixed(2);
+      const cx = (col * cell + cell / 2).toFixed(2);
+      dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+      if (col < 2) {
+        const mx = ((4 - col) * cell + cell / 2).toFixed(2);
+        dots += `<circle cx="${mx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+      }
+    }
+  }
+  return `${open}<circle cx="16" cy="16" r="16" fill="var(--bg3)"/>${dots}</svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Contact icon — real image from FIELD_ICON_APPEARANCE, or an identicon
+// fallback keyed to the contact's own hash (was blank space before —
+// every contact is now visually distinct at a glance without needing an
+// icon explicitly set on either end).
 // ---------------------------------------------------------------------------
 function _contactIcon(contact, size = 24) {
-  if (!contact?.icon) return '';
+  if (!contact?.icon) return contact?.hash ? _identiconSvg(contact.hash, size) : '';
   const mime = contact.icon_mime || 'image/png';
   const r    = Math.round(size * 0.12);
   return `<img src="data:${mime};base64,${contact.icon}" ` +
@@ -296,9 +353,14 @@ function makeNodeItem(node) {
   if (isLocked) li.classList.add('node-locked');
 
   li.insertAdjacentHTML('beforeend',
-    `<span class="node-name">${dot}${esc(node.name)}</span>` +
-    `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
-    `<span class="node-age">${age}</span>`);
+    `<div class="node-icon-row">` +
+      `<span class="node-identicon">${_identiconSvg(node.hash, 22)}</span>` +
+      `<div class="node-text">` +
+        `<span class="node-name">${dot}${esc(node.name)}</span>` +
+        `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
+        `<span class="node-age">${age}</span>` +
+      `</div>` +
+    `</div>`);
 
   li.addEventListener('click', e => {
     if (e.target.closest('.node-fav-btn')) return;
@@ -1729,17 +1791,77 @@ function _safeHexColor(value, fallback) {
   return (typeof value === 'string' && _HEX_COLOR_RE.test(value)) ? value : fallback;
 }
 
+// Same rationale as _safeHexColor above, applied to MDI path "d" data
+// (fetched from this app's own bundled static/data/mdi_icons.json, not
+// remote/user-controlled — but still flows into innerHTML, so it's
+// worth the same collapse-the-dataflow treatment CodeQL's rule wants).
+// Legitimate SVG path data is only command letters, digits, '.', '-',
+// ',' and whitespace — never '"', '<', or '>' — so this is a strict
+// allowlist, not a guess at what to block.
+const _SVG_PATH_RE = /^[MmLlHhVvCcSsQqTtAaZz0-9.,\-\s]+$/;
+function _safeSvgPath(value) {
+  return (typeof value === 'string' && _SVG_PATH_RE.test(value)) ? value : null;
+}
+
+// ---------------------------------------------------------------------------
+// Real Material Design Icons catalog — lazy-fetched client-side mirror of
+// mdi_icons.py's server-side lookup, backing both this app's own live
+// icon preview (_iconSvg below) and the icon picker. Loaded once, only
+// when actually needed (icon editor opened) — static/data/mdi_icons.json
+// is ~2.7MB, no reason to fetch it on every page load. See NOTICE.md for
+// the data's own license (Apache-2.0, Material Design Icons project).
+// ---------------------------------------------------------------------------
+let _mdiPaths      = null;  // name -> SVG path "d" data, once loaded
+let _mdiCategories = null;  // category -> [names], once loaded
+let _mdiLoading    = null;  // in-flight fetch promise, so concurrent callers share it
+
+function _normalizeMdiName(name) {
+  return (name || '').trim().toLowerCase().replace(/[ _]/g, '-');
+}
+
+function _ensureMdiCatalog() {
+  if (_mdiPaths) return Promise.resolve();
+  if (_mdiLoading) return _mdiLoading;
+  _mdiLoading = Promise.all([
+    fetch('/static/data/mdi_icons.json').then(r => r.json()),
+    fetch('/static/data/mdi_categories.json').then(r => r.json()),
+  ]).then(([paths, categories]) => {
+    _mdiPaths = paths;
+    _mdiCategories = categories;
+  }).catch(e => {
+    // Missing/corrupt asset degrades every lookup to "not found" — same
+    // contract as mdi_icons.py's server-side loader. Reset _mdiLoading
+    // so a later call can retry (e.g. a transient network blip) instead
+    // of permanently remembering this one failure.
+    _mdiPaths = {};
+    _mdiCategories = {};
+    setStatus(`Could not load icon catalog: ${e.message}`, 'error');
+  }).finally(() => { _mdiLoading = null; });
+  return _mdiLoading;
+}
+
 function _iconSvg(glyph, fg, bg, size = 28) {
-  const g = (glyph || '?').slice(0, 2).toUpperCase();
-  const fontSize = size * 0.55;
   const safeFg = _safeHexColor(fg, '#ffffff');
   const safeBg = _safeHexColor(bg, '#5ba3c9');
+  const path = _mdiPaths && _safeSvgPath(_mdiPaths[_normalizeMdiName(glyph)]);
+
+  // Same 24x24-inset-in-32x32-circle math as messaging.py's
+  // _render_appearance_svg, so a self-rendered preview and a
+  // server-rendered contact icon look identical for the same inputs.
+  const glyphSvg = path
+    ? `<g transform="translate(6,6) scale(${(20 / 24).toFixed(4)})">` +
+      `<path d="${path}" fill="${safeFg}"/></g>`
+    : (() => {
+        const g = (glyph || '?').slice(0, 1).toUpperCase();
+        const fontSize = (size * 0.55) * 32 / size;
+        return `<text x="16" y="22" text-anchor="middle" font-size="${fontSize}" ` +
+               `font-family="sans-serif" font-weight="bold" fill="${safeFg}">${esc(g)}</text>`;
+      })();
+
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ' +
     `width="${size}" height="${size}">` +
-    `<circle cx="16" cy="16" r="16" fill="${safeBg}"/>` +
-    `<text x="16" y="22" text-anchor="middle" font-size="${fontSize * 32 / size}" ` +
-    `font-family="sans-serif" font-weight="bold" fill="${safeFg}">${esc(g)}</text>` +
+    `<circle cx="16" cy="16" r="16" fill="${safeBg}"/>${glyphSvg}` +
     '</svg>'
   );
 }
@@ -1759,12 +1881,15 @@ function _renderMyIcon() {
 function _renderIconEditorPreview() {
   const slot = $('icon-editor-preview');
   if (!slot) return;
-  slot.innerHTML = _iconSvg(
-    $('icon-glyph').value,
-    $('icon-fg').value,
-    $('icon-bg').value,
-    36,
-  );
+  const glyph = $('icon-glyph').value;
+  slot.innerHTML = _iconSvg(glyph, $('icon-fg').value, $('icon-bg').value, 36);
+  const label = $('icon-glyph-label');
+  if (label) {
+    // Real MDI name once the catalog's loaded and recognizes it;
+    // otherwise show the raw stored value so a not-yet-migrated old
+    // single-letter glyph is still legible as "what's saved", not blank.
+    label.textContent = (_mdiPaths && _mdiPaths[_normalizeMdiName(glyph)]) ? glyph : (glyph || '?');
+  }
 }
 
 function _openIconEditor() {
@@ -1774,12 +1899,17 @@ function _openIconEditor() {
   $('icon-bg').value    = ic.bg;
   _renderIconEditorPreview();
   $('icon-editor').hidden = false;
+  // Warm the catalog now rather than waiting for "Choose icon…" — by the
+  // time that click happens the fetch is usually already done, so the
+  // picker opens with real icons rendered immediately instead of a
+  // blank grid for a beat.
+  _ensureMdiCatalog().then(_renderIconEditorPreview);
 }
 
 if ($('btn-edit-icon')) {
   $('btn-edit-icon').addEventListener('click', _openIconEditor);
   $('btn-icon-cancel').addEventListener('click', () => { $('icon-editor').hidden = true; });
-  ['icon-glyph', 'icon-fg', 'icon-bg'].forEach(id => {
+  ['icon-fg', 'icon-bg'].forEach(id => {
     $(id).addEventListener('input', _renderIconEditorPreview);
   });
   $('btn-icon-save').addEventListener('click', async () => {
@@ -1799,6 +1929,100 @@ if ($('btn-edit-icon')) {
         $('icon-editor').hidden = true;
       }
     } catch (e) {}
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Icon picker — search + category chips over the full MDI catalog.
+// Renders a capped number of results at a time (real result sets can run
+// into the thousands; an unbounded grid would be both slow to build and
+// useless to scroll through) — search narrows fast in practice, and a
+// truncation note tells the user to narrow further rather than silently
+// hiding results with no explanation.
+// ---------------------------------------------------------------------------
+const _ICON_PICKER_MAX_RESULTS = 300;
+let _iconPickerCategory = null;  // null = "All" / search-only mode
+
+function _renderIconPickerGrid(names) {
+  const grid = $('icon-picker-grid');
+  const status = $('icon-picker-status');
+  if (!grid) return;
+  const total = names.length;
+  const shown = names.slice(0, _ICON_PICKER_MAX_RESULTS);
+  grid.innerHTML = shown.map(name => {
+    const path = _safeSvgPath(_mdiPaths[name]);
+    if (!path) return '';  // shouldn't happen against trusted bundled data — skip, don't render garbage
+    const svg = `<svg viewBox="0 0 24 24"><path d="${path}" fill="currentColor"/></svg>`;
+    return `<button type="button" class="icon-picker-item" data-name="${esc(name)}" ` +
+           `title="${esc(name)}">${svg}</button>`;
+  }).join('');
+  status.textContent = total === 0
+    ? 'No icons match.'
+    : total > _ICON_PICKER_MAX_RESULTS
+      ? `Showing ${_ICON_PICKER_MAX_RESULTS} of ${total} — narrow your search to see more.`
+      : `${total} icon${total === 1 ? '' : 's'}`;
+}
+
+function _applyIconPickerFilter() {
+  if (!_mdiPaths) return;
+  const query = ($('icon-picker-search').value || '').trim().toLowerCase();
+  let pool = _iconPickerCategory
+    ? (_mdiCategories[_iconPickerCategory] || [])
+    : Object.keys(_mdiPaths);
+  if (query) pool = pool.filter(name => name.includes(query));
+  // Search-all-icons with no query yet would just be the first N of an
+  // unsorted 7400-entry object — not useful. Category browsing has no
+  // such problem (each category's own list is small enough to show
+  // directly), so only gate the "All + no query" combination.
+  if (!_iconPickerCategory && !query) {
+    $('icon-picker-grid').innerHTML = '';
+    $('icon-picker-status').textContent = 'Search or pick a category to browse icons.';
+    return;
+  }
+  _renderIconPickerGrid(pool.sort());
+}
+
+function _renderIconPickerCategories() {
+  const wrap = $('icon-picker-categories');
+  if (!wrap || !_mdiCategories) return;
+  const chips = ['All', ...Object.keys(_mdiCategories).sort()];
+  wrap.innerHTML = chips.map(cat => {
+    const isAll = cat === 'All';
+    const active = isAll ? !_iconPickerCategory : _iconPickerCategory === cat;
+    return `<span class="icon-picker-chip${active ? ' active' : ''}" ` +
+           `data-cat="${isAll ? '' : esc(cat)}">${esc(cat)}</span>`;
+  }).join('');
+}
+
+function _openIconPicker() {
+  $('icon-picker-modal').hidden = false;
+  $('icon-picker-search').value = '';
+  _iconPickerCategory = null;
+  _ensureMdiCatalog().then(() => {
+    _renderIconPickerCategories();
+    _applyIconPickerFilter();
+  });
+  if (_mdiCategories) _renderIconPickerCategories();
+  $('icon-picker-status').textContent = _mdiPaths ? '' : 'Loading icon catalog…';
+}
+
+if ($('btn-choose-icon')) {
+  $('btn-choose-icon').addEventListener('click', _openIconPicker);
+  $('btn-icon-picker-cancel').addEventListener('click', () => { $('icon-picker-modal').hidden = true; });
+  $('icon-picker-search').addEventListener('input', _applyIconPickerFilter);
+  $('icon-picker-categories').addEventListener('click', e => {
+    const chip = e.target.closest('.icon-picker-chip');
+    if (!chip) return;
+    _iconPickerCategory = chip.dataset.cat || null;
+    _renderIconPickerCategories();
+    _applyIconPickerFilter();
+  });
+  $('icon-picker-grid').addEventListener('click', e => {
+    const item = e.target.closest('.icon-picker-item');
+    if (!item) return;
+    $('icon-glyph').value = item.dataset.name;
+    _renderIconEditorPreview();
+    $('icon-picker-modal').hidden = true;
   });
 }
 
@@ -2643,7 +2867,11 @@ function renderPeerList() {
     const row = document.createElement('div');
     row.className = 'contact-item';
     row.style.cssText = 'cursor:pointer;display:flex;align-items:center;gap:8px;';
-    const peerIcon = _contactIcon(contact, 28);
+    // Falls back to {hash: peer.hash} so an announced peer who isn't a
+    // saved contact yet still gets an identicon keyed to their real
+    // hash, instead of no icon at all until the first click auto-adds
+    // them as a contact below.
+    const peerIcon = _contactIcon(contact || { hash: peer.hash }, 28);
     const hopsLabel = (peer.hops === null || peer.hops === undefined)
       ? '? hops'
       : peer.hops === 0

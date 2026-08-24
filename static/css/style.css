@@ -301,6 +301,12 @@ body {
 }
 #node-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
 #node-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
+/* Identicon + name/hash/age stack, side by side. .node-right (star/pin,
+   hops) stays float:right and outside this row — inserted first in the
+   DOM, so it still reserves its own space at the row's right edge. */
+#node-list .node-icon-row { display: flex; align-items: flex-start; gap: 7px; }
+#node-list .node-identicon { margin-top: 1px; }
+#node-list .node-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #node-list .node-name  { display: block; font-size: 13px; }
 #node-list .node-hash  { display: block; font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 #node-list .node-age   { display: block; font-size: 10px; color: var(--text-dim); }
