@@ -11,6 +11,16 @@ license terms.
   Fonts glyph patches are © Ryan L McIntyre under the MIT license. See
   `static/fonts/RobotoMonoNerdFont/LICENSE.md` for full text.
 
+- **Material Design Icons** (`static/data/mdi_icons.json`,
+  `static/data/mdi_categories.json`) — © the Pictogrammers project
+  (<https://github.com/Templarian/MaterialDesign>) under the Apache
+  License 2.0. Bundled as name-to-SVG-path-data (and name-to-category)
+  JSON, generated from the `@mdi/js` npm package — the same real MDI
+  catalog Sideband and MeshChat draw their `FIELD_ICON_APPEARANCE` icon
+  names from, used here to render a real icon shape for both inbound
+  contact icons and this operator's own icon picker, rather than a
+  first-letter placeholder.
+
 ## Python dependencies
 
 NomadPortal pulls these Python packages (each under its own license; see
