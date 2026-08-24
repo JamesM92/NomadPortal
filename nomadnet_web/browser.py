@@ -1854,12 +1854,20 @@ class NodeBrowser:
         ):
             return False
         with self._lock:
-            # Index-page favorites still require the node to exist (existing
-            # behaviour for the node-list star). Page favorites are accepted
-            # even if the node hasn't announced yet — useful for bookmarking
-            # a manually-typed address.
+            # Favoriting (value=True) a node this device has never actually
+            # heard announce — e.g. one reached via a manually-typed
+            # address — is now allowed: a minimal node record is created
+            # on the fly via _ensure_node_record(), the same as if the
+            # user had found it through a real announce first. Page
+            # favorites (path != "/") already had this looser behaviour;
+            # this brings index-page favorites (the node-list star) in
+            # line with them instead of requiring an announce first.
+            # Un-favoriting (value=False) a node with no record at all
+            # still declines outright — nothing to remove.
             if path == "/" and self.nodes.get(hash_hex) is None:
-                return False
+                if not value:
+                    return False
+                self._ensure_node_record(hash_hex, name)
 
             if user_sub:
                 favs = self._favorites.setdefault(user_sub, [])
@@ -2001,6 +2009,45 @@ class NodeBrowser:
 
         return out
 
+    @staticmethod
+    def _new_node_record(hash_hex: str, name: str, announce_count: int = 0) -> dict:
+        """The one place this record's shape is written down — every path
+        that can bring a node into existence (a real announce via
+        _register_node, a fetch attempt against an unannounced node via
+        _record_fetch, and favoriting a never-announced node via
+        set_favorite) should build through here instead of hand-writing
+        the dict literal separately, so the fields can't drift out of
+        sync between call sites."""
+        now = time.time()
+        return {
+            "hash":           hash_hex,
+            "name":           name,
+            "first_seen":     now,
+            "last_seen":      now,
+            "announce_count": announce_count,
+            "view_count":     0,
+            "rx_bytes":       0,
+            "last_load_ms":   None,
+            "avg_load_ms":    None,
+            "last_ping_ms":   None,
+            "last_load_ok":   None,
+            "ever_load_ok":   False,
+            "favorited":      False,
+        }
+
+    def _ensure_node_record(self, hash_hex: str, name: str = "") -> dict:
+        """Create a minimal node record (announce_count=0, since none has
+        actually happened yet) if none exists yet for hash_hex — never
+        overwrites real announce data a node might already have. Returns
+        the (possibly just-created) record. Caller must hold self._lock."""
+        existing = self.nodes.get(hash_hex)
+        if existing is not None:
+            return existing
+        record = self._new_node_record(hash_hex, name or (hash_hex[:16] + "…"))
+        self.nodes[hash_hex] = record
+        self._mark_nodes_dirty()
+        return record
+
     def _register_node(self, destination_hash: bytes, app_data: Optional[bytes]):
         hash_hex = destination_hash.hex()
         name = "Unnamed Node"
@@ -2018,21 +2065,7 @@ class NodeBrowser:
                 existing["last_seen"]      = now
                 existing["announce_count"] = existing.get("announce_count", 0) + 1
             else:
-                self.nodes[hash_hex] = {
-                    "hash":           hash_hex,
-                    "name":           name,
-                    "first_seen":     now,
-                    "last_seen":      now,
-                    "announce_count": 1,
-                    "view_count":     0,
-                    "rx_bytes":       0,
-                    "last_load_ms":   None,
-                    "avg_load_ms":    None,
-                    "last_ping_ms":   None,
-                    "last_load_ok":   None,
-                    "ever_load_ok":   False,
-                    "favorited":      False,
-                }
+                self.nodes[hash_hex] = self._new_node_record(hash_hex, name, announce_count=1)
 
         log.info(
             "Node %s: %s (announces=%d)",
@@ -2046,21 +2079,7 @@ class NodeBrowser:
         with self._lock:
             node = self.nodes.get(hash_hex)
             if node is None:
-                node = {
-                    "hash":           hash_hex,
-                    "name":           hash_hex[:16] + "…",
-                    "first_seen":     time.time(),
-                    "last_seen":      time.time(),
-                    "announce_count": 0,
-                    "view_count":     0,
-                    "rx_bytes":       0,
-                    "last_load_ms":   None,
-                    "avg_load_ms":    None,
-                    "last_ping_ms":   None,
-                    "last_load_ok":   None,
-                    "ever_load_ok":   False,
-                    "favorited":      False,
-                }
+                node = self._new_node_record(hash_hex, hash_hex[:16] + "…")
                 self.nodes[hash_hex] = node
 
             if update_status:
