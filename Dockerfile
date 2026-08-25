@@ -33,8 +33,20 @@ WORKDIR /app
 # Install Python dependencies first (layer-cached). requirements.txt
 # pins setuptools explicitly (see its own comment there) — the base
 # image's ensurepip-installed setuptools (70.3.0) carries CVE-2025-47273.
+#
+# --ignore-installed on that one package specifically: ensurepip's
+# bootstrap install doesn't clean up under a normal `pip install`
+# upgrade the way a pip-managed install does — confirmed real, not
+# hypothetical: `pip install -r requirements.txt` alone correctly
+# resolved and installed setuptools==83.0.0 (visible in the build
+# log), but Trivy still found the untouched 70.3.0 dist-info
+# alongside it. --ignore-installed forces a clean install over
+# whatever ensurepip left behind instead of trying to detect/upgrade
+# it. requirements.txt's own setuptools==83.0.0 line then no-ops
+# (already satisfied) when the second command runs.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --ignore-installed "setuptools==83.0.0" \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
