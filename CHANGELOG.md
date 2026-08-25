@@ -167,13 +167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``.hadolint.yaml`` for the accompanying DL3005 exception and its
   rationale). pip-audit / bandit / CodeQL all passed throughout.
 
-- **Pin `setuptools==78.1.1`** in ``requirements.txt`` (not an app
+- **Pin `setuptools==83.0.0`** in ``requirements.txt`` (not an app
   dependency — the base image's ensurepip-installed setuptools,
-  70.3.0, carries CVE-2025-47273, a path-traversal issue). Another
-  Trivy finding on the same v1.3.0 PR; pinned through this file
-  rather than a bare Dockerfile ``pip install --upgrade`` so it
-  stays under the same version-bump discipline as every other
-  dependency here.
+  70.3.0, carries CVE-2025-47273, a path-traversal issue, fixed in
+  78.1.1). pip-audit's broader OSV feed then flagged a second, newer
+  issue at 78.1.1 (PYSEC-2026-3447, a Unicode-normalization MANIFEST.in
+  bypass on macOS APFS/HFS+, irrelevant to how this app builds/runs
+  but still flagged) fixed only in 83.0.0 — verified clean with
+  ``pip-audit -r requirements.txt`` locally before landing. Pinned
+  through this file rather than a bare Dockerfile ``pip install
+  --upgrade`` so it stays under the same version-bump discipline as
+  every other dependency here.
 
 ### Fixed
 
