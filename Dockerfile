@@ -48,14 +48,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # for the literal version string in any METADATA/PKG-INFO file — to
 # find the real source before writing another guess at a fix. Not a
 # fix by itself; remove once the real location is known.
-RUN echo "--- setuptools paths outside site-packages/setuptools-83.0.0* ---" \
- && find / -xdev -iname "*setuptools*" 2>/dev/null \
-      | grep -v '^/usr/local/lib/python3\.14/site-packages/setuptools\(-83\.0\.0\.dist-info\)\?\(/\|$\)' \
-      || true \
- && echo "--- METADATA/PKG-INFO/egg-info files mentioning 70.3.0 ---" \
- && grep -rl "70.3.0" / --include="METADATA" --include="PKG-INFO" --include="*.egg-info" 2>/dev/null \
-      || true \
- && echo "--- done ---"
+RUN echo "--- setuptools paths outside site-packages/setuptools-83.0.0* ---"; \
+    find / -xdev -iname "*setuptools*" \
+      -not -path "/usr/local/lib/python3.14/site-packages/setuptools" \
+      -not -path "/usr/local/lib/python3.14/site-packages/setuptools/*" \
+      -not -path "/usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info" \
+      -not -path "/usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info/*" \
+      2>/dev/null; \
+    echo "--- METADATA/PKG-INFO/egg-info files mentioning 70.3.0 ---"; \
+    grep -rl "70.3.0" / --include="METADATA" --include="PKG-INFO" --include="*.egg-info" 2>/dev/null; \
+    echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
