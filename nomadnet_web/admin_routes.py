@@ -393,13 +393,55 @@ def identity_announce(identity_id: str):
 # Identities  (admin only — one identity per user, admin can reset)
 # ---------------------------------------------------------------------------
 
+def _resolve_owner_label(user_sub: str) -> str:
+    """A human-readable label for the web account that owns [user_sub],
+    for the admin identities table — real name/email when available,
+    falling back to the bare account key for a local login UserStore
+    has no record of (the bootstrap ADMIN_USERNAME/PASSWORD superadmin
+    is never registered there — see UserStore's own doc comment)."""
+    if not user_sub:
+        return "(no account)"
+    user_store = _user_store()
+    record = user_store.get_user(user_sub) if user_store else None
+    if record:
+        return record.get("name") or record.get("email") or user_sub
+    if user_sub.startswith("local:"):
+        return user_sub[len("local:"):]
+    return user_sub
+
+
 @admin_bp.get("/identities")
 @admin_required
 def identities():
+    """Multi-identity means one account can own several identities now
+    (not the one-per-account assumption this page's own copy used to
+    make) — each row is tagged with its owning account's real name/
+    email (not just the identity's own display name, and not just a
+    truncated opaque user_sub hash) and whether it's that account's
+    currently *active* identity, and rows are grouped by owner so an
+    account's several identities sit together rather than scattered
+    across the table in creation order."""
+    id_store   = _id_store()
+    all_idents = id_store.list_identities()
+
+    active_by_user: dict = {}
+    enriched = []
+    for ident in all_idents:
+        user_sub = ident.get("user_sub", "")
+        if user_sub and user_sub not in active_by_user:
+            active_entry = id_store.get_active_for_user(user_sub)
+            active_by_user[user_sub] = active_entry["id"] if active_entry else None
+        entry = dict(ident)
+        entry["owner_label"] = _resolve_owner_label(user_sub)
+        entry["is_active"]   = bool(user_sub) and active_by_user.get(user_sub) == ident["id"]
+        enriched.append(entry)
+
+    enriched.sort(key=lambda e: (e["owner_label"].lower(), e.get("created", 0)))
+
     return render_template(
         "admin/identities.html",
         user=current_user,
-        identities=_id_store().list_identities(),
+        identities=enriched,
     )
 
 

@@ -271,6 +271,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The admin Identities page didn't say which account an identity
+  belonged to.** Its "User" column actually showed the identity's own
+  display name, not the owning account — harmless when every account
+  had exactly one identity, but multi-identity means an admin can now
+  see several identities sharing the same account with no way to tell.
+  New "Owner" column resolves the real account name/email (via
+  ``UserStore``) or the local-login username, falls back to the bare
+  account key for an orphaned/unregistered one; rows are grouped by
+  owner so one account's identities sit together; each identity's own
+  name gets an "active" badge when it's that account's currently
+  presented one. The stale "each user account has one RNS identity"
+  intro copy is updated to describe the real multi-identity model.
+
 - **Signing out landed on the sign-in page instead of the app.**
   ``/auth/logout`` redirected back to ``auth.login_page`` in both the
   OIDC (``post_logout_redirect_uri``) and local-login paths — signing

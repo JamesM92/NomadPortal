@@ -12,20 +12,24 @@
 
 <div class="card" style="margin-bottom:10px;">
   <p class="dim" style="line-height:1.6;">
-    Each user account has one RNS identity, created automatically on first use.
-    Identities are only revealed when you explicitly send a <strong>fingerprint</strong>
-    to a node — browsing is always anonymous.
-    Resetting regenerates the keypair; the old identity cannot be recovered.
+    Each user account gets an RNS identity automatically on first use, and
+    can create more from Settings → Identities — one is "active" at a time
+    for sending/announcing, but every identity an account owns can still
+    receive messages. Identities are only revealed when a user explicitly
+    sends a <strong>fingerprint</strong> to a node — browsing is always
+    anonymous. Resetting regenerates the keypair; the old identity cannot
+    be recovered.
   </p>
 </div>
 
 {% if identities %}
 <div class="card">
-  <div class="card-title">User identities ({{ identities | length }})</div>
+  <div class="card-title">Identities ({{ identities | length }})</div>
   <table class="admin-table">
     <thead>
       <tr>
-        <th>User</th>
+        <th>Owner</th>
+        <th>Identity</th>
         <th>Identity hash</th>
         <th style="width:90px"></th>
       </tr>
@@ -34,9 +38,16 @@
       {% for ident in identities %}
       <tr>
         <td style="font-size:13px;">
-          {{ ident.name | e }}
+          {{ ident.owner_label | e }}
           {% if ident.get('user_sub') %}
           <br><span class="mono dim" style="font-size:10px;">{{ ident.user_sub[:32] }}…</span>
+          {% endif %}
+        </td>
+
+        <td style="font-size:13px;">
+          {{ ident.name | e }}
+          {% if ident.is_active %}
+          <br><span class="badge badge-ok" style="font-size:10px;">active</span>
           {% endif %}
         </td>
 
@@ -48,7 +59,7 @@
         <td>
           <form method="post"
                 action="{{ url_for('admin.identity_reset', identity_id=ident.id) }}"
-                data-confirm="Reset identity for '{{ ident.name }}'? This generates a new keypair — the old identity is permanently lost.">
+                data-confirm="Reset identity '{{ ident.name }}' (owned by {{ ident.owner_label }})? This generates a new keypair — the old identity is permanently lost.">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Reset</button>
           </form>
