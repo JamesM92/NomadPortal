@@ -40,15 +40,22 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The site-packages install above doesn't touch this: ensurepip bundles
-# its own static copy of the setuptools wheel it originally used to
-# bootstrap pip, at .../ensurepip/_bundled/setuptools-70.3.0-*.whl —
-# not an installed package, just a stdlib resource file, so Trivy kept
-# finding 70.3.0 here even after the real install was confirmed clean
-# at 83.0.0. Nothing in this image re-runs `python -m ensurepip` after
-# build, so it's safe to delete outright. Printed so the build log
-# confirms what (if anything) actually matched.
-RUN find / -xdev -iname "setuptools-70.3.0*" -print -delete
+# TEMPORARY diagnostic — the previous guess (ensurepip's bundled
+# wheel, matched by filename) found nothing: that RUN step printed no
+# output before Trivy still reported 70.3.0 on the following run. This
+# casts a much wider net — every setuptools-related path outside the
+# confirmed-clean 83.0.0 site-packages install, plus a content grep
+# for the literal version string in any METADATA/PKG-INFO file — to
+# find the real source before writing another guess at a fix. Not a
+# fix by itself; remove once the real location is known.
+RUN echo "--- setuptools paths outside site-packages/setuptools-83.0.0* ---" \
+ && find / -xdev -iname "*setuptools*" 2>/dev/null \
+      | grep -v '^/usr/local/lib/python3\.14/site-packages/setuptools\(-83\.0\.0\.dist-info\)\?\(/\|$\)' \
+      || true \
+ && echo "--- METADATA/PKG-INFO/egg-info files mentioning 70.3.0 ---" \
+ && grep -rl "70.3.0" / --include="METADATA" --include="PKG-INFO" --include="*.egg-info" 2>/dev/null \
+      || true \
+ && echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
