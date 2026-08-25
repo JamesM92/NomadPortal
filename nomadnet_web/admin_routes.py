@@ -738,6 +738,7 @@ def api_ui_settings_save():
         "guests_address_bar", "users_address_bar", "admins_address_bar",
         "guests_nodes_panel", "users_nodes_panel", "admins_nodes_panel",
         "guests_messages_panel", "users_messages_panel", "admins_messages_panel",
+        "guests_network_panel", "users_network_panel", "admins_network_panel",
         "users_can_message",
         # General settings
         "app_title", "site_name", "default_node",

@@ -219,7 +219,8 @@ body {
 .sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 #sidebar-panel-nodes,
-#sidebar-panel-messages {
+#sidebar-panel-messages,
+#sidebar-panel-network {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -228,7 +229,8 @@ body {
 }
 #sidebar[hidden] { display: none; }
 #sidebar-panel-nodes[hidden],
-#sidebar-panel-messages[hidden] { display: none; }
+#sidebar-panel-messages[hidden],
+#sidebar-panel-network[hidden] { display: none; }
 
 .sidebar-header {
   padding: 8px 10px;
@@ -267,11 +269,13 @@ body {
 #btn-identify svg { display: block; }
 #btn-identify.identify-active { color: var(--accent); }
 
-#node-filter-wrap {
+#node-filter-wrap,
+#network-filter-wrap {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
-#node-filter {
+#node-filter,
+#network-filter {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -282,16 +286,35 @@ body {
   border-radius: 2px;
   outline: none;
 }
-#node-filter:focus { border-color: var(--accent); }
+#node-filter:focus,
+#network-filter:focus { border-color: var(--accent); }
 
-#node-list {
+/* Type-filter chip row (Network panel: All / Sites / Peers / Relays)
+   — same visual language as the icon picker's category chips
+   (templates/index.html), pulled out as a real reusable class since
+   this is a standing feature, not a one-off modal. */
+#network-type-chips {
+  display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
+  padding: 0 8px 6px; flex-shrink: 0;
+}
+.type-chip {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
+  border-radius: 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.type-chip:hover  { color: var(--text); border-color: var(--accent); }
+.type-chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+#node-list,
+#network-list {
   list-style: none;
   flex: 1;
   overflow-y: auto;
   padding: 4px 0;
 }
 
-#node-list li {
+#node-list li,
+#network-list li {
   padding: 7px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -308,25 +331,35 @@ body {
    keeps order:2 so it still renders on the right despite being first
    in the DOM (see makeNodeItem's own comment for why it's inserted
    first). */
-#node-list li[data-hash] { display: flex; align-items: flex-start; gap: 6px; }
-#node-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
-#node-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
+#node-list li[data-hash],
+#network-list li[data-hash] { display: flex; align-items: flex-start; gap: 6px; }
+#node-list li:hover,
+#network-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
+#node-list li.active,
+#network-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
 /* Identicon + name/hash/age stack. flex:1 + min-width:0 is what lets it
    shrink and actually hand its unclaimed space to .node-right instead
    of pushing/overlapping it. */
-#node-list .node-icon-row { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; }
-#node-list .node-identicon { margin-top: 1px; flex-shrink: 0; }
-#node-list .node-text { min-width: 0; flex: 1; overflow: hidden; }
-#node-list .node-name  {
+#node-list .node-icon-row,
+#network-list .node-icon-row { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; }
+#node-list .node-identicon,
+#network-list .node-identicon { margin-top: 1px; flex-shrink: 0; }
+#node-list .node-text,
+#network-list .node-text { min-width: 0; flex: 1; overflow: hidden; }
+#node-list .node-name,
+#network-list .node-name  {
   display: block; font-size: 13px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#node-list .node-hash  {
+#node-list .node-hash,
+#network-list .node-hash  {
   display: block; font-size: 10px; color: var(--text-dim); margin-top: 1px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#node-list .node-age   { display: block; font-size: 10px; color: var(--text-dim); }
-#node-list .node-hops  {
+#node-list .node-age,
+#network-list .node-age   { display: block; font-size: 10px; color: var(--text-dim); }
+#node-list .node-hops,
+#network-list .node-hops  {
   display: block;
   font-size: 10px;
   color: var(--accent2);
@@ -336,7 +369,23 @@ body {
   line-height: 1;
   white-space: nowrap;
 }
-#node-list .node-hops-unknown { color: var(--text-dim); font-style: italic; }
+#node-list .node-hops-unknown,
+#network-list .node-hops-unknown { color: var(--text-dim); font-style: italic; }
+/* Network-tab-only kind badge (Site / Peer / Relay) — sits below the
+   hops badge in .node-right, same column, small enough not to compete
+   with it for attention (the ring color already carries this meaning
+   at a glance; this is the text fallback for anyone not distinguishing
+   the ring hues). */
+#network-list .node-kind {
+  display: block;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-top: 2px;
+  text-align: center;
+  white-space: nowrap;
+}
 .node-dot          { font-size: 10px; margin-right: 5px; vertical-align: middle; }
 .node-dot-none     { color: var(--border); }
 .node-dot-ok       { color: var(--accent); }
@@ -382,7 +431,8 @@ body {
    comment above), order:2 so it still lands on the right despite being
    first in the DOM. flex-shrink:0 guarantees it never gets squeezed by
    a long node name — it always has its own reserved, clickable space. */
-#node-list .node-right {
+#node-list .node-right,
+#network-list .node-right {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -420,7 +470,8 @@ body {
 #node-list li.node-locked { opacity: 0.35; cursor: default; }
 #node-list li.node-locked:hover { background: transparent; }
 
-#sidebar-footer {
+#sidebar-footer,
+.sidebar-footer {
   padding: 5px 10px;
   border-top: 1px solid var(--border);
   font-size: 11px;
@@ -495,7 +546,8 @@ body {
 .bc-btn:disabled { opacity: 0.4; cursor: default; }
 .bc-btn[hidden] { display: none; }
 
-#node-sort {
+#node-sort,
+#network-sort {
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);

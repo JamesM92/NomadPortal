@@ -41,17 +41,34 @@ let _lastPage = { url: '', hash: '', path: '', html: '', micron: '' };
 // (column 2 is the untouched center axis). A hash under 6 bytes can't
 // feed both colors, so it renders a plain grey circle instead, matching
 // the degenerate case in the original.
+//
+// ringColor draws a thin colored stroke around the circle when set —
+// same "kind" indicator Android's Identicon.kt already has (see its own
+// ringColor doc comment): a real, distinct color per *kind of thing*
+// (site / contact / relay), not left to the hash-derived dot colors to
+// carry any of that meaning. Matches Android's own hex values exactly
+// (_RING_* below) so the two apps read as the same visual language.
+// Undefined/falsy draws no ring, the original plain look.
 // ---------------------------------------------------------------------------
-function _identiconSvg(hashHex, size = 24) {
+const _RING_SITE  = '#9B6BC8'; // purple — matches Android's NomadPortalPurple
+const _RING_PEER  = '#5BC8C8'; // teal — matches Android's NomadIdenticonRingContact
+const _RING_RELAY = '#C8C85B'; // gold — matches Android's NomadIdenticonRingRelay
+
+function _identiconSvg(hashHex, size = 24, ringColor = null) {
   const hex   = (hashHex || '').replace(/[^0-9a-f]/gi, '');
   const bytes = [];
   for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
 
   const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ` +
                `width="${size}" height="${size}" style="display:block;flex-shrink:0;border-radius:50%;">`;
+  // Stroke straddles the circle's own path, so the radius backs off by
+  // half the stroke width (plus a hair of margin) to stay inside the
+  // 32x32 viewBox rather than clipping at the edge.
+  const ring = ringColor ? ` stroke="${ringColor}" stroke-width="1.5"` : '';
+  const r    = ringColor ? 15 : 16;
 
   if (bytes.length < 6) {
-    return `${open}<circle cx="16" cy="16" r="16" fill="#808080"/></svg>`;
+    return `${open}<circle cx="16" cy="16" r="${r}" fill="#808080"${ring}/></svg>`;
   }
 
   const primary   = `rgb(${bytes[0]},${bytes[1]},${bytes[2]})`;
@@ -63,17 +80,17 @@ function _identiconSvg(hashHex, size = 24) {
       const val = bytes[(row * 3 + col) % bytes.length];
       if (val <= 127) continue;
       const color = (val % 2 === 0) ? primary : secondary;
-      const r  = (cell / 2.5).toFixed(2);
+      const cr = (cell / 2.5).toFixed(2);
       const cy = (row * cell + cell / 2).toFixed(2);
       const cx = (col * cell + cell / 2).toFixed(2);
-      dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+      dots += `<circle cx="${cx}" cy="${cy}" r="${cr}" fill="${color}"/>`;
       if (col < 2) {
         const mx = ((4 - col) * cell + cell / 2).toFixed(2);
-        dots += `<circle cx="${mx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+        dots += `<circle cx="${mx}" cy="${cy}" r="${cr}" fill="${color}"/>`;
       }
     }
   }
-  return `${open}<circle cx="16" cy="16" r="16" fill="var(--bg3)"/>${dots}</svg>`;
+  return `${open}<circle cx="16" cy="16" r="${r}" fill="var(--bg3)"${ring}/>${dots}</svg>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +100,14 @@ function _identiconSvg(hashHex, size = 24) {
 // icon explicitly set on either end).
 // ---------------------------------------------------------------------------
 function _contactIcon(contact, size = 24) {
-  if (!contact?.icon) return contact?.hash ? _identiconSvg(contact.hash, size) : '';
+  // Ring only applies to the identicon fallback below, not a real icon
+  // image — matches Android's ContactAvatar exactly (ringColor is never
+  // passed on its ContactIcon.Appearance/successful-RawImage branches,
+  // only its own Identicon-fallback ones). A real icon is already
+  // visually distinct; the ring's job is telling "no custom icon"
+  // contacts apart from sites/relays at a glance, not decorating every
+  // avatar regardless of content.
+  if (!contact?.icon) return contact?.hash ? _identiconSvg(contact.hash, size, _RING_PEER) : '';
   const mime = contact.icon_mime || 'image/png';
   const r    = Math.round(size * 0.12);
   return `<img src="data:${mime};base64,${contact.icon}" ` +
@@ -435,7 +459,7 @@ function makeNodeItem(node) {
 
   li.insertAdjacentHTML('beforeend',
     `<div class="node-icon-row">` +
-      `<span class="node-identicon">${_identiconSvg(node.hash, 22)}</span>` +
+      `<span class="node-identicon">${_identiconSvg(node.hash, 22, _RING_SITE)}</span>` +
       `<div class="node-text">` +
         `<span class="node-name">${dot}${esc(node.name)}</span>` +
         `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
@@ -1828,8 +1852,10 @@ $('btn-fav-page')?.addEventListener('click', toggleCurrentPageFavorite);
 function showSidebarPanel(name) {
   $('sidebar-panel-nodes').hidden    = (name !== 'nodes');
   $('sidebar-panel-messages').hidden = (name !== 'messages');
+  $('sidebar-panel-network').hidden  = (name !== 'network');
   $('sidebar-tab-nodes').classList.toggle('active',    name === 'nodes');
   $('sidebar-tab-messages').classList.toggle('active', name === 'messages');
+  $('sidebar-tab-network').classList.toggle('active',  name === 'network');
 }
 
 $('sidebar-tabs').addEventListener('click', e => {
@@ -1840,6 +1866,8 @@ $('sidebar-tabs').addEventListener('click', e => {
   if (panel === 'messages') {
     loadIdentities();
     refreshChats();
+  } else if (panel === 'network') {
+    refreshNetworkPanel();
   }
 });
 
@@ -3034,6 +3062,206 @@ function renderPeerList() {
 $('user-filter').addEventListener('input', renderPeerList);
 
 // ---------------------------------------------------------------------------
+// Network tab — unified, filterable/searchable/sortable browser over
+// every announce heard (sites, LXMF peers, mesh relays), modeled on the
+// NomadPortal-Android sister project's own Network tab. Additive to the
+// Nodes/Messages panels — those keep their own simple favorites/
+// announces sections exactly as they already do; this is a second,
+// unified view over the same underlying data (plus relays, which
+// weren't surfaced anywhere in the UI before this).
+// ---------------------------------------------------------------------------
+let _allRelays = [];
+let _networkTypeFilter = 'all'; // 'all' | 'site' | 'peer' | 'relay'
+let _networkListWindow = { page: 1, frozen: null, resetKey: null };
+
+async function refreshNetworkPanel() {
+  const tasks = [];
+  // Peers/relays need login (same as the Users tab and /api/lxmf-peers
+  // itself) — sites don't, so those always refresh regardless of
+  // auth state, matching the Nodes panel's own guest-visible behavior.
+  if (_authState.logged_in) {
+    tasks.push(loadContacts());
+    tasks.push(
+      apiFetch('/api/lxmf-peers')
+        .then(d => { _allPeers = d.peers || []; })
+        .catch(() => {}),
+    );
+    tasks.push(
+      apiFetch('/api/relays')
+        .then(d => { _allRelays = d.relays || []; })
+        .catch(() => {}),
+    );
+  }
+  await Promise.all(tasks);
+  renderNetworkList();
+}
+
+function renderNetworkList() {
+  const inner = $('network-list');
+  if (!inner) return;
+  const filterText = ($('network-filter')?.value || '').trim().toLowerCase();
+  const sortKey    = ($('network-sort')?.value) || 'last_seen';
+  const typeFilter = _networkTypeFilter;
+
+  // Normalize all three announce kinds into one common row shape so
+  // filter/search/sort/windowing only has to be written once.
+  let entries = [];
+  if (typeFilter === 'all' || typeFilter === 'site') {
+    for (const n of _allNodes) {
+      entries.push({
+        kind: 'site', hash: n.hash, name: n.name,
+        last_seen: n.last_seen, hops: n.hops,
+        announce_count: n.announce_count,
+      });
+    }
+  }
+  if ((typeFilter === 'all' || typeFilter === 'peer') && _authState.logged_in) {
+    for (const p of _allPeers) {
+      const contact = _contacts.find(c => c.hash === p.hash);
+      entries.push({
+        kind: 'peer', hash: p.hash, name: contact?.name || p.name,
+        last_seen: p.last_seen, hops: p.hops,
+        announce_count: p.announce_count,
+      });
+    }
+  }
+  if ((typeFilter === 'all' || typeFilter === 'relay') && _authState.logged_in) {
+    for (const r of _allRelays) {
+      entries.push({
+        kind: 'relay', hash: r.hash, name: null,
+        last_seen: r.last_seen, hops: r.hops,
+        announce_count: r.announce_count, picked: r.picked,
+      });
+    }
+  }
+
+  if (filterText) {
+    entries = entries.filter(e =>
+      (e.name || '').toLowerCase().includes(filterText) ||
+      e.hash.toLowerCase().includes(filterText));
+  }
+
+  $('network-count').textContent =
+    `${entries.length} announce${entries.length !== 1 ? 's' : ''}`;
+
+  if (!entries.length) {
+    inner.innerHTML = filterText
+      ? `<li class="node-placeholder">No matches for &ldquo;${esc(filterText)}&rdquo;.</li>`
+      : (!_authState.logged_in && typeFilter !== 'site')
+        ? '<li class="node-placeholder">Log in to see LXMF peers and mesh relays.</li>'
+        : '<li class="node-placeholder">Waiting for announces…</li>';
+    return;
+  }
+
+  if (sortKey === 'name') {
+    entries.sort((a, b) =>
+      (a.name || a.hash).toLowerCase().localeCompare((b.name || b.hash).toLowerCase()));
+  } else if (sortKey === 'hops') {
+    entries.sort((a, b) => {
+      const ah = a.hops == null ? Infinity : a.hops;
+      const bh = b.hops == null ? Infinity : b.hops;
+      return ah - bh;
+    });
+  } else if (sortKey === 'announces') {
+    entries.sort((a, b) => (b.announce_count || 0) - (a.announce_count || 0));
+  } else {
+    entries.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
+  }
+
+  inner.innerHTML = '';
+  // Windowed — see _windowList's own doc comment (shared with the node
+  // list and the Users tab). resetKey covers every criterion this
+  // render depends on; changing any of them snaps back to page 1.
+  const w = _windowList(entries, _networkListWindow, `${filterText}|${typeFilter}|${sortKey}`);
+  for (const entry of w.visible) inner.appendChild(makeNetworkItem(entry));
+  if (w.remaining > 0) {
+    inner.appendChild(_makeLoadMoreRow(w.remaining, inner, () => {
+      w.loadMore();
+      renderNetworkList();
+    }, 'li'));
+  }
+}
+
+function makeNetworkItem(entry) {
+  const li = document.createElement('li');
+  li.dataset.hash = entry.hash;
+
+  const ringColor = entry.kind === 'site' ? _RING_SITE
+    : entry.kind === 'peer' ? _RING_PEER : _RING_RELAY;
+  const kindLabel = entry.kind === 'site' ? 'Site'
+    : entry.kind === 'peer' ? 'Peer' : 'Relay';
+  const name = entry.name || entry.hash.slice(0, 16) + '…';
+  const hopsLabel = (entry.hops === null || entry.hops === undefined)
+    ? '?'
+    : entry.hops === 0
+      ? 'local'
+      : entry.hops === 1 ? '1 hop' : `${entry.hops} hops`;
+  const hopsClass = (entry.hops === null || entry.hops === undefined)
+    ? 'node-hops node-hops-unknown'
+    : 'node-hops';
+
+  const right = document.createElement('div');
+  right.className = 'node-right';
+  right.insertAdjacentHTML('beforeend',
+    `<span class="${hopsClass}" title="Hops away on the Reticulum network">${hopsLabel}</span>` +
+    // "picked" is the relay this app's own propagation sync is
+    // currently using (PropagationSyncService's own doc comment) —
+    // surfacing it here rather than leaving it a debug-only detail.
+    `<span class="node-kind"${entry.picked ? ' title="Currently syncing through this relay"' : ''}>${kindLabel}${entry.picked ? ' ★' : ''}</span>`);
+  li.appendChild(right);
+
+  li.insertAdjacentHTML('beforeend',
+    `<div class="node-icon-row">` +
+      `<span class="node-identicon">${_identiconSvg(entry.hash, 22, ringColor)}</span>` +
+      `<div class="node-text">` +
+        `<span class="node-name">${esc(name)}</span>` +
+        `<span class="node-hash">${entry.hash.slice(0, 24)}…</span>` +
+        `<span class="node-age">${formatAge(entry.last_seen)}</span>` +
+      `</div>` +
+    `</div>`);
+
+  if (entry.kind === 'site') {
+    li.addEventListener('click', () => navigateTo(`hash://${entry.hash}/page/index.mu`));
+  } else if (entry.kind === 'peer') {
+    li.addEventListener('click', async () => {
+      if (!_authState.logged_in) return;
+      const contact = _contacts.find(c => c.hash === entry.hash);
+      if (!contact) {
+        try {
+          const d = await apiFetch('/api/contacts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hash: entry.hash, name: entry.name || '' }),
+          });
+          if (d.ok) _contacts = [..._contacts.filter(c => c.hash !== entry.hash), d.contact];
+        } catch (_) {}
+      }
+      showSidebarPanel('messages');
+      switchMsgTab('chats');
+      openConversation(entry.hash);
+    });
+  } else {
+    // Relays are mesh infrastructure, not an addressable destination
+    // for messaging or NomadNet browsing — no click action, matches
+    // the node list's own .node-locked "inert row" cursor treatment.
+    li.style.cursor = 'default';
+  }
+  return li;
+}
+
+$('network-filter').addEventListener('input', renderNetworkList);
+$('network-sort')?.addEventListener('change', renderNetworkList);
+$('btn-refresh-network').addEventListener('click', refreshNetworkPanel);
+$('network-type-chips').addEventListener('click', e => {
+  const chip = e.target.closest('.type-chip');
+  if (!chip) return;
+  _networkTypeFilter = chip.dataset.type;
+  $('network-type-chips').querySelectorAll('.type-chip').forEach(c =>
+    c.classList.toggle('active', c === chip));
+  renderNetworkList();
+});
+
+// ---------------------------------------------------------------------------
 // Compose modal (for new conversations)
 // ---------------------------------------------------------------------------
 function openComposeModal(destHash = '') {
@@ -3173,6 +3401,7 @@ function applyUISettings(s) {
   // explicit `true` rather than merely "not `false`".
   const showNodes    = isSuper || pick(s.guests_nodes_panel,    s.users_nodes_panel,    s.admins_nodes_panel)    === true;
   const showMessages = isSuper || pick(s.guests_messages_panel, s.users_messages_panel, s.admins_messages_panel) === true;
+  const showNetwork  = isSuper || pick(s.guests_network_panel,  s.users_network_panel,  s.admins_network_panel)  === true;
 
   if (!showNodes) {
     const tab = $('sidebar-tab-nodes');
@@ -3186,10 +3415,17 @@ function applyUISettings(s) {
     const panel = $('sidebar-panel-messages');
     if (panel) panel.hidden = true;
   }
+  if (!showNetwork) {
+    const tab = $('sidebar-tab-network');
+    if (tab) tab.hidden = true;
+    const panel = $('sidebar-panel-network');
+    if (panel) panel.hidden = true;
+  }
 
   // Activate the first visible panel
   if (!showNodes && showMessages)  showSidebarPanel('messages');
-  if (!showNodes && !showMessages) {
+  if (!showNodes && !showMessages && showNetwork) showSidebarPanel('network');
+  if (!showNodes && !showMessages && !showNetwork) {
     const tabs = $('sidebar-tabs');
     if (tabs) tabs.hidden = true;
     const sidebar = $('sidebar');

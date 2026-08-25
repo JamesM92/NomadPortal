@@ -30,6 +30,7 @@
     admins_address_bar: 'enabled',
     admins_nodes_panel: true,
     admins_messages_panel: true,
+    admins_network_panel: true,
   };
   var PRESETS = {
     public: Object.assign({
@@ -37,6 +38,7 @@
       guests_address_bar: 'enabled', users_address_bar: 'enabled',
       guests_nodes_panel: true,  users_nodes_panel: true,
       guests_messages_panel: true, users_messages_panel: true,
+      guests_network_panel: true, users_network_panel: true,
       users_can_message: true,
     }, ADMIN_DEFAULTS),
     gated: Object.assign({
@@ -44,6 +46,7 @@
       guests_address_bar: 'hidden', users_address_bar: 'enabled',
       guests_nodes_panel: false, users_nodes_panel: true,
       guests_messages_panel: false, users_messages_panel: true,
+      guests_network_panel: false, users_network_panel: true,
       users_can_message: true,
     }, ADMIN_DEFAULTS),
     locked: Object.assign({
@@ -51,6 +54,7 @@
       guests_address_bar: 'hidden', users_address_bar: 'hidden',
       guests_nodes_panel: false, users_nodes_panel: false,
       guests_messages_panel: false, users_messages_panel: false,
+      guests_network_panel: false, users_network_panel: false,
       users_can_message: true,
     }, ADMIN_DEFAULTS),
   };
@@ -67,6 +71,9 @@
     guests_messages_panel:  's-guests-messages-panel',
     users_messages_panel:   's-users-messages-panel',
     admins_messages_panel:  's-admins-messages-panel',
+    guests_network_panel:   's-guests-network-panel',
+    users_network_panel:    's-users-network-panel',
+    admins_network_panel:   's-admins-network-panel',
     users_can_message:      's-users-can-message',
   };
 

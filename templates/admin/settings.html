@@ -247,6 +247,23 @@
         </td>
       </tr>
       <tr>
+        <td>Network panel
+          <div class="dim" style="font-size:11px;">Sidebar browser of every announce heard — sites, LXMF peers, and mesh relays together. Peers/relays still need login even when this is on; sites stay visible either way.</div>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-guests-network-panel"
+                 {% if settings.guests_network_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-users-network-panel"
+                 {% if settings.users_network_panel %}checked{% endif %}>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" id="s-admins-network-panel" {{ ad }}
+                 {% if settings.admins_network_panel %}checked{% endif %}>
+        </td>
+      </tr>
+      <tr>
         <td>Can send LXMF messages
           <div class="dim" style="font-size:11px;">Whether logged-in users may send messages. Guests can never send; admins always can.</div>
         </td>

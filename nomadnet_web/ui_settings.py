@@ -21,6 +21,7 @@ _ADMIN_UNRESTRICTED = {
     "admins_address_bar":      "enabled",
     "admins_nodes_panel":      True,
     "admins_messages_panel":   True,
+    "admins_network_panel":    True,
 }
 
 _PRESETS = {
@@ -33,6 +34,8 @@ _PRESETS = {
         "users_nodes_panel":       True,
         "guests_messages_panel":   True,
         "users_messages_panel":    True,
+        "guests_network_panel":    True,
+        "users_network_panel":     True,
         "users_can_message":       True,
         **_ADMIN_UNRESTRICTED,
     },
@@ -45,6 +48,8 @@ _PRESETS = {
         "users_nodes_panel":       True,
         "guests_messages_panel":   False,
         "users_messages_panel":    True,
+        "guests_network_panel":    False,
+        "users_network_panel":     True,
         "users_can_message":       True,
         **_ADMIN_UNRESTRICTED,
     },
@@ -57,6 +62,8 @@ _PRESETS = {
         "users_nodes_panel":       False,
         "guests_messages_panel":   False,
         "users_messages_panel":    False,
+        "guests_network_panel":    False,
+        "users_network_panel":     False,
         "users_can_message":       True,
         **_ADMIN_UNRESTRICTED,
     },
@@ -130,6 +137,7 @@ class UISettings:
         "guests_default_lock", "users_default_lock", "admins_default_lock",
         "guests_nodes_panel", "users_nodes_panel", "admins_nodes_panel",
         "guests_messages_panel", "users_messages_panel", "admins_messages_panel",
+        "guests_network_panel", "users_network_panel", "admins_network_panel",
         "users_can_message",
     )
 

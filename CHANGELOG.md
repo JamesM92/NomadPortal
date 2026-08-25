@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Identicon "kind" ring colors, and a new Network tab.** Ported from
+  the NomadPortal-Android sister project. Every identicon now draws a
+  thin colored ring around it — purple for sites/nodes, teal for
+  contacts/peers — so you can tell at a glance what kind of thing
+  you're looking at, matching Android's own ``Identicon.kt`` scheme
+  exactly (same hex values). Only shows on the identicon fallback,
+  never over a real custom icon/image, same as Android's own
+  ``ContactAvatar``.
+
+  New **Network** sidebar tab (third tab, alongside Nodes and
+  Messages — additive, not a replacement: those keep their own
+  simple favorites/announces sections exactly as they already do)
+  unifies every announce heard — sites, LXMF peers, and now mesh
+  relays too — into one filterable (All/Sites/Peers/Relays chips),
+  searchable, sortable list. Relays (``lxmf.propagation``-aspect
+  announces, the store-and-forward mesh infrastructure
+  ``PropagationSyncService`` already auto-discovers for its own
+  outbound-sync picker) get their own gold ring and were never
+  surfaced anywhere in the UI before this — that data existed, just
+  as an aggregate count. New ``PropagationSyncService.
+  list_known_nodes()`` exposes the individual entries; new
+  ``GET /api/relays`` (login-required, matching ``/api/lxmf-peers``)
+  serves them. The relay currently being synced through is flagged
+  in the list. Sites stay visible to guests inside the Network tab
+  (same as the Nodes panel); peers/relays still need login.
+
+  New per-audience visibility toggle ("Network panel") in Admin →
+  Settings, same guests/users/admins × public/gated/locked structure
+  as the existing Nodes/Messages panel toggles. 5 new pytest cases
+  cover ``PropagationSyncService.list_known_nodes()`` (empty state,
+  a single announce, repeat-announce count/hops updates, multiple
+  relays, and the currently-picked flag).
+
 ## [1.3.0] - 2026-08-24
 
 ### Added

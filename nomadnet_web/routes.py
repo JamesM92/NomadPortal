@@ -1795,3 +1795,16 @@ def api_lxmf_peers():
     tracker = current_app.config.get("LXMF_TRACKER")
     peers   = tracker.get_peers() if tracker else []
     return jsonify({"peers": peers})
+
+
+@bp.get("/api/relays")
+@login_required
+def api_relays():
+    """LXMF propagation-node (store-and-forward mesh infrastructure)
+    announces heard so far — the Network tab's Relays list. Gated the
+    same as /api/lxmf-peers rather than /api/nodes: this is mesh
+    infrastructure detail, not something a guest browsing a hosted
+    site needs to see."""
+    prop_sync = current_app.config.get("PROP_SYNC")
+    relays = prop_sync.list_known_nodes() if prop_sync else []
+    return jsonify({"relays": relays})

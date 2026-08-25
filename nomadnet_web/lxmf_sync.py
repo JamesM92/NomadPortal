@@ -98,7 +98,8 @@ class PropagationSyncService:
 
         # bytes(destination_hash) → {"hops": int, "first_seen": float,
         #                            "last_seen": float,
-        #                            "app_data": bytes or None}
+        #                            "app_data": bytes or None,
+        #                            "announce_count": int}
         self._known_nodes: dict = {}
         self._known_nodes_lock = threading.Lock()
 
@@ -183,6 +184,39 @@ class PropagationSyncService:
             "syncs_per_user": syncs,
         }
 
+    def list_known_nodes(self) -> list:
+        """The individual propagation-node announces this service has
+        heard, for the Network tab's Relays list (see routes.py's
+        ``GET /api/relays``). Previously this data only existed as an
+        aggregate count in ``snapshot()`` — every other announce
+        tracker (``NodeBrowser``, ``LXMFPeerTracker``) already exposes
+        its own individual entries, so this closes that gap rather
+        than adding a parallel tracking mechanism. Shaped to match
+        those trackers' own row fields (``hash``/``hops``/
+        ``last_seen``/``announce_count``) so the frontend can render
+        all three kinds through one shared row renderer. No ``name``
+        field — a ``lxmf.propagation`` announce's ``app_data`` carries
+        capability flags, not a human-assigned display name (same as
+        real MeshChat/Sideband propagation-node listings); the
+        frontend falls back to a hash-prefix label like it already
+        does for any other unnamed entry. ``picked`` flags the node
+        this service is currently syncing through, so the UI can
+        surface that rather than leaving it a debug-only detail.
+        """
+        with self._known_nodes_lock:
+            picked = self._picked
+            return [
+                {
+                    "hash": dest_hash.hex(),
+                    "hops": entry["hops"],
+                    "first_seen": entry["first_seen"],
+                    "last_seen": entry["last_seen"],
+                    "announce_count": entry.get("announce_count", 1),
+                    "picked": dest_hash == picked,
+                }
+                for dest_hash, entry in self._known_nodes.items()
+            ]
+
     # ------------------------------------------------------------------
     # Announce handling (called by _PropagationAnnounceHandler)
     # ------------------------------------------------------------------
@@ -221,6 +255,7 @@ class PropagationSyncService:
                     "first_seen": now,
                     "last_seen": now,
                     "app_data": app_data,
+                    "announce_count": 1,
                 }
                 log.info(
                     "PropagationSyncService: new propagation node "
@@ -231,6 +266,7 @@ class PropagationSyncService:
                 entry["hops"] = hops
                 entry["last_seen"] = now
                 entry["app_data"] = app_data
+                entry["announce_count"] = entry.get("announce_count", 0) + 1
 
     # ------------------------------------------------------------------
     # Sync loop

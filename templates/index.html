@@ -227,6 +227,7 @@
       <button class="sidebar-tab" id="sidebar-tab-messages" data-panel="messages">
         Messages <span id="sidebar-msg-badge" class="inbox-badge" hidden></span>
       </button>
+      <button class="sidebar-tab" id="sidebar-tab-network" data-panel="network">Network</button>
     </div>
 
     <!-- ── Nodes panel ────────────────────────────────────────────────── -->
@@ -432,6 +433,40 @@
         <div id="user-list-inner" style="flex:1;overflow-y:auto;">
           <div class="msg-empty">No LXMF announces heard yet.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- ── Network panel ──────────────────────────────────────────────── -->
+    <!-- Unified browser over every announce heard — sites, LXMF peers,
+         and mesh relays (lxmf.propagation nodes) together, filterable
+         by type, searchable, sortable. Additive to the Nodes/Messages
+         panels above, not a replacement — those keep their own simple
+         favorites/announces sections exactly as they already do. -->
+    <div id="sidebar-panel-network" hidden>
+      <div class="sidebar-header">
+        Network
+        <button id="btn-refresh-network" class="icon-btn" title="Refresh">&#8635;</button>
+      </div>
+      <div id="network-filter-wrap">
+        <input id="network-filter" type="text" placeholder="Filter announces…">
+        <select id="network-sort" title="Sort announces">
+          <option value="last_seen">Recent first</option>
+          <option value="name">A → Z</option>
+          <option value="hops">Closest first</option>
+          <option value="announces">Most announced</option>
+        </select>
+      </div>
+      <div id="network-type-chips">
+        <button class="type-chip active" data-type="all">All</button>
+        <button class="type-chip" data-type="site">Sites</button>
+        <button class="type-chip" data-type="peer">Peers</button>
+        <button class="type-chip" data-type="relay">Relays</button>
+      </div>
+      <ul id="network-list">
+        <li class="node-placeholder">Waiting for announces…</li>
+      </ul>
+      <div class="sidebar-footer">
+        <span id="network-count">0 announces</span>
       </div>
     </div>
 
