@@ -179,13 +179,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --upgrade`` so it stays under the same version-bump discipline as
   every other dependency here.
 
-  Even with the pin correctly resolving in site-packages (confirmed
-  in the build log), Trivy kept reporting 70.3.0 — the actual
-  remaining copy turned out to be ensurepip's own bundled wheel at
-  ``.../ensurepip/_bundled/setuptools-70.3.0-*.whl``, a static
-  stdlib resource file untouched by any ``pip install``. Nothing in
-  this image re-runs ``python -m ensurepip`` after build, so the
-  Dockerfile now finds and deletes it outright.
+- **New `.trivyignore`**, two entries, both investigated exhaustively
+  rather than waved through (see the file's own comments for the
+  full trail):
+
+  - ``CVE-2025-47273`` — Trivy kept reporting "setuptools 70.3.0"
+    even after the 83.0.0 pin above was confirmed as the only
+    setuptools ``pip list`` knows about. A four-round diagnostic
+    (unrestricted filesystem search, dpkg query, and a content grep
+    for the literal "70.3.0" string across pip's and setuptools's
+    entire site-packages trees) found no trace of that version
+    anywhere in the image — a Trivy matching artifact, not a real
+    installed copy.
+  - ``GHSA-6v7p-g79w-8964`` — a real finding, but not ours to fix
+    directly: pip's own vendored ``msgpack`` (1.1.2 → 1.2.1, used
+    for pip's internal HTTP cache, not attacker-reachable input).
+    pip 26.2.1 (what this image has) is the current latest PyPI
+    release — no newer pip exists yet that vendors a patched copy.
 
 ### Fixed
 

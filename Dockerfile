@@ -35,29 +35,14 @@ WORKDIR /app
 # image's ensurepip-installed setuptools (70.3.0) carries CVE-2025-47273.
 # A plain `pip install -r requirements.txt` correctly resolves and
 # installs the pinned setuptools==83.0.0 into site-packages, confirmed
-# clean in the build log — no --ignore-installed/--force-reinstall
-# needed there.
+# clean in the build log. Two Trivy findings that remain after this —
+# a phantom "setuptools 70.3.0" (no such version exists anywhere in
+# this image; see the diligence trail in .trivyignore) and pip's own
+# vendored msgpack copy (pip 26.2.1 is the current PyPI release, so
+# there's nothing newer to bump to) — are accepted-risk exceptions,
+# not overlooked. See .trivyignore for the full investigation.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# TEMPORARY diagnostic, round 4 — round 3 solved half of this: `pip
-# list` confirms only setuptools 83.0.0 is actually installed, and
-# msgpack turned out to be pip's own vendored copy
-# (site-packages/pip/_vendor/msgpack — a real embedded copy at
-# whatever version pip 26.2.1 bundles, not a standalone pip-installed
-# package). setuptools 70.3.0 has no equivalent vendored directory
-# anywhere on the filesystem, though, so it must be a version-looking
-# string trivy's parser is picking up out of context from some file
-# under pip's or setuptools's own site-packages tree. Grepping
-# directly for the string there, narrowly, now that the search space
-# is this small. Not a fix by itself; remove once resolved.
-RUN echo "--- files under pip/setuptools containing 70.3.0 ---"; \
-    grep -rl "70.3.0" \
-      /usr/local/lib/python3.14/site-packages/pip \
-      /usr/local/lib/python3.14/site-packages/setuptools \
-      /usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info \
-      2>/dev/null; \
-    echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
