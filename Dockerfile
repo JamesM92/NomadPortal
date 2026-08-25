@@ -40,23 +40,20 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# TEMPORARY diagnostic — the previous guess (ensurepip's bundled
-# wheel, matched by filename) found nothing: that RUN step printed no
-# output before Trivy still reported 70.3.0 on the following run. This
-# casts a much wider net — every setuptools-related path outside the
-# confirmed-clean 83.0.0 site-packages install, plus a content grep
-# for the literal version string in any METADATA/PKG-INFO file — to
-# find the real source before writing another guess at a fix. Not a
-# fix by itself; remove once the real location is known.
-RUN echo "--- setuptools paths outside site-packages/setuptools-83.0.0* ---"; \
-    find / -xdev -iname "*setuptools*" \
-      -not -path "/usr/local/lib/python3.14/site-packages/setuptools" \
-      -not -path "/usr/local/lib/python3.14/site-packages/setuptools/*" \
-      -not -path "/usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info" \
-      -not -path "/usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info/*" \
-      2>/dev/null; \
-    echo "--- METADATA/PKG-INFO/egg-info files mentioning 70.3.0 ---"; \
-    grep -rl "70.3.0" / --include="METADATA" --include="PKG-INFO" --include="*.egg-info" 2>/dev/null; \
+# TEMPORARY diagnostic, round 2 — the filesystem-path guess found
+# nothing at all (no setuptools-named path outside the confirmed-clean
+# 83.0.0 site-packages install, no "70.3.0" string in any METADATA/
+# PKG-INFO/egg-info anywhere). That rules out anything under
+# site-packages entirely, which points at a dpkg-level Debian package
+# (python3-setuptools, e.g. pulled in transitively by gcc/build
+# tooling) — a completely separate install mechanism from our own
+# /usr/local Python, invisible to both prior searches. Not a fix by
+# itself; remove once the real location is known.
+RUN echo "--- dpkg packages matching python3/setuptools ---"; \
+    dpkg -l 'python3*' 2>/dev/null; \
+    dpkg -l '*setuptools*' 2>/dev/null; \
+    echo "--- non-/usr/local python-looking dirs ---"; \
+    find /usr/lib /usr/share -maxdepth 4 -iname "*python3*" 2>/dev/null; \
     echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
