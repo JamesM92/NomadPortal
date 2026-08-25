@@ -417,7 +417,7 @@ def identity_reset(identity_id: str):
         if messaging and old_entry:
             user_sub = old_entry.get("user_sub", "")
             if user_sub:
-                messaging.reset_user_router(user_sub)
+                messaging.reset_identity_router(identity_id)
                 messaging.setup_user(user_sub)
         flash("Identity reset — a fresh keypair has been generated.", "ok")
     else:

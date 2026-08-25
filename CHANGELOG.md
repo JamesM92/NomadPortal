@@ -112,16 +112,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an opaque per-identity key), an identity's ``user_sub`` here keeps
   meaning the *owning web account*; message history and contacts stay
   scoped to the account (unchanged), not to the individual identity —
-  switching identities changes which LXMF address you send/receive as,
-  but every identity under an account shares one inbox and contact
-  list, and deleting an identity does not cascade-delete any message
-  history. Exactly one identity is "active" at a time; switching tears
-  down the previous identity's live LXMRouter
-  (``MessagingService.deactivate_user()``) and brings up the new one
-  (``activate_user()``) rather than running both at once, so an
-  inactive identity stops receiving until switched back to — the same
-  real ``LXMRouter.exit_handler()`` teardown Android's own version
-  uses. An account can never end up with zero identities: deleting the
+  every identity under an account shares one inbox and contact list.
+  Every identity an account owns keeps its own live LXMRouter, so
+  messages can be received on *any* of them, not just the active one —
+  switching only changes which identity you send as, and which one
+  gets announced going forward (``MessagingService.activate_identity()``).
+  An inactive identity stays quietly reachable to anyone who already
+  has its address, without inviting new inbound paths via its own
+  announces (there's no periodic re-announce elsewhere in this
+  codebase for LXMF identities, so gating the one-time bootstrap
+  announce on "is this the active identity" is sufficient). Deleting an
+  identity does not cascade-delete any message history, but does
+  really tear down that specific identity's router
+  (``MessagingService.deactivate_identity()``, real
+  ``LXMRouter.exit_handler()`` teardown) since it can no longer receive
+  for anything once its keypair is gone. An account can never end up
+  with zero identities: deleting the
   last one is refused outright (deliberately not auto-replaced the way
   Android's own delete does), and importing a keypair another account
   already owns is rejected. In the same pass, fixed a real dormant bug
@@ -137,12 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (all login-required, ownership-checked). Also closed a pre-existing
   gap on the identity-announce route: it took an identity ID straight
   from the URL with no ownership check, letting any logged-in user
-  poke another account's announce cooldown. 27 new pytest cases cover
+  poke another account's announce cooldown. 40 new pytest cases cover
   the storage layer (per-account ownership, active-identity tracking
   and its self-healing fallback, create/delete/import guards, legacy
-  on-disk migration) and the router lifecycle
-  (deactivate/activate, and that boot only brings up each account's
-  active identity, not every identity it owns).
+  on-disk migration) and the router lifecycle (activate/deactivate a
+  specific identity's router without disturbing another one under the
+  same account, and that both boot and login bring up every identity
+  an account owns, announcing only the active one).
 - **Terminal (rnsh remote shell over the mesh).** New Settings →
   Terminal tab: connect to a remote ``rnsh`` listener
   (github.com/acehoss/rnsh) by destination hash, authenticated with

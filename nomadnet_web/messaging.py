@@ -232,8 +232,12 @@ class MessagingService:
         self._attachments    = attachment_store
         self._lock           = threading.Lock()
         self._identity_store = None
-        # user_sub -> {"router": LXMRouter, "dest": Destination}
-        self._user_routers: dict = {}
+        # identity_id -> {"router": LXMRouter, "dest": Destination,
+        # "identity": RNS.Identity, "user_sub": <owning account>}. Keyed
+        # by identity, not by account — see module-level design note
+        # above _init_identity_router() for why an account can now have
+        # more than one live entry here at once.
+        self._identity_routers: dict = {}
         os.makedirs(storage_path, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -241,43 +245,87 @@ class MessagingService:
     # ------------------------------------------------------------------
 
     def setup_user(self, user_sub: str) -> None:
-        """Ensure a delivery identity is registered for this user.
+        """Ensure every one of this account's identities has a live
+        delivery router — so messages can be received on ANY identity
+        the account owns, not just its currently active one — with only
+        the active identity actually announced (see
+        ``_init_identity_router()``'s own doc comment for why: an
+        identity nobody's actively presenting shouldn't keep inviting
+        new inbound paths, even though it still happily receives
+        anything already addressed to it).
 
-        Call at login so incoming messages are routed immediately rather
-        than waiting for the user's first outbound send.
+        Call at login so this doesn't wait for ``setup_delivery()``'s
+        own boot-time pass — covers an identity created/imported after
+        boot, or an account logging in for the first time this run.
         """
-        data = self._get_user_router(user_sub)
-        if data is None:
+        if self._identity_store is None:
+            log.warning(
+                "Could not set up delivery for user %s — identity store not ready",
+                user_sub[:16] if user_sub else "?",
+            )
+            return
+        entries = self._identity_store.list_for_user(user_sub)
+        if not entries:
             log.warning(
                 "Could not set up delivery for user %s — "
                 "identity may not exist yet",
                 user_sub[:16] if user_sub else "?",
             )
+            return
+        active_entry = self._identity_store.get_active_for_user(user_sub)
+        active_id    = active_entry["id"] if active_entry else None
+        for entry in entries:
+            self._init_identity_router(entry, announce=(entry["id"] == active_id))
 
     # ------------------------------------------------------------------
     # Delivery setup
     # ------------------------------------------------------------------
 
     def setup_delivery(self, identity_store) -> None:
-        """Register a delivery identity + LXMRouter for each account's
-        *active* identity. Multi-identity means an account can own more
-        than one identity, but only the active one should have a live
-        router at boot — the rest come up on demand when an account
-        switches to them (see `activate_user()`)."""
+        """Register a delivery identity + LXMRouter for EVERY identity
+        of every account — so an account can receive on any identity it
+        owns — but only announce each account's currently *active*
+        identity (see ``_init_identity_router()``'s own doc comment)."""
         self._identity_store = identity_store
-        for entry in identity_store.list_active_identities():
-            self._init_user_router(entry)
+        for entry in identity_store.list_identities():
+            user_sub = entry.get("user_sub", "")
+            active_entry = identity_store.get_active_for_user(user_sub) if user_sub else None
+            is_active = bool(active_entry) and active_entry["id"] == entry["id"]
+            self._init_identity_router(entry, announce=is_active)
 
-    def _init_user_router(self, entry: dict) -> Optional[dict]:
-        """Create (or reuse) an LXMRouter for the given identity entry."""
+    def _init_identity_router(self, entry: dict, announce: bool = True) -> Optional[dict]:
+        """Create (or reuse) an LXMRouter for the given identity entry,
+        keyed by the identity's own id — NOT by the owning account —
+        since multi-identity means an account can have more than one of
+        these live at once (one per identity it owns), all delivering
+        into that account's one shared inbox (the delivery callback
+        below closes over the entry's own ``user_sub``, not the
+        identity id).
+
+        [announce] controls whether the real "make this identity
+        reachable" bootstrap announce fires (see the block below for
+        why that's needed at all) — the caller decides based on whether
+        this is the account's currently *active* identity. Only the
+        active identity should be inviting new inbound paths; the rest
+        stay quietly receptive to anything already addressed to them
+        (a contact who already has their address can still reach them)
+        without advertising themselves further. There's no periodic
+        re-announce loop elsewhere in this codebase for LXMF identities
+        (unlike voice calls' own 3-hourly loop) — the bootstrap announce
+        here is the *only* place an LXMF identity ever announces short
+        of the user's own manual Announce button (which itself always
+        targets the active identity, via ``do_announce()`` →
+        ``_get_user_router()``) — so gating it here is sufficient to
+        keep an inactive identity from announcing at all.
+        """
         import LXMF
 
         identity_id = entry["id"]
         user_sub    = entry.get("user_sub", "")
 
         with self._lock:
-            if user_sub and user_sub in self._user_routers:
-                return self._user_routers[user_sub]
+            if identity_id in self._identity_routers:
+                return self._identity_routers[identity_id]
 
         if self._identity_store is None:
             return None
@@ -314,15 +362,18 @@ class MessagingService:
                 lambda msg, sub=user_sub: self._on_delivery(msg, sub)
             )
 
-            data = {"router": router, "dest": registered, "identity": identity}
+            data = {"router": router, "dest": registered, "identity": identity, "user_sub": user_sub}
             with self._lock:
-                if user_sub:
-                    self._user_routers[user_sub] = data
+                self._identity_routers[identity_id] = data
             log.info(
-                "Registered delivery identity %s → LXMF addr %s (user %s)",
+                "Registered delivery identity %s → LXMF addr %s (user %s)%s",
                 identity_id[:16], registered.hexhash[:16],
                 user_sub[:16] if user_sub else "anon",
+                "" if announce else " [not announcing — inactive identity]",
             )
+
+            if not announce:
+                return data
 
             # RNS path discovery is announce-based with no other mechanism —
             # a destination that has never announced is unreachable by
@@ -352,91 +403,84 @@ class MessagingService:
             return None
 
     def _get_user_router(self, user_sub: str) -> Optional[dict]:
-        """Return the router/dest pair for a user, lazily initialising if needed."""
-        with self._lock:
-            data = self._user_routers.get(user_sub)
-        if data is not None:
-            return data
-
+        """Return the router for this account's currently *active*
+        identity, lazily initialising (and announcing) it if needed."""
         if not user_sub or self._identity_store is None:
             return None
 
         entry = self._identity_store.get_for_user(user_sub)
         if entry is None:
             return None
-        return self._init_user_router(entry)
+        return self._init_identity_router(entry)
 
-    def reset_user_router(self, user_sub: str) -> None:
-        """Drop the cached router for a user so it is rebuilt on next use.
+    def reset_identity_router(self, identity_id: str) -> None:
+        """Drop the cached router for one specific identity (keyed by
+        its own id, not the owning account) so it's rebuilt on next
+        use. Call after that identity's RNS keypair is regenerated
+        (admin reset) so the new keypair's LXMF address takes effect
+        immediately — the replacement identity gets a brand-new
+        ``identity_id`` (a different hexhash), so the old entry here is
+        simply orphaned, not reused.
 
-        Call after the user's RNS identity is regenerated (e.g. admin reset)
-        so the new keypair's LXMF address takes effect immediately.
-
-        Note: unlike ``deactivate_user`` below, this does NOT call the
-        popped router's own ``exit_handler()`` — it was written for the
-        "this identity's keypair no longer exists, a fresh one is about
-        to replace it" case, where the old router's own background
-        threads/links being left running was never actually exercised
-        for long (the identity behind it was gone). Multi-identity
-        switching is a different case — the deactivated identity is
-        still real and may be reactivated later — so it needs the real
-        teardown ``deactivate_user`` does instead of this method.
+        Does NOT call the popped router's own ``exit_handler()`` — the
+        identity behind it no longer exists (a fresh one, under a
+        different id, replaces it), so there's nothing meaningful left
+        to cleanly hand off to. Compare ``deactivate_identity()``,
+        which does the real teardown for an identity that's being
+        deleted outright (not replaced).
         """
         with self._lock:
-            self._user_routers.pop(user_sub, None)
+            self._identity_routers.pop(identity_id, None)
 
-    def deactivate_user(self, user_sub: str) -> None:
-        """Cleanly stops the LXMRouter currently active for this
-        account — the real mechanism behind multi-identity's
-        single-active-identity switch. ``LXMRouter.exit_handler()``
-        (verified directly against the installed LXMF/LXMRouter.py
-        source) tears down that router's own delivery
-        destination/links and flips ``exit_handler_running``, which its
-        own background job-loop threads check to stop themselves — it
-        only touches that router's own state, so this is safe to call
-        while ``RNS.Reticulum()`` and any other account's router keep
-        running.
+    def deactivate_identity(self, identity_id: str) -> None:
+        """Cleanly stops one specific identity's own LXMRouter —
+        ``LXMRouter.exit_handler()`` (verified directly against the
+        installed LXMF/LXMRouter.py source) tears down that router's
+        own delivery destination/links and flips
+        ``exit_handler_running``, which its own background job-loop
+        threads check to stop themselves — it only touches that
+        router's own state, so this is safe to call while
+        ``RNS.Reticulum()`` and every other identity's router (this
+        account's other identities included) keep running.
 
-        A no-op if this account has no live router (e.g. it was never
-        activated this run, or is already deactivated) — same
-        "tolerates being called on nothing" contract as
-        ``reset_user_router``.
-
-        Does NOT delete the identity or its stored messages/contacts —
-        those stay scoped to the account regardless of which identity
-        is active (see ``identity_store.py``'s module docstring), so
-        switching back to the account later picks up right where it
-        left off. ``register_delivery_identity`` refuses a second
-        identity on an already-used router instance, so reactivation
-        always builds a fresh ``LXMRouter`` rather than resuming this
-        exited one — ``_init_user_router`` already does exactly that
-        once this ``user_sub`` is gone from ``_user_routers``.
+        Used when that identity is being deleted outright (it can no
+        longer receive for anything once its keypair is gone) — NOT
+        when merely switching which identity is active. Every identity
+        an account owns keeps its own live router so messages can be
+        received on any of them; only the currently-active one gets
+        announced (see ``_init_identity_router()``'s own doc comment).
+        A no-op if this identity has no live router.
         """
         with self._lock:
-            data = self._user_routers.pop(user_sub, None)
+            data = self._identity_routers.pop(identity_id, None)
         if data is None:
             return
         try:
             data["router"].exit_handler()
         except Exception:
             log.exception(
-                "deactivate_user: exit_handler() raised for %s — "
-                "router is still removed from the active set either way",
-                user_sub[:16] if user_sub else "anon",
+                "deactivate_identity: exit_handler() raised for %s — "
+                "router is still removed from the live set either way",
+                identity_id[:16],
             )
 
-    def activate_user(self, entry: dict) -> Optional[dict]:
-        """Public wrapper over ``_init_user_router`` — the other half of
-        ``deactivate_user``'s pair, for the multi-identity switch flow.
-        [entry] is an ``IdentityStore`` entry dict (has "id"/"user_sub"/
-        "name"). Safe to call for an identity that's already active —
-        ``_init_user_router`` itself already tolerates that (returns the
-        existing router)."""
-        return self._init_user_router(entry)
+    def activate_identity(self, entry: dict) -> Optional[dict]:
+        """Ensures [entry]'s identity has a live, *announced* router —
+        the real mechanism behind marking an identity active (routes.py's
+        switch-identity flow), or bringing a freshly created/imported
+        identity's router up immediately rather than waiting for a lazy
+        fetch. [entry] is an ``IdentityStore`` entry dict (has
+        "id"/"user_sub"/"name"). Safe to call for an identity that's
+        already live — ``_init_identity_router`` itself already
+        tolerates that (returns the existing router, unannounced again)."""
+        return self._init_identity_router(entry, announce=True)
 
     def active_routers(self) -> list:
-        """Return a snapshot list of currently-registered routers as
-        ``[(user_sub, {"router": ..., "dest": ..., "identity": ...}), ...]``.
+        """Return a snapshot list of every currently-live identity
+        router as ``[(user_sub, {"router":, "dest":, "identity":,
+        "user_sub":}), ...]`` — one entry per identity, which can now be
+        more than one per account (every identity an account owns keeps
+        a live router for receiving, not just the active one).
 
         Consumed by ``PropagationSyncService`` — each tick it iterates
         this list and fires an outbound sync per router. Snapshot
@@ -444,21 +488,18 @@ class MessagingService:
         removed after this call may still get one more sync tick.
         Harmless — the sync operation itself is idempotent and
         LXMRouter handles stale references gracefully.
-
-        Admin's router is always present (created at container
-        startup); user routers appear on login and disappear when
-        ``reset_user_router`` is called.
         """
         with self._lock:
-            return list(self._user_routers.items())
+            return [(data["user_sub"], data) for data in self._identity_routers.values()]
 
     def lxmf_address(self, user_sub: str = "") -> Optional[str]:
-        """Return the hexhash of the user's LXMF delivery destination, or None."""
+        """Return the hexhash of the account's *active* identity's LXMF
+        delivery destination, or None."""
         data = self._get_user_router(user_sub)
         return data["dest"].hexhash if data else None
 
     def get_identity(self, user_sub: str = ""):
-        """Return the ``RNS.Identity`` behind this user's currently
+        """Return the ``RNS.Identity`` behind this account's currently
         active LXMF router, or None. The real caller is the rnsh
         terminal feature, which authenticates to a remote listener with
         the same identity LXMF messaging already uses for this account
@@ -469,8 +510,12 @@ class MessagingService:
 
     def refresh_router_display_name(self, user_sub: str, name: str) -> None:
         """Applies a rename to the *live* router's destination immediately
-        (if one is running for ``user_sub``), so an announce made right
-        after a rename doesn't still carry the old name.
+        (if one is running), so an announce made right after a rename
+        doesn't still carry the old name. Only ever meaningful for the
+        account's *active* identity — routes.py's own rename handler
+        already only calls this when the identity just renamed is the
+        active one (renaming an inactive identity has no live announce
+        to refresh in the first place).
 
         Real bug, found on the NomadPortal-Android sister project via a
         live on-device report ("the announce is sending out with the
@@ -483,23 +528,28 @@ class MessagingService:
         ``get_announce_app_data()`` in turn reads the plain
         ``delivery_destination.display_name`` attribute, set once at
         ``register_delivery_identity(identity, display_name=...)`` time
-        (see ``_init_user_router()`` above) and never touched again by
-        anything short of this method. Without it, a rename persists to
-        disk correctly (identity_store.rename()) but never changes what
-        any *live* announce actually carries — mesh peers keep seeing
-        the identity's original name until the next full process
+        (see ``_init_identity_router()`` above) and never touched again
+        by anything short of this method. Without it, a rename persists
+        to disk correctly (identity_store.rename()) but never changes
+        what any *live* announce actually carries — mesh peers keep
+        seeing the identity's original name until the next full process
         restart re-registers the delivery identity with the new
         persisted name. ``display_name`` has no dedicated setter; this
         is a plain attribute assignment, confirmed directly against
         ``register_delivery_identity()``'s own body.
 
-        Best-effort and silent about "nothing to refresh": a no-op if no
-        live router exists yet for ``user_sub`` (e.g. renaming before
-        first login) isn't an error, just nothing to do — the next
-        ``_init_user_router()`` call picks up the new name from disk
-        regardless.
+        Best-effort and silent about "nothing to refresh": a no-op if
+        this account has no active identity, or that identity has no
+        live router yet — the next ``_init_identity_router()`` call
+        picks up the new name from disk regardless.
         """
-        data = self._user_routers.get(user_sub)
+        if self._identity_store is None:
+            return
+        entry = self._identity_store.get_for_user(user_sub)
+        if entry is None:
+            return
+        with self._lock:
+            data = self._identity_routers.get(entry["id"])
         if data is None:
             return
         try:

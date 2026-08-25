@@ -1,4 +1,4 @@
-"""Tests for MessagingService._init_user_router()'s bootstrap/re-announce.
+"""Tests for MessagingService._init_identity_router()'s bootstrap/re-announce.
 
 Motivation: RNS path discovery is announce-based with no other mechanism —
 a destination that has never announced is unreachable by anyone, full
@@ -16,7 +16,7 @@ path fresh on their peers' end).
 LXMF.LXMRouter itself is stubbed out entirely (not just the background
 delivery thread, unlike test_messaging.py's approach) — router
 construction and registration happen synchronously in
-_init_user_router(), so there's no background-thread boundary to stub
+_init_identity_router(), so there's no background-thread boundary to stub
 past the way _send() has one. Matches this project's existing testing
 philosophy (see test_drop_job_grace.py's own docstring) of never touching
 real RNS/LXMF machinery in a unit test.
@@ -82,8 +82,8 @@ def service(tmp_path):
 ENTRY = {"id": "ab" * 16, "user_sub": "u1", "name": "Test User"}
 
 
-def test_init_user_router_announces_once_on_success(service):
-    data = service._init_user_router(ENTRY)
+def test_init_identity_router_announces_once_on_success(service):
+    data = service._init_identity_router(ENTRY)
     assert data is not None
     assert data["router"].announced_hashes == [data["dest"].hash]
 
@@ -94,7 +94,7 @@ def test_announce_failure_does_not_prevent_router_registration(service, monkeypa
 
     monkeypatch.setattr(_FakeRouter, "announce", _boom)
 
-    data = service._init_user_router(ENTRY)
+    data = service._init_identity_router(ENTRY)
     # Router registration must still succeed even though announce blew up —
     # best-effort, shouldn't take down the whole registration.
     assert data is not None
@@ -102,8 +102,8 @@ def test_announce_failure_does_not_prevent_router_registration(service, monkeypa
 
 
 def test_second_init_for_same_user_reuses_cached_router_no_double_announce(service):
-    first = service._init_user_router(ENTRY)
-    second = service._init_user_router(ENTRY)
+    first = service._init_identity_router(ENTRY)
+    second = service._init_identity_router(ENTRY)
 
     assert first is second
     # Only the first call actually constructed (and announced) a router —

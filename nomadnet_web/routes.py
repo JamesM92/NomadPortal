@@ -1564,10 +1564,12 @@ def api_identity_create():
 @bp.post("/api/identities/<identity_id>/activate")
 @login_required
 def api_identity_activate(identity_id: str):
-    """Switch the account's active identity — tears down the
-    currently-live router and brings up [identity_id]'s instead. See
-    MessagingService.deactivate_user()/activate_user() for the real
-    LXMRouter lifecycle this drives."""
+    """Switch the account's active identity. Every identity the account
+    owns keeps its own live LXMRouter regardless (so messages can be
+    received on any of them) — switching active status only changes
+    which one gets announced going forward; the previously-active
+    identity's router is left running untouched, still receiving. See
+    MessagingService.activate_identity()'s own doc comment."""
     store = _id_store()
     entry = store.get(identity_id)
     if entry is None or entry.get("user_sub") != current_user.id:
@@ -1575,15 +1577,13 @@ def api_identity_activate(identity_id: str):
 
     active = store.get_active_for_user(current_user.id)
     if active is not None and active["id"] == identity_id:
-        return jsonify({"ok": True})  # already active — no teardown/rebuild needed
+        return jsonify({"ok": True})  # already active — nothing to change
 
-    messaging = current_app.config.get("MESSAGING")
-    if messaging is not None:
-        messaging.deactivate_user(current_user.id)
     if not store.set_active_for_user(current_user.id, identity_id):
         return jsonify({"ok": False, "error": "Could not switch identity"}), 500
+    messaging = current_app.config.get("MESSAGING")
     if messaging is not None:
-        messaging.activate_user(entry)
+        messaging.activate_identity(entry)
     return jsonify({"ok": True})
 
 
@@ -1606,15 +1606,18 @@ def api_identity_delete(identity_id: str):
         return jsonify({"ok": False, "error": message}), 400
 
     messaging = current_app.config.get("MESSAGING")
-    if was_active and messaging is not None:
-        # The old router (for the identity that just got deleted) is
-        # torn down; delete_for_user() already reassigned active status
-        # to another of this account's identities, so bring that one's
-        # router up now rather than waiting for the next lazy fetch.
-        messaging.deactivate_user(current_user.id)
-        new_active = store.get_active_for_user(current_user.id)
-        if new_active is not None:
-            messaging.activate_user(new_active)
+    if messaging is not None:
+        # The deleted identity's own router is torn down for real — it
+        # can no longer receive for anything. Every other identity this
+        # account owns (including the newly-active one, if this was it)
+        # already has its own independent live router, untouched by
+        # this — see MessagingService.deactivate_identity()'s own doc
+        # comment for why that's safe.
+        messaging.deactivate_identity(identity_id)
+        if was_active:
+            new_active = store.get_active_for_user(current_user.id)
+            if new_active is not None:
+                messaging.activate_identity(new_active)
     return jsonify({"ok": True})
 
 

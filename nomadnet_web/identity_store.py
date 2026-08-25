@@ -232,12 +232,15 @@ class IdentityStore:
 
     def list_active_identities(self) -> list:
         """One entry per distinct owning account — whichever identity is
-        currently active for it. The real caller list here is
-        `MessagingService.setup_delivery()` at boot: with multi-identity,
-        `list_identities()` can hold several identities per account, but
-        only the active one per account should get a live router — the
-        others come up on demand when the account switches to them
-        (`MessagingService.activate_user()`)."""
+        currently active for it. General-purpose utility: anywhere that
+        wants "the one identity per account that's currently presented"
+        rather than every identity every account owns
+        (`list_identities()`). Not used by
+        `MessagingService.setup_delivery()` — that brings up a live
+        router for *every* identity every account owns (so messages can
+        be received on any of them), only gating each identity's own
+        announce on whether it's the active one — see that method's own
+        doc comment."""
         out = []
         for user_sub in {e.get("user_sub") for e in self._data.values() if e.get("user_sub")}:
             entry = self.get_active_for_user(user_sub)
