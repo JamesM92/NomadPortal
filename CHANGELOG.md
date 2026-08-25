@@ -204,9 +204,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``LXMFPeerTracker.record()`` gained an optional ``identity_hash``
   param to capture that correlation key; ``/api/lxmf-peers`` now
   cross-references it against the call tracker and adds a
-  ``call_capable`` flag per peer. Network tab peer rows show a small
-  phone icon when set, and the announce-info dialog (see the entry
-  above) gained a "Call-capable" row for peers. 17 new pytest cases
+  ``call_capable`` flag per peer. A small phone icon shows wherever a
+  call-capable peer already appears — Network tab peer rows, the
+  Messages panel's own Users tab, and the Chats tab's conversation list
+  — and the announce-info dialog (see the entry above) gained a
+  "Call-capable" row for peers. ``refreshChats()`` now also refreshes
+  ``/api/lxmf-peers`` alongside sent/received messages so the Chats
+  tab's own badge doesn't depend on having visited Users or Network
+  first. 17 new pytest cases
   (``test_call_tracker_persist.py``, plus 3 more in
   ``test_lxmf_tracker_persist.py`` for the ``identity_hash`` capture).
 - **Voice calls, Phase 1a: real ring/answer/hang-up signalling — no

@@ -2429,6 +2429,10 @@ async function refreshChats() {
       apiFetch('/api/messages/sent'),
       apiFetch('/api/messages/received'),
       loadContacts(),
+      // Keeps _allPeers fresh for the call-capable phone badge below,
+      // without requiring a detour through the Users/Network tab first
+      // (those are the only other places this fetch normally happens).
+      apiFetch('/api/lxmf-peers').then(d => { _allPeers = d.peers || []; }).catch(() => {}),
     ]);
     _allConversations = buildConversations(
       sentData.messages || [],
@@ -2479,12 +2483,20 @@ function renderConversationList(conversations) {
     const blockedLabel = contact?.blocked
       ? ' <span style="color:var(--error);font-size:9px;font-weight:normal;">🚫 blocked</span>'
       : '';
+    // Voice-call Phase 0 (presence only, no calling yet -- see
+    // call_tracker.py's own doc comment): this contact has announced on
+    // the lxst.telephony aspect at some point, same signal the Network
+    // tab's own peer rows already surface.
+    const peer = _allPeers.find(p => p.hash === conv.hash);
+    const callBadge = peer?.call_capable
+      ? ' <span title="This contact has announced call support (lxst.telephony)">&#128222;</span>'
+      : '';
     const convIcon = _contactIcon(contact, 36);
     el.innerHTML =
       (convIcon ? `<div style="width:36px;height:36px;flex-shrink:0;">${convIcon}</div>` : '') +
       `<div style="flex:1;min-width:0;">` +
         `<div class="conv-header">` +
-          `<span class="conv-name">${esc(name)}${badge}${blockedLabel}</span>` +
+          `<span class="conv-name">${esc(name)}${callBadge}${badge}${blockedLabel}</span>` +
           `<span class="conv-time">${formatAge(conv.lastTime)}</span>` +
         `</div>` +
         `<div class="conv-preview">` +
@@ -3125,12 +3137,19 @@ function renderPeerList() {
         : peer.hops === 1 ? '1 hop' : `${peer.hops} hops`;
     const hopsColor = (peer.hops === null || peer.hops === undefined)
       ? 'var(--text-dim)' : 'var(--accent2)';
+    // Voice-call Phase 0 (presence only, no calling yet -- see
+    // call_tracker.py's own doc comment): same signal the Network tab's
+    // own peer rows already surface.
+    const callBadge = peer.call_capable
+      ? '<span style="flex-shrink:0;margin-left:4px;" title="This peer has announced call support (lxst.telephony)">&#128222;</span>'
+      : '';
     row.innerHTML =
       (peerIcon ? `<div style="width:28px;height:28px;flex-shrink:0;">${peerIcon}</div>` : '') +
       `<div style="flex:1;min-width:0;margin-left:${peerIcon ? 6 : 0}px;">` +
         `<div style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(name)}</div>` +
         `<div style="color:var(--text-dim);font-size:10px;">${peer.hash.slice(0, 20)}… · ${formatAge(peer.last_seen)}</div>` +
       `</div>` +
+      callBadge +
       `<span style="color:${hopsColor};font-size:10px;flex-shrink:0;margin-left:4px;font-variant-numeric:tabular-nums;" title="Hops away on the Reticulum network">${hopsLabel}</span>` +
       `<span style="color:var(--text-dim);font-size:10px;flex-shrink:0;margin-left:4px;" title="Announce count">×${peer.announce_count}</span>`;
     row.addEventListener('click', async () => {
