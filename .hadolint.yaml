@@ -20,3 +20,20 @@ ignored:
   # against whatever-was-installed at build time, which is the layer
   # that actually matters for security.
   - DL3008
+
+  # DL3005: "Do not use apt-get upgrade or dist-upgrade" — the usual
+  # concern is a non-reproducible build silently picking up unrelated
+  # package churn between builds.
+  #
+  # Reasoning for ignoring: added specifically to fix a real Trivy
+  # failure (CVE-2026-53612/-53613/-53614/-53615, util-linux) where
+  # Debian's security repo had already published the patched packages
+  # but the next scheduled python:3.14-slim-trixie base-image rebuild
+  # hadn't picked them up yet — bumping our pinned digest alone wasn't
+  # enough while that gap existed. `apt-get upgrade` here pulls those
+  # patches directly at build time instead of waiting on upstream's
+  # rebuild cadence. The same DL3008 reasoning above already applies:
+  # Trivy re-scans every build regardless, so reproducibility was
+  # already secondary to "ship the patched packages" in this file's
+  # design, not a new tradeoff introduced by this rule.
+  - DL3005

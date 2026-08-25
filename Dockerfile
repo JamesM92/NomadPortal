@@ -5,7 +5,14 @@ LABEL org.opencontainers.image.description="Web browser for NomadNet nodes with 
 LABEL org.opencontainers.image.source="https://github.com/JamesM92/NomadPortal"
 
 # System dependencies for Reticulum (cryptography / serial transports).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` pulls in Debian's own security-repo patches for
+# packages already baked into the base image (util-linux and friends —
+# CVE-2026-53612/-53613/-53614/-53615) that the next scheduled
+# python:3.14-slim-trixie rebuild hasn't picked up yet. Bumping the
+# pinned base-image digest alone isn't enough while that gap exists;
+# this is the standard "don't just trust the base image is fresh"
+# Docker hardening step, and belongs here regardless of digest churn.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       gcc \
       libssl-dev \
       openssl \
@@ -23,9 +30,14 @@ RUN groupadd -r -g 1000 nomadnet \
 
 WORKDIR /app
 
-# Install Python dependencies first (layer-cached)
+# Install Python dependencies first (layer-cached).
+# pip/setuptools/wheel upgraded explicitly first — the base image's
+# bundled setuptools (70.3.0) carries CVE-2025-47273 (path traversal);
+# ensurepip only installs it once at base-image build time and doesn't
+# track security fixes, so it has to be bumped here.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
