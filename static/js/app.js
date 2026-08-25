@@ -1728,6 +1728,10 @@ async function pollStatus() {
     _updateStatusTooltip(data);
   } catch (_) { /* silently ignore polling errors */ }
   if (_authState.logged_in) _pollUnread();
+  // Sites refresh for guests too (refreshNetworkPanel's own guest/
+  // logged-in branching handles peers/relays) — not gated behind
+  // logged_in the way _pollUnread is.
+  if (!$('sidebar-panel-network').hidden) refreshNetworkPanel();
 }
 
 function _updateStatusTooltip(data) {
@@ -3103,6 +3107,18 @@ async function refreshNetworkPanel() {
   renderNetworkList();
 }
 
+// Signature of the last set of entries actually painted into
+// #network-list — lets renderNetworkList skip the teardown/rebuild
+// when a poll brings back the exact same data (the common case).
+// Without this, wiring live-updating into pollStatus (see its own
+// call site) would reintroduce the exact "messages tab is laggy"
+// class of bug fixed earlier: a full rebuild every ~15s tears down
+// every row and resets whatever scroll position the reader was at,
+// even when nothing actually changed. Includes _networkListWindow's
+// own page count so clicking "Load more" (same entries, one more
+// page) isn't mistaken for a no-op.
+let _networkListSignature = null;
+
 function renderNetworkList() {
   const inner = $('network-list');
   if (!inner) return;
@@ -3149,6 +3165,12 @@ function renderNetworkList() {
       e.hash.toLowerCase().includes(filterText));
   }
 
+  const signature = entries
+    .map(e => `${e.kind}:${e.hash}:${e.last_seen}:${e.hops}:${e.announce_count}:${e.last_load_ok}:${e.picked}`)
+    .join('|') + `#${filterText}|${typeFilter}|${sortKey}|${_networkListWindow.page}`;
+  if (signature === _networkListSignature) return;
+  _networkListSignature = signature;
+
   $('network-count').textContent =
     `${entries.length} announce${entries.length !== 1 ? 's' : ''}`;
 
@@ -3187,6 +3209,18 @@ function renderNetworkList() {
       w.loadMore();
       renderNetworkList();
     }, 'li'));
+  }
+
+  // Sites-only content (guest, viewing "All") shouldn't silently omit
+  // peers/relays with no explanation — the empty-state message above
+  // only covers the "filtered to Peers/Relays and got nothing" case;
+  // this covers "viewing All and sites filled the list fine".
+  if (!_authState.logged_in && typeFilter === 'all') {
+    const hint = document.createElement('li');
+    hint.className = 'node-placeholder';
+    hint.style.cssText = 'font-size:11px;padding:6px 12px;cursor:default;';
+    hint.textContent = 'Log in to also see LXMF peers and mesh relays.';
+    inner.appendChild(hint);
   }
 }
 
