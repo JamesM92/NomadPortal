@@ -3092,7 +3092,21 @@ async function refreshNetworkPanel() {
   // three regardless of auth state. loadContacts() already no-ops
   // for guests on its own (no account, no contacts), so calling it
   // unconditionally here is safe and simpler than gating it too.
+  //
+  // refreshNodes() (not just a raw /api/nodes fetch) — real bug this
+  // fixes: _allNodes was only ever refreshed by pollStatus's own
+  // count-gated check (`nodes_discovered !== _allNodes.length`), which
+  // only fires when the *number* of known nodes changes, never when an
+  // already-known site's own last_seen/hops/announce_count updates
+  // from a fresh announce. Peers/relays don't have that gate — this
+  // panel already fetches them fresh, unconditionally, every poll —
+  // so sites visibly lagged behind them in the same list. Harmless
+  // that this also re-renders the (possibly hidden) Nodes panel and
+  // its status-bar count — same as pollStatus's own count-triggered
+  // refresh already does, just firing more reliably while this panel
+  // is open.
   await Promise.all([
+    refreshNodes(),
     loadContacts(),
     apiFetch('/api/lxmf-peers')
       .then(d => { _allPeers = d.peers || []; })

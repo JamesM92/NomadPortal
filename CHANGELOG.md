@@ -80,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fire, even though sites were usually already loaded by that point.
   Now calls ``refreshNetworkPanel()`` directly at boot too.
 
+- **Sites didn't live-update in the Network tab, even though peers
+  and relays did.** ``_allNodes`` was only ever refreshed by
+  ``pollStatus``'s own count-gated check (fires only when the
+  *number* of known nodes changes, never when an already-known
+  site's own ``last_seen``/``hops``/``announce_count`` updates from
+  a fresh announce) — peers/relays don't have that gate, this panel
+  already fetches them unconditionally every poll, so sites visibly
+  lagged behind them in the same list. ``refreshNetworkPanel()`` now
+  also calls ``refreshNodes()``, matching the unconditional refresh
+  the other two kinds already got.
+
 ## [1.3.0] - 2026-08-24
 
 ### Added
