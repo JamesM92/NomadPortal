@@ -102,6 +102,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unblock lets future messages through again, blocking one account
   does not affect another, and the guard degrades to "allow" rather
   than crashing when no contact store is wired in).
+- **Multi-identity accounts.** New Settings modal (gear icon next to
+  "Sign out") with an Identities tab: create, rename, switch, delete,
+  export (``.identity`` file download), import, and QR-share any
+  number of identities under one login. Ported the single-active-
+  identity model from the NomadPortal-Android sister project's own
+  multi-identity work, adapted for a real multi-tenant web account:
+  unlike Android (no account concept — it repurposes ``user_sub`` as
+  an opaque per-identity key), an identity's ``user_sub`` here keeps
+  meaning the *owning web account*; message history and contacts stay
+  scoped to the account (unchanged), not to the individual identity —
+  switching identities changes which LXMF address you send/receive as,
+  but every identity under an account shares one inbox and contact
+  list, and deleting an identity does not cascade-delete any message
+  history. Exactly one identity is "active" at a time; switching tears
+  down the previous identity's live LXMRouter
+  (``MessagingService.deactivate_user()``) and brings up the new one
+  (``activate_user()``) rather than running both at once, so an
+  inactive identity stops receiving until switched back to — the same
+  real ``LXMRouter.exit_handler()`` teardown Android's own version
+  uses. An account can never end up with zero identities: deleting the
+  last one is refused outright (deliberately not auto-replaced the way
+  Android's own delete does), and importing a keypair another account
+  already owns is rejected. In the same pass, fixed a real dormant bug
+  in the identity-naming helper: it called
+  ``RNS.Destination.app_and_aspects_to_name(...)``, which doesn't
+  exist on the installed RNS version at all — every call silently
+  raised ``AttributeError`` (caught by a broad ``except``) and fell
+  back to the identity's own raw hash instead of its real LXMF address
+  for the "NomadPortal-XYZ" suffix. New
+  ``GET/POST /api/identities``, ``POST .../activate``,
+  ``DELETE /api/identities/<id>``, ``POST .../icon``,
+  ``GET .../qr``, ``GET .../export``, ``POST /api/identities/import``
+  (all login-required, ownership-checked). Also closed a pre-existing
+  gap on the identity-announce route: it took an identity ID straight
+  from the URL with no ownership check, letting any logged-in user
+  poke another account's announce cooldown. 27 new pytest cases cover
+  the storage layer (per-account ownership, active-identity tracking
+  and its self-healing fallback, create/delete/import guards, legacy
+  on-disk migration) and the router lifecycle
+  (deactivate/activate, and that boot only brings up each account's
+  active identity, not every identity it owns).
+- **Terminal (rnsh remote shell over the mesh).** New Settings →
+  Terminal tab: connect to a remote ``rnsh`` listener
+  (github.com/acehoss/rnsh) by destination hash, authenticated with
+  your active identity, and drive it in line mode (compose a line,
+  Enter sends it — no raw keystroke terminal emulation, matching
+  rnsh's own real client's documented line-mode option). Client
+  (initiator) only, deliberately: this app never runs an rnsh
+  *listener* and never will without a separate, explicit decision to
+  add one — a listener means anyone with the right destination hash
+  gets a real shell on the machine running NomadPortal. New
+  ``nomadnet_web/rnsh_client.py``, ported from the NomadPortal-Android
+  sister project's own copy (same real wire protocol — magic byte,
+  message types, msgpack field order — reimplemented directly against
+  ``RNS.Link``/``RNS.Channel``, confirmed compatible with a real
+  ``rnsh listener`` on the other end), with one adaptation: Android is
+  a single-user device with one global session, so this adds
+  ``RnshManager`` to hold one session *per logged-in account* instead,
+  so two different accounts opening the terminal panel can't steal
+  each other's shell. New ``/api/rnsh/connect|status|output|input|
+  resize|disconnect`` (all login-required). 20 new pytest cases cover
+  the wire-protocol message classes (real pack/unpack round-trips),
+  the session state machine in isolation (no real network I/O), and
+  ``RnshManager``'s per-account session isolation.
 
 ### Fixed
 

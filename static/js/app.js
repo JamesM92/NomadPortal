@@ -3857,3 +3857,320 @@ async function _bootDefaultNavigation(siteInfo, primaryHash) {
   addrBar.value = '';
   setStatus('Ready — select a node or enter an address', 'ok');
 }
+
+// ---------------------------------------------------------------------------
+// Settings modal: Identities (multi-identity) + Terminal (rnsh)
+// ---------------------------------------------------------------------------
+
+function _openSettingsModal(tab) {
+  $('settings-modal').hidden = false;
+  _switchSettingsTab(tab || 'identities');
+}
+function _closeSettingsModal() {
+  $('settings-modal').hidden = true;
+  // Stops the status/output polling loop, not the session itself — a
+  // live rnsh session keeps running server-side (RnshManager doesn't
+  // tear it down just because nobody's watching); reopening the
+  // Terminal tab resumes polling and picks up whatever output piled up
+  // in the meantime (read_output() drains the full buffer, not just
+  // what arrived since the modal was open).
+  _stopRnshPolling();
+}
+function _switchSettingsTab(tab) {
+  document.querySelectorAll('.settings-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  $('settings-panel-identities').hidden = tab !== 'identities';
+  $('settings-panel-terminal').hidden   = tab !== 'terminal';
+  if (tab === 'identities') {
+    _loadIdentitiesList();
+  } else {
+    _refreshRnshStatus();
+  }
+}
+
+$('btn-settings')?.addEventListener('click', () => _openSettingsModal('identities'));
+$('btn-settings-close')?.addEventListener('click', _closeSettingsModal);
+document.querySelectorAll('.settings-tab').forEach(btn => {
+  btn.addEventListener('click', () => _switchSettingsTab(btn.dataset.tab));
+});
+
+// ---- Identities: list / create / switch / delete / export / import ----
+// Distinct from loadIdentities() above (singular "my identity" — the
+// account's currently *active* one, backing the sidebar panel). This
+// loads *all* of the account's identities for the Settings list.
+
+async function _loadIdentitiesList() {
+  const listEl = $('identities-list');
+  const errEl  = $('identities-error');
+  errEl.hidden = true;
+  try {
+    const data = await apiFetch('/api/identities');
+    listEl.innerHTML = '';
+    (data.identities || []).forEach(entry => listEl.appendChild(_makeIdentityRow(entry)));
+  } catch (err) {
+    listEl.innerHTML = '';
+    errEl.hidden = false;
+    errEl.textContent = `Could not load identities: ${err.message}`;
+  }
+}
+
+function _makeIdentityRow(entry) {
+  const row = document.createElement('div');
+  row.className = 'identity-row' + (entry.is_active ? ' is-active' : '');
+  row.dataset.id = entry.id;
+
+  const main = document.createElement('div');
+  main.className = 'identity-main';
+  main.innerHTML =
+    `<span class="identity-name">${esc(entry.name)}</span>` +
+    `<span class="identity-addr">${entry.lxmf_address ? esc(entry.lxmf_address) : '(address not ready yet)'}</span>`;
+  row.appendChild(main);
+
+  if (entry.is_active) {
+    const badge = document.createElement('span');
+    badge.className = 'identity-active-badge';
+    badge.textContent = 'Active';
+    row.appendChild(badge);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'identity-actions';
+
+  if (!entry.is_active) {
+    const switchBtn = document.createElement('button');
+    switchBtn.type = 'button';
+    switchBtn.textContent = 'Switch';
+    switchBtn.title = 'Make this your active identity';
+    switchBtn.addEventListener('click', () => _activateIdentity(entry.id));
+    actions.appendChild(switchBtn);
+  }
+
+  const qrBtn = document.createElement('button');
+  qrBtn.type = 'button';
+  qrBtn.textContent = 'QR';
+  qrBtn.title = 'Show this identity\'s QR code';
+  qrBtn.addEventListener('click', () => {
+    const img = $('qr-modal-img');
+    if (img) img.src = `/api/identities/${entry.id}/qr?_=${Date.now()}`;
+    $('qr-modal').hidden = false;
+  });
+  actions.appendChild(qrBtn);
+
+  const exportBtn = document.createElement('button');
+  exportBtn.type = 'button';
+  exportBtn.textContent = 'Export';
+  exportBtn.title = 'Download this identity\'s .identity key file';
+  exportBtn.addEventListener('click', () => {
+    window.location.href = `/api/identities/${entry.id}/export`;
+  });
+  actions.appendChild(exportBtn);
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'identity-delete-btn';
+  delBtn.textContent = 'Delete';
+  delBtn.addEventListener('click', () => _deleteIdentity(entry.id, entry.name));
+  actions.appendChild(delBtn);
+
+  row.appendChild(actions);
+  return row;
+}
+
+async function _activateIdentity(id) {
+  try {
+    await apiFetch(`/api/identities/${id}/activate`, { method: 'POST' });
+    await _loadIdentitiesList();
+    // The sidebar's own single-identity panel (rename/icon/QR/announce)
+    // always reflects whichever identity is active — refresh it so it
+    // doesn't keep showing the one just switched away from.
+    loadIdentities();
+    setStatus('Switched active identity.', 'ok');
+  } catch (err) {
+    setStatus(`Could not switch identity: ${err.message}`, 'error');
+  }
+}
+
+async function _deleteIdentity(id, name) {
+  if (!confirm(`Delete identity "${name}"? This cannot be undone.`)) return;
+  try {
+    await apiFetch(`/api/identities/${id}`, { method: 'DELETE' });
+    await _loadIdentitiesList();
+    loadIdentities();
+    setStatus('Identity deleted.', 'ok');
+  } catch (err) {
+    setStatus(`Could not delete identity: ${err.message}`, 'error');
+  }
+}
+
+$('btn-identity-create')?.addEventListener('click', async () => {
+  const nameInput = $('new-identity-name');
+  const name = (nameInput.value || '').trim();
+  try {
+    await apiFetch('/api/identities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    nameInput.value = '';
+    await _loadIdentitiesList();
+    setStatus('Identity created.', 'ok');
+  } catch (err) {
+    setStatus(`Could not create identity: ${err.message}`, 'error');
+  }
+});
+
+$('identity-import-file')?.addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';  // allow re-selecting the same file next time
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    await apiFetch('/api/identities/import', { method: 'POST', body: fd });
+    await _loadIdentitiesList();
+    setStatus('Identity imported.', 'ok');
+  } catch (err) {
+    setStatus(`Could not import identity: ${err.message}`, 'error');
+  }
+});
+
+// ---- Terminal (rnsh) ----
+let _rnshPollTimer  = null;
+let _rnshLastState  = 'idle';
+
+function _appendRnshOutput(text) {
+  const out = $('rnsh-output');
+  const atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
+  out.textContent += text;
+  if (atBottom) out.scrollTop = out.scrollHeight;
+}
+
+// Strips common ANSI CSI/OSC escape sequences (cursor moves, colors)
+// for readability. This is a plain-text line-mode terminal, not a real
+// ANSI-aware one — see rnsh_client.py's own "line mode only,
+// deliberately" doc comment for why raw terminal emulation isn't
+// attempted here.
+function _stripAnsi(text) {
+  return text
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '');
+}
+
+function _rnshSetConnectedUI(connected) {
+  $('rnsh-input').disabled = !connected;
+  $('btn-rnsh-connect').hidden = connected;
+  $('btn-rnsh-disconnect').hidden = !connected;
+}
+
+async function _pollRnsh() {
+  let status;
+  try {
+    status = await apiFetch('/api/rnsh/status');
+  } catch (_) {
+    return; // transient network hiccup — next tick tries again
+  }
+  if (status.state !== _rnshLastState) {
+    _rnshLastState = status.state;
+    const statusEl = $('rnsh-status');
+    if (status.state === 'connecting') {
+      statusEl.textContent = 'Connecting…';
+    } else if (status.state === 'connected') {
+      statusEl.textContent = 'Connected.';
+      _rnshSetConnectedUI(true);
+    } else if (status.state === 'closed') {
+      statusEl.textContent = (status.exit_code !== null && status.exit_code !== undefined)
+        ? `Session ended (exit code ${status.exit_code}).`
+        : 'Session ended.';
+      _rnshSetConnectedUI(false);
+    } else if (status.state === 'failed') {
+      statusEl.textContent = `Failed: ${status.error || 'unknown error'}`;
+      _rnshSetConnectedUI(false);
+    } else {
+      statusEl.textContent = '';
+      _rnshSetConnectedUI(false);
+    }
+  }
+  if (status.state === 'connected' || status.state === 'connecting') {
+    try {
+      const out = await apiFetch('/api/rnsh/output');
+      if (out.data_b64) {
+        const bytes = Uint8Array.from(atob(out.data_b64), c => c.charCodeAt(0));
+        const text  = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+        _appendRnshOutput(_stripAnsi(text));
+      }
+    } catch (_) { /* transient — next tick tries again */ }
+  } else {
+    _stopRnshPolling();
+  }
+}
+
+function _startRnshPolling() {
+  if (_rnshPollTimer !== null) return;
+  _rnshPollTimer = setInterval(_pollRnsh, 700);
+  _pollRnsh();
+}
+function _stopRnshPolling() {
+  if (_rnshPollTimer !== null) {
+    clearInterval(_rnshPollTimer);
+    _rnshPollTimer = null;
+  }
+}
+// Syncs the Terminal tab's UI with real server-side session state
+// (e.g. right after opening Settings, or switching back to this tab) —
+// resumes polling only if a session is actually live, rather than
+// unconditionally starting a timer that would immediately stop itself
+// on the next idle tick.
+function _refreshRnshStatus() {
+  _rnshLastState = '__force_refresh__';  // guarantees the next poll re-renders status text
+  _pollRnsh().then(() => {
+    if (_rnshLastState === 'connected' || _rnshLastState === 'connecting') {
+      _startRnshPolling();
+    }
+  });
+}
+
+$('btn-rnsh-connect')?.addEventListener('click', async () => {
+  const destInput = $('rnsh-dest-hash');
+  const dest = (destInput.value || '').trim().toLowerCase();
+  if (!dest) { setStatus('Enter a destination hash first.', 'error'); return; }
+  $('rnsh-output').textContent = '';
+  $('rnsh-status').textContent = 'Connecting…';
+  try {
+    await apiFetch('/api/rnsh/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dest_hash: dest }),
+    });
+    _rnshLastState = '__force_refresh__';
+    _startRnshPolling();
+  } catch (err) {
+    $('rnsh-status').textContent = `Could not connect: ${err.message}`;
+  }
+});
+
+$('btn-rnsh-disconnect')?.addEventListener('click', async () => {
+  try { await apiFetch('/api/rnsh/disconnect', { method: 'POST' }); } catch (_) {}
+  _rnshSetConnectedUI(false);
+  $('rnsh-status').textContent = 'Disconnected.';
+  _stopRnshPolling();
+});
+
+$('rnsh-input')?.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  const input = $('rnsh-input');
+  const line = input.value;
+  input.value = '';
+  const bytes = new TextEncoder().encode(line + '\n');
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  try {
+    await apiFetch('/api/rnsh/input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data_b64: btoa(binary) }),
+    });
+  } catch (err) {
+    setStatus(`Could not send input: ${err.message}`, 'error');
+  }
+});

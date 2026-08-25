@@ -159,6 +159,82 @@
     }
     .icon-picker-item:hover { border-color: var(--accent); color: var(--accent); }
     .icon-picker-item svg { width: 100%; height: 100%; display: block; }
+
+    /* ---- Settings modal (Identities + Terminal) ---- */
+    /* Same real-rule-not-inline-style pattern as #icon-picker-modal/
+       #qr-modal above — see #icon-picker-modal's own comment for why. */
+    #settings-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #settings-modal[hidden] { display: none; }
+    .settings-box { width: 560px; max-width: 95vw; }
+    #settings-tabs {
+      display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .settings-tab {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-dim); padding: 6px 10px; cursor: pointer;
+      font-family: var(--font-mono); font-size: 12px;
+    }
+    .settings-tab:hover { color: var(--text); }
+    .settings-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .settings-panel[hidden] { display: none; }
+    .settings-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 10px; }
+    .settings-error { color: var(--error); font-size: 12px; margin-top: 8px; }
+
+    #identities-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+    .identity-row {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: 3px; font-size: 12px;
+    }
+    .identity-row.is-active { border-color: var(--accent); }
+    .identity-row .identity-main { flex: 1; min-width: 0; }
+    .identity-row .identity-name { color: var(--text); }
+    .identity-row .identity-addr {
+      display: block; color: var(--text-dim); font-size: 10px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .identity-active-badge {
+      background: #1a2a1a; border: 1px solid var(--accent2); color: var(--accent2);
+      padding: 0 5px; border-radius: 2px; font-size: 10px; flex-shrink: 0;
+    }
+    .identity-row .identity-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .identity-row button {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-family: var(--font-mono); font-size: 10px; padding: 3px 6px;
+      border-radius: 2px; cursor: pointer;
+    }
+    .identity-row button:hover { color: var(--text); border-color: var(--accent); }
+    .identity-row button.identity-delete-btn:hover { color: var(--error); border-color: var(--error); }
+
+    #identities-add-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    #identities-add-row input[type="text"] {
+      flex: 1; min-width: 120px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono); font-size: 12px;
+      padding: 5px 8px; border-radius: 2px; outline: none;
+    }
+    #btn-identity-import-label { margin: 0; }
+
+    #rnsh-connect-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    #rnsh-dest-hash {
+      flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      font-family: var(--font-mono); font-size: 12px; padding: 5px 8px;
+      border-radius: 2px; outline: none;
+    }
+    #rnsh-output {
+      background: #000; color: #d0d0d0; border: 1px solid var(--border); border-radius: 2px;
+      font-family: var(--font-mono); font-size: 11px; line-height: 1.4;
+      padding: 8px; height: 220px; overflow-y: auto; overflow-x: auto;
+      white-space: pre-wrap; word-break: break-word; margin: 0 0 8px;
+    }
+    .rnsh-line-input {
+      width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono); font-size: 12px;
+      padding: 6px 8px; border-radius: 2px; outline: none;
+    }
+    .rnsh-line-input:disabled { opacity: .5; }
   </style>
 </head>
 <body>
@@ -210,6 +286,8 @@
     <span id="ub-user-section" hidden>
       <span class="user-name" id="ub-name"></span>
       <span class="badge-admin" id="ub-admin-badge" hidden>admin</span>
+      <span class="ub-sep">&#8231;</span>
+      <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
       <span class="ub-sep">&#8231;</span>
       <span id="ub-admin-sep" hidden>&#8231;</span>
       <a href="/admin" id="ub-admin-link" hidden>Admin</a>
@@ -598,6 +676,53 @@
     <div class="modal-actions">
       <button class="btn-modal-cancel" id="btn-msg-cancel">Cancel</button>
       <button class="btn-modal-send"   id="btn-msg-send">Send &#10140;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Settings modal: Identities + Terminal (rnsh) =================== -->
+<div id="settings-modal" hidden>
+  <div class="modal-box settings-box">
+    <div class="modal-title">&#9881; Settings</div>
+    <div id="settings-tabs">
+      <button type="button" class="settings-tab active" data-tab="identities">Identities</button>
+      <button type="button" class="settings-tab" data-tab="terminal">Terminal</button>
+    </div>
+
+    <div id="settings-panel-identities" class="settings-panel">
+      <div id="identities-list"></div>
+      <div id="identities-add-row">
+        <input type="text" id="new-identity-name" placeholder="Name (optional)" maxlength="128">
+        <button type="button" id="btn-identity-create" class="btn btn-sm btn-neutral">+ New identity</button>
+        <label id="btn-identity-import-label" class="btn btn-sm btn-neutral">
+          Import…
+          <input type="file" id="identity-import-file" accept=".identity" hidden>
+        </label>
+      </div>
+      <div id="identities-error" class="settings-error" hidden></div>
+    </div>
+
+    <div id="settings-panel-terminal" class="settings-panel" hidden>
+      <p class="settings-hint">
+        Connects to a remote <code>rnsh</code> shell listener over the mesh,
+        using your active identity as authentication. Line mode only — type
+        a full line, press Enter to send it. This app never runs an rnsh
+        listener itself.
+      </p>
+      <div id="rnsh-connect-row">
+        <input type="text" id="rnsh-dest-hash" spellcheck="false"
+               placeholder="Destination hash of an rnsh listener">
+        <button type="button" id="btn-rnsh-connect" class="btn btn-sm btn-primary">Connect</button>
+        <button type="button" id="btn-rnsh-disconnect" class="btn btn-sm btn-neutral" hidden>Disconnect</button>
+      </div>
+      <div id="rnsh-status" class="settings-hint"></div>
+      <pre id="rnsh-output" aria-live="polite"></pre>
+      <input type="text" id="rnsh-input" class="rnsh-line-input"
+             placeholder="Connect first, then type a command and press Enter" disabled>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-modal-cancel" id="btn-settings-close">Close</button>
     </div>
   </div>
 </div>

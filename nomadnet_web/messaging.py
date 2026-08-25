@@ -259,9 +259,13 @@ class MessagingService:
     # ------------------------------------------------------------------
 
     def setup_delivery(self, identity_store) -> None:
-        """Register a delivery identity + LXMRouter for every stored user identity."""
+        """Register a delivery identity + LXMRouter for each account's
+        *active* identity. Multi-identity means an account can own more
+        than one identity, but only the active one should have a live
+        router at boot — the rest come up on demand when an account
+        switches to them (see `activate_user()`)."""
         self._identity_store = identity_store
-        for entry in identity_store.list_identities():
+        for entry in identity_store.list_active_identities():
             self._init_user_router(entry)
 
     def _init_user_router(self, entry: dict) -> Optional[dict]:
@@ -367,9 +371,68 @@ class MessagingService:
 
         Call after the user's RNS identity is regenerated (e.g. admin reset)
         so the new keypair's LXMF address takes effect immediately.
+
+        Note: unlike ``deactivate_user`` below, this does NOT call the
+        popped router's own ``exit_handler()`` — it was written for the
+        "this identity's keypair no longer exists, a fresh one is about
+        to replace it" case, where the old router's own background
+        threads/links being left running was never actually exercised
+        for long (the identity behind it was gone). Multi-identity
+        switching is a different case — the deactivated identity is
+        still real and may be reactivated later — so it needs the real
+        teardown ``deactivate_user`` does instead of this method.
         """
         with self._lock:
             self._user_routers.pop(user_sub, None)
+
+    def deactivate_user(self, user_sub: str) -> None:
+        """Cleanly stops the LXMRouter currently active for this
+        account — the real mechanism behind multi-identity's
+        single-active-identity switch. ``LXMRouter.exit_handler()``
+        (verified directly against the installed LXMF/LXMRouter.py
+        source) tears down that router's own delivery
+        destination/links and flips ``exit_handler_running``, which its
+        own background job-loop threads check to stop themselves — it
+        only touches that router's own state, so this is safe to call
+        while ``RNS.Reticulum()`` and any other account's router keep
+        running.
+
+        A no-op if this account has no live router (e.g. it was never
+        activated this run, or is already deactivated) — same
+        "tolerates being called on nothing" contract as
+        ``reset_user_router``.
+
+        Does NOT delete the identity or its stored messages/contacts —
+        those stay scoped to the account regardless of which identity
+        is active (see ``identity_store.py``'s module docstring), so
+        switching back to the account later picks up right where it
+        left off. ``register_delivery_identity`` refuses a second
+        identity on an already-used router instance, so reactivation
+        always builds a fresh ``LXMRouter`` rather than resuming this
+        exited one — ``_init_user_router`` already does exactly that
+        once this ``user_sub`` is gone from ``_user_routers``.
+        """
+        with self._lock:
+            data = self._user_routers.pop(user_sub, None)
+        if data is None:
+            return
+        try:
+            data["router"].exit_handler()
+        except Exception:
+            log.exception(
+                "deactivate_user: exit_handler() raised for %s — "
+                "router is still removed from the active set either way",
+                user_sub[:16] if user_sub else "anon",
+            )
+
+    def activate_user(self, entry: dict) -> Optional[dict]:
+        """Public wrapper over ``_init_user_router`` — the other half of
+        ``deactivate_user``'s pair, for the multi-identity switch flow.
+        [entry] is an ``IdentityStore`` entry dict (has "id"/"user_sub"/
+        "name"). Safe to call for an identity that's already active —
+        ``_init_user_router`` itself already tolerates that (returns the
+        existing router)."""
+        return self._init_user_router(entry)
 
     def active_routers(self) -> list:
         """Return a snapshot list of currently-registered routers as
@@ -393,6 +456,16 @@ class MessagingService:
         """Return the hexhash of the user's LXMF delivery destination, or None."""
         data = self._get_user_router(user_sub)
         return data["dest"].hexhash if data else None
+
+    def get_identity(self, user_sub: str = ""):
+        """Return the ``RNS.Identity`` behind this user's currently
+        active LXMF router, or None. The real caller is the rnsh
+        terminal feature, which authenticates to a remote listener with
+        the same identity LXMF messaging already uses for this account
+        — reused, not a separate rnsh-specific identity (see
+        ``rnsh_client.RnshSession``'s own doc comment)."""
+        data = self._get_user_router(user_sub)
+        return data["identity"] if data else None
 
     def refresh_router_display_name(self, user_sub: str, name: str) -> None:
         """Applies a rename to the *live* router's destination immediately

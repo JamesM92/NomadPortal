@@ -1511,9 +1511,202 @@ def api_identity_rename(identity_id: str):
     # Live-refresh so an announce made right after this doesn't still
     # carry the old name — see MessagingService.refresh_router_display_name
     # for the real bug this closes (a rename alone is dead code for any
-    # announce until the next process restart).
-    current_app.config["MESSAGING"].refresh_router_display_name(current_user.id, new_name)
+    # announce until the next process restart). Only when [identity_id]
+    # is the account's *currently active* identity: refresh_router_display_name
+    # blindly overwrites whichever router is live for this user_sub, and
+    # with multi-identity that live router may belong to a *different*
+    # identity than the one just renamed — applying it unconditionally
+    # would leak this rename onto the active identity's own live display
+    # name instead.
+    active = _id_store().get_active_for_user(current_user.id)
+    if active is not None and active["id"] == identity_id:
+        current_app.config["MESSAGING"].refresh_router_display_name(current_user.id, new_name)
     return jsonify({"ok": True})
+
+
+@bp.get("/api/identities")
+@login_required
+def api_identities_list():
+    """All identities owned by the current account — the "Settings →
+    Identities" list. Ensures the account has at least one identity
+    first (same bootstrap ``/api/my-identity`` already relies on) so a
+    brand-new account never sees an empty list here."""
+    store = _id_store()
+    store.ensure_for_user(current_user.id, getattr(current_user, "name", ""))
+    active = store.get_active_for_user(current_user.id)
+    active_id = active["id"] if active else None
+    out = []
+    for entry in store.list_for_user(current_user.id):
+        out.append({
+            "id":           entry["id"],
+            "name":         entry["name"],
+            "lxmf_address": store.get_dest_hash_hex(entry["id"]),
+            "icon":         entry.get("icon"),
+            "created":      entry.get("created"),
+            "is_active":    entry["id"] == active_id,
+        })
+    return jsonify({"identities": out})
+
+
+@bp.post("/api/identities")
+@login_required
+def api_identity_create():
+    """Create a new identity owned by the current account. Does not
+    switch to it — the UI calls .../activate separately, same
+    "create, then explicitly activate" split as every other
+    multi-identity mutation here."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()[:128]
+    entry = _id_store().create_for_user(current_user.id, name)
+    return jsonify({"ok": True, "identity": {"id": entry["id"], "name": entry["name"]}})
+
+
+@bp.post("/api/identities/<identity_id>/activate")
+@login_required
+def api_identity_activate(identity_id: str):
+    """Switch the account's active identity — tears down the
+    currently-live router and brings up [identity_id]'s instead. See
+    MessagingService.deactivate_user()/activate_user() for the real
+    LXMRouter lifecycle this drives."""
+    store = _id_store()
+    entry = store.get(identity_id)
+    if entry is None or entry.get("user_sub") != current_user.id:
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+
+    active = store.get_active_for_user(current_user.id)
+    if active is not None and active["id"] == identity_id:
+        return jsonify({"ok": True})  # already active — no teardown/rebuild needed
+
+    messaging = current_app.config.get("MESSAGING")
+    if messaging is not None:
+        messaging.deactivate_user(current_user.id)
+    if not store.set_active_for_user(current_user.id, identity_id):
+        return jsonify({"ok": False, "error": "Could not switch identity"}), 500
+    if messaging is not None:
+        messaging.activate_user(entry)
+    return jsonify({"ok": True})
+
+
+@bp.delete("/api/identities/<identity_id>")
+@login_required
+def api_identity_delete(identity_id: str):
+    """Delete one of the account's own identities. Refused for an
+    identity not owned by this account or the account's only one — see
+    IdentityStore.delete_for_user()'s own doc comment for why this
+    deliberately does not auto-create a replacement the way the
+    NomadPortal-Android sister project's delete does."""
+    store = _id_store()
+    was_active = False
+    active = store.get_active_for_user(current_user.id)
+    if active is not None and active["id"] == identity_id:
+        was_active = True
+
+    ok, message = store.delete_for_user(current_user.id, identity_id)
+    if not ok:
+        return jsonify({"ok": False, "error": message}), 400
+
+    messaging = current_app.config.get("MESSAGING")
+    if was_active and messaging is not None:
+        # The old router (for the identity that just got deleted) is
+        # torn down; delete_for_user() already reassigned active status
+        # to another of this account's identities, so bring that one's
+        # router up now rather than waiting for the next lazy fetch.
+        messaging.deactivate_user(current_user.id)
+        new_active = store.get_active_for_user(current_user.id)
+        if new_active is not None:
+            messaging.activate_user(new_active)
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/identities/<identity_id>/icon")
+@login_required
+def api_identity_icon_set(identity_id: str):
+    """Set the icon appearance for a specific (not necessarily active)
+    owned identity. .../my-identity/icon remains the shortcut for the
+    currently-active one."""
+    store = _id_store()
+    entry = store.get(identity_id)
+    if entry is None or entry.get("user_sub") != current_user.id:
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+    data  = request.get_json(silent=True) or {}
+    glyph = (data.get("glyph") or "?").strip()
+    fg    = data.get("fg", "")
+    bg    = data.get("bg", "")
+    store.set_icon_appearance(identity_id, glyph, fg, bg)
+    return jsonify({"ok": True, "icon": store.get_icon_appearance(identity_id)})
+
+
+@bp.get("/api/identities/<identity_id>/qr")
+@login_required
+def api_identity_qr(identity_id: str):
+    """SVG QR code for one owned identity's LXMF address — same
+    lxma://<hash>:<pubkey> payload as /api/my-identity/qr, but usable
+    for any of the account's identities, not just the active one (an
+    inactive identity has no live router/announced address, so the
+    address is computed offline via get_dest_hash_hex instead of read
+    off a live Destination)."""
+    from . import identity_qr
+    from flask import Response
+
+    store = _id_store()
+    entry = store.get(identity_id)
+    if entry is None or entry.get("user_sub") != current_user.id:
+        abort(404, description="Identity not found")
+
+    identity = store.load_rns_identity(identity_id)
+    lxmf_address = store.get_dest_hash_hex(identity_id)
+    if identity is None or not lxmf_address:
+        abort(503, description="Identity not ready yet")
+
+    payload = identity_qr.build_identity_qr_payload(lxmf_address, identity.get_public_key().hex())
+    svg = identity_qr.render_qr_svg(payload)
+    return Response(svg, mimetype="image/svg+xml")
+
+
+@bp.get("/api/identities/<identity_id>/export")
+@login_required
+def api_identity_export(identity_id: str):
+    """Download this identity's raw ``.identity`` key file — the same
+    on-disk format Columba's own export/import uses, confirmed
+    cross-compatible (see IdentityStore.import_identity's own doc
+    comment). The only way to move a keypair to another install; never
+    a message/contact backup mechanism."""
+    from flask import Response
+
+    store = _id_store()
+    entry = store.get(identity_id)
+    if entry is None or entry.get("user_sub") != current_user.id:
+        abort(404, description="Identity not found")
+    key_bytes = store.export_key_bytes(identity_id)
+    if key_bytes is None:
+        abort(404, description="Key file not found")
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", entry.get("name") or identity_id[:16])
+    return Response(
+        key_bytes,
+        mimetype="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.identity"'},
+    )
+
+
+@bp.post("/api/identities/import")
+@login_required
+def api_identity_import():
+    """Import a ``.identity`` key file (uploaded as multipart form data,
+    field name ``file``) as a new identity owned by the current
+    account. Rejects a keypair another account already owns — see
+    IdentityStore.import_identity's own doc comment."""
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    key_bytes = upload.read()
+    if not key_bytes or len(key_bytes) > 8192:
+        return jsonify({"ok": False, "error": "Invalid identity file"}), 400
+    name = (request.form.get("name") or "").strip()[:128]
+    try:
+        entry = _id_store().import_identity(key_bytes, name=name, user_sub=current_user.id)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "identity": {"id": entry["id"], "name": entry["name"]}})
 
 
 _HEX24_RE = re.compile(r"^[0-9a-f]+$")
@@ -1566,6 +1759,15 @@ def api_fingerprint_off():
 @bp.post("/api/identities/<identity_id>/announce")
 @login_required
 def api_identity_announce(identity_id: str):
+    # Ownership check — without it, any logged-in user could poke
+    # another account's identity's announce cooldown (reset its timer
+    # early, or read its "next allowed" message) just by knowing its
+    # hex ID, even though the actual announce below always goes out
+    # under the *caller's own* active identity regardless.
+    entry = _id_store().get(identity_id)
+    if entry is None or entry.get("user_sub") != current_user.id:
+        return jsonify({"ok": False, "message": "Identity not found"}), 404
+
     ok, message, next_allowed = _id_store().check_cooldown(identity_id)
     if ok:
         messaging = current_app.config.get("MESSAGING")
@@ -1859,3 +2061,86 @@ def api_relays():
     prop_sync = current_app.config.get("PROP_SYNC")
     relays = prop_sync.list_known_nodes() if prop_sync else []
     return jsonify({"relays": relays})
+
+
+# ---------------------------------------------------------------------------
+# rnsh (remote shell over Reticulum) — Settings → Terminal. Client
+# (initiator) only — see rnsh_client.py's own doc comment for the real
+# "never a listener" scoping decision. One session at a time per
+# account (RnshManager), authenticated with that account's currently
+# active LXMF identity.
+# ---------------------------------------------------------------------------
+
+def _rnsh():
+    return current_app.config["RNSH"]
+
+
+@bp.post("/api/rnsh/connect")
+@login_required
+def api_rnsh_connect():
+    data = request.get_json(silent=True) or {}
+    dest_hash = (data.get("dest_hash") or "").strip().lower()
+    if not dest_hash or not _HEX24_RE.match(dest_hash):
+        return jsonify({"ok": False, "error": "Invalid destination hash"}), 400
+
+    messaging = current_app.config.get("MESSAGING")
+    identity = messaging.get_identity(current_user.id) if messaging else None
+    if identity is None:
+        return jsonify({"ok": False, "error": "No delivery identity registered yet — try again shortly"}), 503
+
+    _rnsh().connect(current_user.id, identity, dest_hash)
+    return jsonify({"ok": True, "message": "Connecting…"})
+
+
+@bp.get("/api/rnsh/status")
+@login_required
+def api_rnsh_status():
+    return jsonify(_rnsh().status(current_user.id))
+
+
+@bp.get("/api/rnsh/output")
+@login_required
+def api_rnsh_output():
+    """{"data_b64": "..."} — base64, never raw bytes, so a chunk that
+    happens to split a multi-byte UTF-8 character mid-stream can't
+    corrupt the JSON response itself; the browser reassembles and
+    decodes it client-side. Empty string when there's nothing new to
+    report — never an error, just "nothing to show yet"."""
+    import base64
+    data = _rnsh().read_output(current_user.id)
+    return jsonify({"data_b64": base64.b64encode(data).decode("ascii") if data else ""})
+
+
+@bp.post("/api/rnsh/input")
+@login_required
+def api_rnsh_input():
+    import base64
+    data = request.get_json(silent=True) or {}
+    try:
+        raw = base64.b64decode(data.get("data_b64") or "", validate=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid input"}), 400
+    if len(raw) > 8192:
+        return jsonify({"ok": False, "error": "Input too large"}), 400
+    _rnsh().send_input(current_user.id, raw)
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/rnsh/resize")
+@login_required
+def api_rnsh_resize():
+    data = request.get_json(silent=True) or {}
+    try:
+        rows = max(1, min(500, int(data.get("rows", 24))))
+        cols = max(1, min(2000, int(data.get("cols", 80))))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid size"}), 400
+    _rnsh().resize(current_user.id, rows, cols)
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/rnsh/disconnect")
+@login_required
+def api_rnsh_disconnect():
+    _rnsh().disconnect(current_user.id)
+    return jsonify({"ok": True})
