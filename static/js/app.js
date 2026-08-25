@@ -3461,7 +3461,19 @@ function applyUISettings(s) {
 
   // Activate the first visible panel
   if (!showNodes && showMessages)  showSidebarPanel('messages');
-  if (!showNodes && !showMessages && showNetwork) showSidebarPanel('network');
+  if (!showNodes && !showMessages && showNetwork) {
+    showSidebarPanel('network');
+    // Network starts collapsed by default (for every audience it can
+    // apply to — guests, regular users, or even an admin whose own
+    // preset happens to land here too, not just guests) — per
+    // explicit direction. Nodes/Messages don't get this treatment:
+    // browsing those is the primary use case, so they stay expanded;
+    // Network is more of an occasional reference tool, and this is
+    // the one case where it's the ONLY tab available, with nothing
+    // else to switch to for reclaiming the content area otherwise
+    // (see #btn-sidebar-collapse's own comment).
+    $('sidebar')?.classList.add('collapsed');
+  }
   if (!showNodes && !showMessages && !showNetwork) {
     const tabs = $('sidebar-tabs');
     if (tabs) tabs.hidden = true;

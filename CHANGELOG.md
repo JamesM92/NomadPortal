@@ -51,10 +51,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the existing Nodes/Messages panel toggles. New desktop sidebar-
   collapse button (``#btn-sidebar-collapse``, next to the brand) —
   matters most for a guest down to one enabled panel, who'd otherwise
-  have no way to reclaim the content area's full width. 5 new pytest
-  cases cover ``PropagationSyncService.list_known_nodes()`` (empty
-  state, a single announce, repeat-announce count/hops updates,
-  multiple relays, and the currently-picked flag).
+  have no way to reclaim the content area's full width. When Network
+  is the only enabled panel for a given audience, the sidebar now
+  starts collapsed by default (for every audience that combination
+  can apply to, not just guests) rather than eating screen space
+  before anyone's asked to see it. 5 new pytest cases cover
+  ``PropagationSyncService.list_known_nodes()`` (empty state, a
+  single announce, repeat-announce count/hops updates, multiple
+  relays, and the currently-picked flag).
+
+### Fixed
+
+- **Signing out landed on the sign-in page instead of the app.**
+  ``/auth/logout`` redirected back to ``auth.login_page`` in both the
+  OIDC (``post_logout_redirect_uri``) and local-login paths — signing
+  out immediately re-prompted for login instead of returning to the
+  default node, the same place a fresh guest visit lands. Both paths
+  now redirect to the app root instead.
 
 ## [1.3.0] - 2026-08-24
 

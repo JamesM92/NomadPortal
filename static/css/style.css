@@ -1169,6 +1169,18 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
     max-width: none;
   }
   #sidebar.mobile-open { transform: translateX(0); box-shadow: 4px 0 16px rgba(0,0,0,.5); }
+  /* Neutralize the desktop .collapsed state here — real bug this
+     prevents: the Network-tab boot default (applyUISettings) adds
+     .collapsed regardless of screen width, but mobile has no control
+     that ever removes it (#btn-sidebar-collapse is desktop-only,
+     hidden above). Without this override, .collapsed's display:none
+     would permanently beat #sidebar.mobile-open's transform (which
+     doesn't touch display), making the hamburger toggle look like it
+     does nothing — tapping it would flip .mobile-open, but the
+     sidebar would stay invisible forever. Restoring the base #sidebar
+     display:flex here means visibility on mobile is governed only by
+     the transform/.mobile-open mechanism, same as before this existed. */
+  #sidebar.collapsed { display: flex; }
 
   /* Content fills full width */
   #content-wrap { width: 100%; }
