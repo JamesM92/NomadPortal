@@ -508,6 +508,7 @@ async function toggleFavorite(hash, newVal) {
   if (!node) return;
   node.favorited = newVal;
   renderNodeList();
+  if (!$('sidebar-panel-network').hidden) renderNetworkList();
   try {
     await apiFetch(`/api/nodes/${hash}/favorite`, {
       method: 'POST',
@@ -518,6 +519,7 @@ async function toggleFavorite(hash, newVal) {
   } catch (e) {
     node.favorited = !newVal;
     renderNodeList();
+    if (!$('sidebar-panel-network').hidden) renderNetworkList();
     setStatus(`Could not save favorite: ${e.message}`, 'error');
   }
 }
@@ -3170,6 +3172,7 @@ function renderNetworkList() {
         last_seen: n.last_seen, hops: n.hops,
         announce_count: n.announce_count,
         last_load_ok: n.last_load_ok, ever_load_ok: n.ever_load_ok,
+        is_hosted: n.is_hosted, is_default: n.is_default, favorited: n.favorited,
       });
     }
   }
@@ -3200,7 +3203,7 @@ function renderNetworkList() {
   }
 
   const signature = entries
-    .map(e => `${e.kind}:${e.hash}:${e.last_seen}:${e.hops}:${e.announce_count}:${e.last_load_ok}:${e.picked}`)
+    .map(e => `${e.kind}:${e.hash}:${e.last_seen}:${e.hops}:${e.announce_count}:${e.last_load_ok}:${e.picked}:${e.favorited}`)
     .join('|') + `#${filterText}|${typeFilter}|${sortKey}|${_networkListWindow.page}`;
   if (signature === _networkListSignature) return;
   _networkListSignature = signature;
@@ -3264,6 +3267,39 @@ function makeNetworkItem(entry) {
 
   const right = document.createElement('div');
   right.className = 'node-right';
+
+  // Favorite star/pin — sites only, same rules as the Nodes panel's
+  // own makeNodeItem (pinned for hosted/default, an interactive
+  // toggle for a logged-in user, nothing for a guest looking at an
+  // ordinary node — favoriting is per-account, guests have no
+  // account to save it against). Peers/relays have no favoriting
+  // concept in this app's data model.
+  if (entry.kind === 'site') {
+    if (entry.is_hosted || entry.is_default) {
+      const pin = document.createElement('span');
+      pin.className = 'node-fav-btn fav-active';
+      pin.textContent = '★';
+      pin.title = entry.is_hosted
+        ? 'This node (always pinned)'
+        : 'Operator-pinned default node';
+      pin.style.cursor = 'default';
+      right.appendChild(pin);
+    } else if (_authState.logged_in) {
+      const starBtn = document.createElement('button');
+      starBtn.className = 'node-fav-btn';
+      starBtn.dataset.hash = entry.hash;
+      starBtn.dataset.fav  = entry.favorited ? 'true' : 'false';
+      starBtn.textContent  = entry.favorited ? '★' : '☆';
+      starBtn.classList.toggle('fav-active', !!entry.favorited);
+      starBtn.title        = entry.favorited ? 'Unfavorite' : 'Favorite';
+      starBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleFavorite(entry.hash, starBtn.dataset.fav !== 'true');
+      });
+      right.appendChild(starBtn);
+    }
+  }
+
   right.insertAdjacentHTML('beforeend',
     `<span class="${hopsClass}" title="Hops away on the Reticulum network">${hopsLabel}</span>` +
     // "picked" is the relay this app's own propagation sync is
@@ -3288,7 +3324,10 @@ function makeNetworkItem(entry) {
     `</div>`);
 
   if (entry.kind === 'site') {
-    li.addEventListener('click', () => navigateTo(`hash://${entry.hash}/page/index.mu`));
+    li.addEventListener('click', e => {
+      if (e.target.closest('.node-fav-btn')) return;
+      navigateTo(`hash://${entry.hash}/page/index.mu`);
+    });
   } else if (entry.kind === 'peer') {
     li.addEventListener('click', async () => {
       // Peers are guest-viewable now (see /api/lxmf-peers's own doc

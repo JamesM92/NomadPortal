@@ -103,6 +103,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — the next real ``refreshNodes()`` always overwrites it with the
   server's own value regardless.
 
+- **Site rows in the Network tab had no favorite star.** The Nodes
+  panel's own pin/star (pinned for hosted/default, an interactive
+  toggle for a logged-in user) never made it into ``makeNetworkItem``
+  when the tab was first built. Added, same rules, same
+  ``toggleFavorite()`` — clicking it there updates the same
+  ``_allNodes`` entry the Nodes panel itself favorites, so favoriting
+  from either view stays in sync with the other immediately.
+
 ## [1.3.0] - 2026-08-24
 
 ### Added
