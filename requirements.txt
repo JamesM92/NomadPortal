@@ -44,6 +44,10 @@ pytest==9.1.1
 # page for the demo and the portability caveat).
 Micron2HTML==1.1.1
 
+# "Show my QR" identity sharing (nomadnet_web/identity_qr.py). SVG
+# output only — no Pillow/libjpeg needed.
+qrcode==8.2
+
 # Explicit pin, not an app dependency — the base image's ensurepip-
 # installed setuptools (70.3.0) carries CVE-2025-47273 (path
 # traversal). 78.1.1 fixes that one but pip-audit's broader OSV feed

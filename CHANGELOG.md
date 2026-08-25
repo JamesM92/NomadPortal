@@ -60,6 +60,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single announce, repeat-announce count/hops updates, multiple
   relays, and the currently-picked flag).
 
+- **"Show my QR" — a scannable QR code for your own LXMF address.**
+  Ported from the NomadPortal-Android sister project (show-only; no
+  in-app scanning, by design — Android already covers that half).
+  New button next to "Announce identity" opens a QR code encoding
+  ``lxma://<destination_hash>:<public_key>`` — Columba's own real
+  identity-sharing scheme, adopted verbatim so a code generated here
+  scans correctly in Columba/Sideband/NomadPortal-Android and vice
+  versa. Carries the public key alongside the hash deliberately, not
+  redundantly: a destination hash is a one-way hash
+  (confirmed directly against RNS's own ``Destination.hash()``/
+  ``Identity`` source) and can't be inverted back into a usable key,
+  so without it the scanning device would have to wait for a live
+  mesh announce before the address became usable at all —
+  ``RNS.Identity.remember()`` lets it skip straight to "ready to
+  message." New ``nomadnet_web/identity_qr.py`` (payload + SVG
+  rendering via the new ``qrcode`` dependency, SVG-only so no
+  Pillow/libjpeg is needed) and ``GET /api/my-identity/qr``
+  (login-required, serves ``image/svg+xml`` directly). 5 new pytest
+  cases cover the payload format (including a literal round-trip
+  through Android's own parser shape) and SVG rendering.
+
 ### Fixed
 
 - **Signing out landed on the sign-in page instead of the app.**

@@ -2221,6 +2221,10 @@ function _updateAnnounceStatus() {
     const addr = _myIdentity.lxmf_address || '';
     addrEl.textContent = addr ? addr : '';
     addrEl.hidden = !addr;
+    // QR needs a real address to encode — same condition as the
+    // address line itself.
+    const qrBtn = $('btn-show-qr');
+    if (qrBtn) qrBtn.hidden = !addr;
   }
 
   const last      = _myIdentity.last_announced || 0;
@@ -2265,6 +2269,23 @@ $('announce-lxmf-addr').addEventListener('click', () => {
     el.textContent = 'Copied!';
     setTimeout(() => { el.textContent = prev; }, 1200);
   }).catch(() => {});
+});
+
+// "Show my QR" — img src is the SVG endpoint directly
+// (nomadnet_web/identity_qr.py); the browser requests it like any
+// other image, no separate fetch/inline step needed. A fresh
+// timestamp query param on each open busts any stale cached image
+// from a prior identity rename (the QR payload itself — hash+pubkey —
+// never changes across a rename, but the endpoint has no explicit
+// cache headers either way, so this is defensive rather than load-
+// bearing).
+$('btn-show-qr')?.addEventListener('click', () => {
+  const img = $('qr-modal-img');
+  if (img) img.src = `/api/my-identity/qr?_=${Date.now()}`;
+  $('qr-modal').hidden = false;
+});
+$('btn-qr-modal-close')?.addEventListener('click', () => {
+  $('qr-modal').hidden = true;
 });
 
 $('btn-rename-identity').addEventListener('click', () => {

@@ -128,6 +128,14 @@
       display: flex; align-items: center; justify-content: center; z-index: 200;
     }
     #icon-picker-modal[hidden] { display: none; }
+
+    /* Same real-rule-not-inline-style pattern as #icon-picker-modal
+       above — see its own comment for why. */
+    #qr-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #qr-modal[hidden] { display: none; }
     #icon-picker-categories {
       display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
       padding-bottom: 6px; margin-bottom: 4px; flex-shrink: 0;
@@ -286,6 +294,8 @@
                   style="background:none;border:none;cursor:pointer;color:var(--text-dim);
                          font-size:11px;padding:0 2px;line-height:1;flex-shrink:0;"
                   title="Edit name">✎</button>
+          <button id="btn-show-qr" class="icon-btn" title="Show QR code" hidden
+                  style="font-size:15px;flex-shrink:0;">&#9638;</button>
           <button id="btn-announce" class="btn btn-sm btn-neutral"
                   style="white-space:nowrap;" disabled>Announce</button>
         </div>
@@ -347,6 +357,28 @@
                  style="font-size:10px;color:var(--text-dim);margin-top:6px;min-height:12px;"></div>
             <div class="modal-actions">
               <button type="button" id="btn-icon-picker-cancel" class="btn-modal-cancel">Close</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- QR modal — "show my QR" only, no in-app scan flow (per
+             explicit direction). Same modal-box/[hidden] pattern as
+             #icon-picker-modal above. img src is the SVG endpoint
+             directly (nomadnet_web/identity_qr.py) — no separate
+             fetch/inline step needed, the browser requests it like
+             any other image. -->
+        <div id="qr-modal" hidden>
+          <div class="modal-box" style="width:320px;max-width:92vw;padding:20px 22px;
+                                         display:flex;flex-direction:column;align-items:center;">
+            <div class="modal-title" style="margin-bottom:10px;">Your LXMF address</div>
+            <img id="qr-modal-img" alt="QR code for your LXMF address"
+                 style="width:240px;height:240px;background:#fff;border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-dim);margin-top:10px;text-align:center;">
+              Scan with Sideband, Columba, or NomadPortal-Android to add this
+              address immediately — no need to wait for an announce.
+            </div>
+            <div class="modal-actions">
+              <button type="button" id="btn-qr-modal-close" class="btn-modal-cancel">Close</button>
             </div>
           </div>
         </div>

@@ -37,6 +37,7 @@ each project's repository):
 - **PyYAML** — MIT
 - **Werkzeug** — BSD-3-Clause
 - **requests** — Apache-2.0
+- **qrcode** — BSD
 
 The pinned versions are listed in `requirements.txt`. Run
 `pip-licenses --from=mixed` after a build for an exact list.

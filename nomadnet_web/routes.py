@@ -1441,6 +1441,34 @@ def api_my_identity():
     })
 
 
+@bp.get("/api/my-identity/qr")
+@login_required
+def api_my_identity_qr():
+    """SVG QR code for the current user's own LXMF address — "show my
+    QR", per explicit direction not paired with any in-app scan flow.
+    See identity_qr.py's own doc comment for the lxma://<hash>:<pubkey>
+    payload format and why it carries the public key, not just the
+    hash."""
+    from . import identity_qr
+
+    entry = _id_store().ensure_for_user(
+        current_user.id, getattr(current_user, "name", "")
+    )
+    identity = _id_store().load_rns_identity(entry["id"])
+    messaging = current_app.config.get("MESSAGING")
+    lxmf_address = messaging.lxmf_address(user_sub=current_user.id) if messaging else None
+    if identity is None or not lxmf_address:
+        abort(503, description="Identity not ready yet")
+
+    payload = identity_qr.build_identity_qr_payload(
+        lxmf_address, identity.get_public_key().hex()
+    )
+    svg = identity_qr.render_qr_svg(payload)
+
+    from flask import Response
+    return Response(svg, mimetype="image/svg+xml")
+
+
 @bp.post("/api/my-identity/icon")
 @login_required
 def api_my_identity_icon_set():
