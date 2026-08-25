@@ -510,13 +510,18 @@ def logout():
     session.clear()
     log.info("Logout: %s", name)
 
+    # Back to the app itself (boots to the default node, same as a
+    # fresh guest visit) — not back to the sign-in page. Signing out
+    # is "stop being this user", not "I want to sign in again right
+    # now"; landing on a login prompt immediately after every logout
+    # was the actual reported bug this fixes.
     try:
         meta = oauth.oidc.load_server_metadata()
         end_session = meta.get("end_session_endpoint")
         if end_session:
-            post_logout = url_for("auth.login_page", _external=True)
+            post_logout = url_for("index", _external=True)
             return redirect(f"{end_session}?post_logout_redirect_uri={post_logout}")
     except Exception:
         pass
 
-    return redirect(url_for("auth.login_page"))
+    return redirect(url_for("index"))
