@@ -154,6 +154,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parser and the NomadNet-parity table + anchor features that
   landed in 1.1.0.
 
+- **Bump `python:3.14-slim-trixie` base image** to the latest digest
+  (``sha256:ce407646…``). Picks up patched ``util-linux`` /
+  ``login`` / ``libuuid1`` (CVE-2026-53612, -53613, -53614,
+  -53615 — TOCTOU and SUID-bypass issues in ``mount(8)``, plus an
+  integer overflow in ``libblkid``). Was the sole reason Trivy was
+  blocking the v1.3.0 release PR — pip-audit / bandit / CodeQL all
+  passed.
+
 ### Fixed
 
 - **A favorited node's star became unclickable once its name grew
