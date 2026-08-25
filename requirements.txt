@@ -43,3 +43,11 @@ pytest==9.1.1
 # ``BT<6hex>`` 24-bit exact-color escape (see the site examples
 # page for the demo and the portability caveat).
 Micron2HTML==1.1.1
+
+# Explicit pin, not an app dependency — the base image's ensurepip-
+# installed setuptools (70.3.0) carries CVE-2025-47273 (path
+# traversal). `pip install -r` here upgrades it in place; pinning
+# through this file rather than a bare Dockerfile `pip install
+# --upgrade` keeps it under the same version-bump discipline as
+# every other dependency here instead of floating unpinned.
+setuptools==78.1.1

@@ -30,14 +30,11 @@ RUN groupadd -r -g 1000 nomadnet \
 
 WORKDIR /app
 
-# Install Python dependencies first (layer-cached).
-# pip/setuptools/wheel upgraded explicitly first — the base image's
-# bundled setuptools (70.3.0) carries CVE-2025-47273 (path traversal);
-# ensurepip only installs it once at base-image build time and doesn't
-# track security fixes, so it has to be bumped here.
+# Install Python dependencies first (layer-cached). requirements.txt
+# pins setuptools explicitly (see its own comment there) — the base
+# image's ensurepip-installed setuptools (70.3.0) carries CVE-2025-47273.
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
- && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/

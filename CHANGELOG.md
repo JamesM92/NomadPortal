@@ -156,19 +156,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Bump `python:3.14-slim-trixie` base image** to the latest digest
   (``sha256:ce407646…``) and add an explicit ``apt-get upgrade`` to
-  the Dockerfile's system-deps layer, plus an explicit
-  ``pip install --upgrade pip setuptools wheel`` before
-  ``requirements.txt``. Fixes what Trivy was blocking the v1.3.0
-  release PR on: ``util-linux`` / ``login`` / ``libuuid1``
-  (CVE-2026-53612, -53613, -53614, -53615 — TOCTOU and SUID-bypass
-  issues in ``mount(8)``, plus an integer overflow in ``libblkid``)
-  and ``setuptools`` 70.3.0 (CVE-2025-47273, path traversal).
-  Debian's security repo had already published the ``util-linux``
+  the Dockerfile's system-deps layer. Fixes what Trivy was blocking
+  the v1.3.0 release PR on: ``util-linux`` / ``login`` /
+  ``libuuid1`` (CVE-2026-53612, -53613, -53614, -53615 — TOCTOU and
+  SUID-bypass issues in ``mount(8)``, plus an integer overflow in
+  ``libblkid``). Debian's security repo had already published these
   patches, but the next scheduled base-image rebuild hadn't picked
   them up yet — bumping the pinned digest alone wasn't enough, so
   ``apt-get upgrade`` now pulls them directly at build time (see
   ``.hadolint.yaml`` for the accompanying DL3005 exception and its
   rationale). pip-audit / bandit / CodeQL all passed throughout.
+
+- **Pin `setuptools==78.1.1`** in ``requirements.txt`` (not an app
+  dependency — the base image's ensurepip-installed setuptools,
+  70.3.0, carries CVE-2025-47273, a path-traversal issue). Another
+  Trivy finding on the same v1.3.0 PR; pinned through this file
+  rather than a bare Dockerfile ``pip install --upgrade`` so it
+  stays under the same version-bump discipline as every other
+  dependency here.
 
 ### Fixed
 
