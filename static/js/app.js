@@ -3463,6 +3463,17 @@ function applyUISettings(s) {
   if (!showNodes && showMessages)  showSidebarPanel('messages');
   if (!showNodes && !showMessages && showNetwork) {
     showSidebarPanel('network');
+    // Real bug this fixes: showSidebarPanel() only makes the panel
+    // visible, it doesn't fetch anything — the tab-click handler is
+    // what normally calls refreshNetworkPanel() too, but this boot-time
+    // auto-activation bypasses that handler entirely. Without this,
+    // the panel sat on its static "Waiting for announces…" placeholder
+    // until the first pollStatus tick happened to fire (setInterval
+    // doesn't fire immediately — up to a full 15s after boot, on top
+    // of however long the rest of boot itself took), even though sites
+    // (_allNodes) were usually already populated by refreshNodes()
+    // moments earlier in this same boot sequence.
+    refreshNetworkPanel();
     // Network starts collapsed by default (for every audience it can
     // apply to — guests, regular users, or even an admin whose own
     // preset happens to land here too, not just guests) — per

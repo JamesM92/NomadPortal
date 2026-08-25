@@ -69,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default node, the same place a fresh guest visit lands. Both paths
   now redirect to the app root instead.
 
+- **The Network tab took up to ~15s to show anything on a fresh
+  load.** When Network auto-activates as the sole enabled panel at
+  boot, the code only called ``showSidebarPanel('network')`` —
+  that makes the panel visible but doesn't fetch anything;
+  ``refreshNetworkPanel()`` is normally what the tab-*click* handler
+  calls alongside it, and this boot-time path bypassed that handler
+  entirely. The panel sat on its static "Waiting for announces…"
+  placeholder until the first 15s ``pollStatus`` tick happened to
+  fire, even though sites were usually already loaded by that point.
+  Now calls ``refreshNetworkPanel()`` directly at boot too.
+
 ## [1.3.0] - 2026-08-24
 
 ### Added
