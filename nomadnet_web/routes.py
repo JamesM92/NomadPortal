@@ -2158,3 +2158,204 @@ def api_rnsh_resize():
 def api_rnsh_disconnect():
     _rnsh().disconnect(current_user.id)
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Voice calls — Phase 1a: signalling only, no audio yet (see
+# call_manager.py's own doc comment). One CallManager per account,
+# normally brought up at login (auth.py's _start_call_engine); the
+# fallback below covers a session whose call engine never got that far
+# (e.g. the account's identity wasn't ready yet at login time).
+# ---------------------------------------------------------------------------
+
+def _ensure_call_manager():
+    """The current account's CallManager, starting it on the fly if
+    login-time setup hasn't (yet)."""
+    registry = current_app.config.get("CALL_REGISTRY")
+    if registry is None:
+        return None
+    mgr = registry.get(current_user.id)
+    if mgr is not None:
+        return mgr
+    entry = _id_store().get_for_user(current_user.id)
+    if entry is None:
+        return None
+    identity = _id_store().load_rns_identity(entry["id"])
+    if identity is None:
+        return None
+    return registry.setup_user(current_user.id, identity)
+
+
+def _resolve_call_remote_name(remote_identity_hash):
+    """Shared by /api/calls/status (the live call) and
+    /api/calls/history (past calls) — same fallback chain the rest of
+    this app's messaging screens already use: live LXMF peer tracker
+    (by identity hash, not destination hash — see call_tracker.py's own
+    doc comment for why those differ) → stored contact name → None (the
+    client falls back to a hash prefix). remote_identity_hash is an
+    *identity* hash (CallManager's own domain); a peer record's
+    ``identity_hash`` field is what the LXMF tracker keys this
+    cross-reference on."""
+    if not remote_identity_hash:
+        return None
+    tracker = current_app.config.get("LXMF_TRACKER")
+    peers = tracker.get_peers() if tracker else []
+    peer = next((p for p in peers if p.get("identity_hash") == remote_identity_hash), None)
+    if not peer:
+        return None
+    if peer.get("name"):
+        return peer["name"]
+    contacts = _contact_store()
+    contact = contacts.get(peer["hash"]) if contacts else None
+    return contact.get("name") if contact else None
+
+
+@bp.get("/api/calls/status")
+@login_required
+def api_calls_status():
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({
+            "status": "idle", "is_incoming": False, "remote_identity_hash": None,
+            "remote_name": None, "started_at": None, "established_at": None,
+            "ended_reason": None,
+        })
+    status = mgr.status_dict()
+    status["remote_name"] = _resolve_call_remote_name(status.get("remote_identity_hash"))
+    return jsonify(status)
+
+
+@bp.post("/api/calls/place")
+@login_required
+def api_calls_place():
+    """address may be a destination hash (a contact's already-familiar
+    LXMF address, for someone who's never announced call-capability
+    specifically) or an identity hash (what the Phase 0 phone-icon tap
+    already has on hand for a confirmed call-capable peer) — see
+    CallManager.resolve_identity()'s own doc comment for why both
+    shapes just work.
+
+    Blocking — does real path-lookup network I/O (up to
+    CallManager.path_wait_timeout_s, 15s by default), same "don't put
+    this on a hot path" contract the NomadPortal-Android sister
+    project's own bridge function has (there, run from a background
+    coroutine; here, this request thread blocks instead — acceptable
+    for a rare, deliberate user action like placing a call, unlike
+    something polled)."""
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip().lower()
+    if not address:
+        return jsonify({"success": False, "message": "Address is required"}), 400
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({"success": False, "message": "Call engine not ready yet"}), 503
+    success, message = mgr.place_call(address)
+    return jsonify({"success": success, "message": message})
+
+
+@bp.post("/api/calls/answer")
+@login_required
+def api_calls_answer():
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({"success": False, "message": "Call engine not ready yet"}), 503
+    success, message = mgr.answer_call()
+    return jsonify({"success": success, "message": message})
+
+
+@bp.post("/api/calls/hangup")
+@login_required
+def api_calls_hangup():
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({"success": False, "message": "Call engine not ready yet"}), 503
+    success, message = mgr.hang_up()
+    return jsonify({"success": success, "message": message})
+
+
+@bp.post("/api/calls/dismiss")
+@login_required
+def api_calls_dismiss():
+    """Clears a terminal call state (ended/busy/rejected/failed) back
+    to idle — a separate step from hang_up deliberately, so the UI can
+    show "call ended"/"busy"/"rejected" for a moment rather than the
+    state instantly disappearing the instant the call actually ends.
+    The client calls this once the user's dismissed that screen (or on
+    an auto-dismiss timer)."""
+    mgr = _ensure_call_manager()
+    if mgr is not None:
+        mgr.reset_after_end()
+    return jsonify({"success": True})
+
+
+@bp.post("/api/calls/announce")
+@login_required
+def api_calls_announce():
+    """Manual announce trigger for this account's own telephony
+    Destination — same idea as the LXMF identity's own manual announce
+    button, no separate cooldown enforced here (this route is already
+    login-required; LXST's own real Telephone class has no cooldown
+    concept for this either)."""
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({"success": False, "message": "Call engine not ready yet"}), 503
+    mgr.announce()
+    return jsonify({"success": True, "message": "Announced"})
+
+
+@bp.get("/api/calls/history")
+@login_required
+def api_calls_history():
+    """Most recent call first — is_incoming, remote_identity_hash,
+    remote_name (nullable, same resolution as /api/calls/status),
+    started_at/established_at/ended_at (unix seconds, established_at
+    nullable — never reached ESTABLISHED for a missed/rejected/busy
+    call), status (a terminal CallStatus value), reason. In-memory only
+    (not yet persisted across a process restart), capped at
+    CallManager.HISTORY_MAX entries."""
+    mgr = _ensure_call_manager()
+    if mgr is None:
+        return jsonify({"history": []})
+    entries = []
+    for entry in mgr.get_history():
+        entry = dict(entry)
+        entry["remote_name"] = _resolve_call_remote_name(entry.get("remote_identity_hash"))
+        entries.append(entry)
+    return jsonify({"history": entries})
+
+
+@bp.get("/api/calls/settings")
+@login_required
+def api_calls_settings_get():
+    settings_mgr = current_app.config.get("CALL_SETTINGS")
+    if settings_mgr is None:
+        return jsonify({"calls_enabled": False, "contacts_only": True})
+    return jsonify(settings_mgr.for_user(current_user.id).as_dict())
+
+
+@bp.post("/api/calls/settings")
+@login_required
+def api_calls_settings_set():
+    data = request.get_json(silent=True) or {}
+    settings_mgr = current_app.config.get("CALL_SETTINGS")
+    if settings_mgr is None:
+        return jsonify({"ok": False, "error": "Not available"}), 503
+    settings = settings_mgr.for_user(current_user.id)
+    if "calls_enabled" in data:
+        settings.set_calls_enabled(bool(data["calls_enabled"]))
+    if "contacts_only" in data:
+        settings.set_contacts_only(bool(data["contacts_only"]))
+
+    # Push the change into the *live* CallManager immediately, if one's
+    # already running — otherwise a toggle flipped mid-session wouldn't
+    # take effect until the next login re-reads settings in
+    # CallManagerRegistry.setup_user(). Same "live refresh, not just a
+    # persisted value" concern refresh_router_display_name's own doc
+    # comment describes for LXMF renames.
+    registry = current_app.config.get("CALL_REGISTRY")
+    mgr = registry.get(current_user.id) if registry else None
+    if mgr is not None:
+        mgr.set_calls_enabled(settings.get_calls_enabled())
+        mgr.set_contacts_only(settings.get_contacts_only())
+
+    return jsonify({"ok": True, **settings.as_dict()})

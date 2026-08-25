@@ -89,6 +89,27 @@ def _safe_next_or_default(candidate: str, default: str) -> str:
     return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
 
 
+def _start_call_engine(user_id: str) -> None:
+    """Brings up this account's voice-call engine (Phase 1a signalling
+    — see call_manager.py's own doc comment) at login, the same "ready
+    to receive as soon as you're logged in" contract messaging.setup_user()
+    already gives LXMF. Requires the account's identity to already exist
+    (every one of this function's call sites runs right after
+    id_store.ensure_for_user() did exactly that) — silently does nothing
+    if either store isn't wired up, same tolerant shape every other
+    optional-service call in this login flow already has."""
+    id_store = current_app.config.get("IDENTITY_STORE")
+    call_registry = current_app.config.get("CALL_REGISTRY")
+    if not id_store or not call_registry:
+        return
+    entry = id_store.get_for_user(user_id)
+    if entry is None:
+        return
+    identity = id_store.load_rns_identity(entry["id"])
+    if identity is not None:
+        call_registry.setup_user(user_id, identity)
+
+
 def _record_session(user, ip: str) -> None:
     """Insert or refresh a session entry with login metadata."""
     now = time.time()
@@ -402,6 +423,7 @@ def local_login():
             messaging = current_app.config.get("MESSAGING")
             if messaging:
                 messaging.setup_user(user.id)
+            _start_call_engine(user.id)
             user_store.register_or_update(record["sub"], "", record["name"])
             log.info("Local user login: %s from %s",
                      username.replace("\r", "").replace("\n", ""),
@@ -419,6 +441,7 @@ def local_login():
         messaging = current_app.config.get("MESSAGING")
         if messaging:
             messaging.setup_user(user.id)
+        _start_call_engine(user.id)
         log.info("Local login: %s from %s",
                  username.replace("\r", "").replace("\n", ""),
                  ip.replace("\r", "").replace("\n", ""))
@@ -496,6 +519,7 @@ def callback():
     messaging = current_app.config.get("MESSAGING")
     if messaging:
         messaging.setup_user(user.id)
+    _start_call_engine(user.id)
     log.info("Login: %s (%s) admin=%s", name, email, user.is_admin)
 
     default  = url_for("admin.dashboard") if user.is_admin else "/"

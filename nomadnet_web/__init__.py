@@ -23,6 +23,8 @@ from .contact_store import ContactStoreManager
 from .user_store import UserStore
 from .lxmf_tracker import LXMFPeerTracker
 from .call_tracker import CallPeerTracker
+from .call_manager import CallManagerRegistry
+from .call_settings import CallSettingsManager
 from .ui_settings import UISettings
 from .log_buffer import buffer as log_buffer
 from .rnsh_client import RnshManager
@@ -96,6 +98,16 @@ def create_app(
     )
     app.config["MESSAGING"] = messaging
     app.config["RNSH"] = RnshManager()
+
+    # Voice calls Phase 1a: signalling only, no audio yet (see
+    # call_manager.py's own doc comment). One CallManager per logged-in
+    # account, brought up at login (auth.py) the same way messaging's
+    # own per-user LXMRouter is.
+    call_settings = CallSettingsManager(config_dir)
+    app.config["CALL_SETTINGS"] = call_settings
+    call_registry = CallManagerRegistry(contact_store=con_store, call_settings=call_settings)
+    app.config["CALL_REGISTRY"] = call_registry
+    _defer_after_rns("Call announce loop", call_registry.start_announce_loop)
 
     # Pre-create the local admin's identity at startup (when local login
     # is enabled) so its LXMF router comes up immediately during

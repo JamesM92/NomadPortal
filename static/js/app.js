@@ -3997,10 +3997,14 @@ function _switchSettingsTab(tab) {
   });
   $('settings-panel-identities').hidden = tab !== 'identities';
   $('settings-panel-terminal').hidden   = tab !== 'terminal';
+  $('settings-panel-calls').hidden      = tab !== 'calls';
   if (tab === 'identities') {
     _loadIdentitiesList();
-  } else {
+  } else if (tab === 'terminal') {
     _refreshRnshStatus();
+  } else if (tab === 'calls') {
+    _loadCallsSettings();
+    _loadCallsHistory();
   }
 }
 
@@ -4289,3 +4293,197 @@ $('rnsh-input')?.addEventListener('keydown', async (e) => {
     setStatus(`Could not send input: ${err.message}`, 'error');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Calls tab (Settings) — Phase 1a: signalling only, no audio yet. Allow-
+// incoming / contacts-only toggles, manual announce, dial-by-address,
+// and recent call history. See call_manager.py's own doc comment for
+// the underlying LXST-compatible state machine.
+// ---------------------------------------------------------------------------
+
+async function _loadCallsSettings() {
+  try {
+    const s = await apiFetch('/api/calls/settings');
+    $('toggle-calls-enabled').checked = !!s.calls_enabled;
+    $('toggle-calls-contacts-only').checked = !!s.contacts_only;
+  } catch (_) { /* toggles just keep their last-rendered state */ }
+}
+
+async function _saveCallsSettings(patch) {
+  const errEl = $('calls-settings-error');
+  errEl.hidden = true;
+  try {
+    await apiFetch('/api/calls/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+  } catch (err) {
+    errEl.hidden = false;
+    errEl.textContent = `Could not save: ${err.message}`;
+  }
+}
+
+$('toggle-calls-enabled')?.addEventListener('change', e => {
+  _saveCallsSettings({ calls_enabled: e.target.checked });
+});
+$('toggle-calls-contacts-only')?.addEventListener('change', e => {
+  _saveCallsSettings({ contacts_only: e.target.checked });
+});
+
+$('btn-calls-announce')?.addEventListener('click', async () => {
+  try {
+    const d = await apiFetch('/api/calls/announce', { method: 'POST' });
+    setStatus(d.success ? 'Call address announced.' : (d.message || 'Could not announce'),
+               d.success ? 'ok' : 'error');
+  } catch (err) {
+    setStatus(`Could not announce: ${err.message}`, 'error');
+  }
+});
+
+$('btn-calls-dial')?.addEventListener('click', async () => {
+  const input = $('calls-dial-address');
+  const address = (input.value || '').trim().toLowerCase();
+  if (!address) { setStatus('Enter a destination or identity hash first.', 'error'); return; }
+  try {
+    const d = await apiFetch('/api/calls/place', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+    if (d.success) {
+      input.value = '';
+      _closeSettingsModal();
+      _callLastState = null;  // forces the overlay to render the new (non-idle) state right away
+      _pollCallStatus();
+    } else {
+      setStatus(d.message || 'Could not place call', 'error');
+    }
+  } catch (err) {
+    setStatus(`Could not place call: ${err.message}`, 'error');
+  }
+});
+
+async function _loadCallsHistory() {
+  const list = $('calls-history-list');
+  try {
+    const d = await apiFetch('/api/calls/history');
+    const history = d.history || [];
+    if (!history.length) {
+      list.innerHTML = '<div class="call-history-empty">No calls yet.</div>';
+      return;
+    }
+    list.innerHTML = history.map(h => {
+      const who = esc(h.remote_name || (h.remote_identity_hash ? h.remote_identity_hash.slice(0, 16) + '…' : 'Unknown'));
+      const dir = h.is_incoming ? 'Incoming' : 'Outgoing';
+      const when = h.started_at ? formatAge(h.started_at) : '';
+      return `<div class="call-history-row">` +
+        `<span class="ch-who">${who}</span>` +
+        `<span class="ch-meta">${dir} &middot; ${esc(h.status)} &middot; ${when}</span>` +
+      `</div>`;
+    }).join('');
+  } catch (_) {
+    list.innerHTML = '<div class="call-history-empty">Could not load call history.</div>';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Voice-call overlay + status polling — separate from the Settings tab
+// above, and separate from Terminal's own polling: an incoming call
+// must surface regardless of whether Settings is even open, so this
+// polls continuously (500ms, matching the NomadPortal-Android sister
+// project's own real-time-ish call-status poll interval) whenever the
+// user is logged in.
+// ---------------------------------------------------------------------------
+let _callLastState = null;    // dedupes redundant re-renders, same idea as _rnshLastState
+let _callDismissTimer = null;
+
+function _callOverlaySetButtons({ answer, reject, hangup, dismiss }) {
+  $('btn-call-answer').hidden  = !answer;
+  $('btn-call-reject').hidden  = !reject;
+  $('btn-call-hangup').hidden  = !hangup;
+  $('btn-call-dismiss').hidden = !dismiss;
+}
+
+const _CALL_STATUS_LABELS = {
+  calling:          'Calling…',
+  ringing_outgoing: 'Ringing…',
+  ringing_incoming: 'Incoming call',
+  connecting:       'Connecting…',
+  established:      'Connected',
+  ended:            'Call ended',
+  busy:             'Busy',
+  rejected:         'Call rejected',
+  failed:           'Call failed',
+};
+const _CALL_ACTIVE_STATES = ['calling', 'ringing_outgoing', 'connecting', 'established'];
+
+function _renderCallOverlay(status) {
+  const st  = status.status;
+  const key = `${st}:${status.remote_identity_hash}:${status.remote_name}`;
+  if (key === _callLastState) return;
+  _callLastState = key;
+
+  if (_callDismissTimer) { clearTimeout(_callDismissTimer); _callDismissTimer = null; }
+
+  if (st === 'idle') {
+    $('call-overlay').hidden = true;
+    return;
+  }
+
+  $('call-overlay').hidden = false;
+  const name = status.remote_name ||
+    (status.remote_identity_hash ? status.remote_identity_hash.slice(0, 16) + '…' : 'Unknown');
+  $('call-overlay-name').textContent = name;
+  $('call-overlay-addr').textContent = status.remote_identity_hash || '';
+  $('call-overlay-status').textContent = _CALL_STATUS_LABELS[st] || st;
+
+  if (st === 'ringing_incoming') {
+    _callOverlaySetButtons({ answer: true, reject: true });
+  } else if (_CALL_ACTIVE_STATES.includes(st)) {
+    _callOverlaySetButtons({ hangup: true });
+  } else {
+    // Terminal state (ended/busy/rejected/failed) — auto-dismiss after
+    // a moment (matches the Android sister project's own CallOverlay
+    // 2.5s auto-dismiss) so "call ended" is visible rather than
+    // instantly disappearing; Close is a manual fallback.
+    _callOverlaySetButtons({ dismiss: true });
+    _callDismissTimer = setTimeout(() => {
+      apiFetch('/api/calls/dismiss', { method: 'POST' }).catch(() => {});
+      $('call-overlay').hidden = true;
+      _callLastState = null;
+    }, 2500);
+  }
+}
+
+async function _pollCallStatus() {
+  if (!_authState.logged_in) return;
+  try {
+    const status = await apiFetch('/api/calls/status');
+    _renderCallOverlay(status);
+  } catch (_) { /* transient — next tick tries again */ }
+}
+
+$('btn-call-answer')?.addEventListener('click', async () => {
+  try { await apiFetch('/api/calls/answer', { method: 'POST' }); } catch (_) {}
+  _callLastState = null;
+  _pollCallStatus();
+});
+$('btn-call-reject')?.addEventListener('click', async () => {
+  try { await apiFetch('/api/calls/hangup', { method: 'POST' }); } catch (_) {}
+  _callLastState = null;
+  _pollCallStatus();
+});
+$('btn-call-hangup')?.addEventListener('click', async () => {
+  try { await apiFetch('/api/calls/hangup', { method: 'POST' }); } catch (_) {}
+  _callLastState = null;
+  _pollCallStatus();
+});
+$('btn-call-dismiss')?.addEventListener('click', async () => {
+  if (_callDismissTimer) { clearTimeout(_callDismissTimer); _callDismissTimer = null; }
+  try { await apiFetch('/api/calls/dismiss', { method: 'POST' }); } catch (_) {}
+  $('call-overlay').hidden = true;
+  _callLastState = null;
+});
+
+setInterval(_pollCallStatus, 500);

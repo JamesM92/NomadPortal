@@ -202,6 +202,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above) gained a "Call-capable" row for peers. 17 new pytest cases
   (``test_call_tracker_persist.py``, plus 3 more in
   ``test_lxmf_tracker_persist.py`` for the ``identity_hash`` capture).
+- **Voice calls, Phase 1a: real ring/answer/hang-up signalling — no
+  audio yet.** New Settings → Calls tab (allow-incoming-calls toggle,
+  contacts-only toggle, manual "announce my call address" button,
+  dial-by-address field, recent call history) plus a call overlay that
+  pops up on its own for a ringing or active call, independent of
+  whatever else is on screen. New ``nomadnet_web/call_manager.py``
+  (``CallManager``, ``Signalling``, ``CallStatus``), ported near-
+  verbatim from the NomadPortal-Android sister project's own Phase 1a
+  — a real LXST-compatible state machine (plain ``RNS.Link`` +
+  msgpack-encoded signal codes, verified there against a local clone of
+  markqvist/LXST's actual source), interoperable with real LXST
+  clients — Sideband, Columba, rnphone. Zero codec/audio knowledge in
+  this layer by design: a future Phase 1b would add the actual audio
+  relay, gated on browser WebCodecs Opus support (Chromium-only in
+  practice today). ``CallManagerRegistry`` holds one ``CallManager``
+  per logged-in account instead of Android's single global instance —
+  brought up at login (mirroring ``MessagingService.setup_user()``),
+  torn down/rebuilt on a genuine identity change but deliberately *not*
+  re-wired on an ordinary multi-identity switch, matching the reference
+  implementation's own scope (its ``switch_active_identity()`` doesn't
+  touch its call manager either). New ``nomadnet_web/call_settings.py``
+  (``CallSettings``/``CallSettingsManager``) persists the two toggles
+  per account, same per-user-YAML-file shape as ``ContactStoreManager``
+  — defaults (calls disabled, contacts-only calls) intentionally match
+  ``CallManager``'s own real defaults exactly. New
+  ``/api/calls/status|place|answer|hangup|dismiss|announce|history|
+  settings`` (all login-required). 70 new pytest cases:
+  ``test_call_manager.py`` (51, a near-verbatim port of Android's own
+  suite — outbound/inbound call flow, the calls-enabled master toggle,
+  hang-up, call history, the "not actually busy after a terminal
+  state" bug class, audio-frame relay plumbing, state-change
+  notification), ``test_call_manager_registry.py`` (10, the per-
+  account wrapper), ``test_call_settings.py`` (9, persistence).
 
 ### Fixed
 
