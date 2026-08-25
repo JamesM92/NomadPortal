@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real node/contact icons — identicon fallback + a Material Design
+  Icons picker for your own identity.** Ported from the NomadPortal-
+  Android sister project. Nodes and contacts with no
+  ``FIELD_ICON_APPEARANCE`` set now render a deterministic identicon
+  (GitHub/Columba-style symmetric dot grid keyed to the entity's
+  hash) instead of blank space, applied across the node list, the
+  LXMF peer (Users tab) list, and the conversation list.
+  ``FIELD_ICON_APPEARANCE`` itself now renders as a real icon shape
+  instead of just the first letter of the glyph name — the full
+  Material Design Icons catalog (~7400 icons, Apache-2.0, bundled as
+  ``static/data/mdi_icons.json`` / ``mdi_categories.json``) backs
+  both the server-side SVG render (``nomadnet_web/mdi_icons.py``,
+  ``messaging.py``'s ``_render_appearance_svg``) and a new client-
+  side icon picker (search + category chips) that replaces the old
+  2-character glyph text field for setting your own identity's icon.
+  A regex-allowlist validator on the SVG path data (client
+  ``_safeSvgPath``, a matching server-side pattern) closes the same
+  XSS-dataflow surface ``_safeHexColor`` already covers for colors.
+  15 new pytest cases cover the MDI catalog loader — including a
+  real UTF-8 BOM bug in the bundled file that the first test run
+  caught — and the appearance-SVG renderer's real-icon-vs-letter-
+  fallback behavior.
+
+- **Favoriting a node's home page before it's ever announced.**
+  Ported from the NomadPortal-Android sister project. Index-page
+  favorites (the node-list star) used to require a cached node
+  record to already exist, even though page bookmarks (path !=
+  ``/``) could already create one on the fly — so a node reached
+  only by a manually-typed or pasted address couldn't be starred
+  until it happened to announce first. A missing record is now
+  synthesized from the given name (falling back to the hash prefix);
+  an existing record's real announce data is never overwritten.
+  Also factors three separately hand-written 13-field node-record
+  dict literals into one ``_new_node_record()`` helper so the fields
+  can't drift out of sync between call sites. 9 new pytest cases in
+  ``tests/test_favorite_unannounced.py``.
+
 - **Outbound chat attachments — paperclip UI + multipart send**
   (v1.3.0 step 4). Composer gains a 📎 button that opens a native
   file picker (multi-select, ``image/*,audio/*,*/*``); staged
@@ -100,6 +137,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the 3-hex `` `Fxxx `` shorthand remains the always-portable
   default.
 
+- **Confirmation prompt before following an external (clearnet)
+  link in page content.** NomadNet page content is untrusted and
+  already HTML-escaped with no JS execution path, but a plain-text
+  link label can still claim to be anything while the ``href``
+  points off-mesh — a phishing-style mismatch a reader has no other
+  way to notice. Clicking an ``http(s)://`` link in rendered page
+  content now shows the real destination and asks for confirmation
+  before leaving the mesh.
+
 ### Dependencies
 
 - **``Micron2HTML`` bumped 1.0.8 → 1.1.1** for the ``FT<6hex>``
@@ -107,6 +153,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   landed in 1.1.0.
 
 ### Fixed
+
+- **A favorited node's star became unclickable once its name grew
+  long enough.** ``.node-right`` (the star/pin/hops column) was
+  ``float: right`` beside a ``white-space: nowrap`` node name — a
+  float's reserved space isn't reliably excluded from nowrap text's
+  hit-testing box in every layout path, so a long enough name could
+  visually and interactively cover the star, and every tap landed on
+  the row's own navigate-to-node handler instead. Replaced the float
+  with a real flex row so the star keeps a fixed, always-clickable
+  width regardless of name length.
+
+- **Opening the node list or the Users (LXMF peer) tab was laggy on
+  an established mesh.** Both rendered every matched/sorted row into
+  the DOM unconditionally — thousands of rows on a mesh with a long
+  history. Ported the Android sister project's windowed-list
+  pattern: render only the most recent 50, with a "Show N more" row
+  (click, or scroll it into view) to load another page. The first
+  page stays live against new announces; loading a second page
+  freezes the window so already-scrolled-past rows don't reorder
+  underneath the reader.
+
+- **The messages tab felt laggy while a conversation was open.**
+  ``renderChatLog()`` unconditionally tore down and rebuilt every
+  chat bubble — including inline image/audio attachments — and
+  force-scrolled to the bottom on every poll cycle (every 15s while
+  the panel is open, plus a burst of follow-ups right after
+  sending). Now skips the rebuild when a poll brings back the exact
+  same messages, and only auto-scrolls when the reader was already
+  near the bottom, so a background refresh no longer yanks their
+  scroll position mid-read.
+
+- **Renaming your identity didn't update the name on future
+  announces.** ``LXMRouter.announce()`` reads the live
+  ``Destination.display_name`` set once at registration time, never
+  the persisted-to-disk value ``identity_store.rename()`` updates —
+  so a rename took effect in this app's own UI immediately, but any
+  announce sent afterward (including the bootstrap/reconnect
+  announce) kept broadcasting the old name to the mesh until the
+  next full process restart. ``MessagingService.
+  refresh_router_display_name()`` now pushes the new name onto the
+  live router's destination at rename time. 3 new pytest cases in
+  ``tests/test_refresh_router_display_name.py``.
+
+- **The top-left brand/logo didn't reliably navigate home when
+  clicked.** Its click handler was only wired up inside ``init()``'s
+  async boot sequence (auth state, UI settings, site info — up to
+  three sequential fetches), so a click landing before boot finished
+  did nothing. Moved the handler to attach synchronously at script
+  load, reading the current default/hosted hash live at click time
+  instead of a value captured once boot completed.
+
+- **New or restarted LXMF identities were unreachable until their
+  first outbound message.** RNS path discovery is announce-based
+  with no other mechanism — a destination that has never announced
+  is unreachable by anyone, including this app's own bootstrap/
+  reconnect flow. Registering a new identity (or restarting the
+  process) now sends an announce immediately after registration.
+  3 new pytest cases in ``tests/test_bootstrap_announce.py``.
+
+- **Hosted-site link establishment sometimes timed out even though
+  the announce reached the other side.**
+  ``set_proof_strategy(PROVE_ALL)`` on the hosted-site destination
+  was an unexplained deviation from NomadNet's own reference
+  ``Node.py`` (which sets no proof strategy at all, leaving RNS's
+  default ``PROVE_NONE``). Removed it — confirmed fixed by the
+  original reporter reaching the hosted site successfully
+  immediately after, on a build with no other change.
 
 - **Sideband-users' contact icons rendered as flat grey.** The
   ``FIELD_ICON_APPEARANCE`` (0x04) color values can arrive in two
@@ -126,6 +239,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and without alpha), grey fallback for unknown inputs, and the
   channel clamping semantics — so the regression can't sneak
   back in silently.
+
+### Security
+
+- **Identity rename had no ownership check.**
+  ``POST /api/identities/<id>/rename`` renamed any identity by ID
+  with no check that it belonged to the requesting user — any
+  logged-in user could rename another user's identity. Now returns
+  403 unless the identity's ``user_sub`` matches the current
+  session.
+
+### Docs
+
+- **README and the default hosted-site page rewritten in
+  Simplified Technical English (ASD-STE100).** Active voice, simple
+  tenses, no contractions, shorter sentences — every fact, URL,
+  environment variable, and config value preserved exactly. The
+  Micron Feature Showcase section and its ASCII art in
+  ``templates/site/index.mu`` are left untouched — it's a MeshChat
+  rendering-parity fixture, not prose.
 
 ## [1.2.0] - 2026-08-06
 
