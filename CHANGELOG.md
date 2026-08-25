@@ -177,14 +177,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``pip-audit -r requirements.txt`` locally before landing. Pinned
   through this file rather than a bare Dockerfile ``pip install
   --upgrade`` so it stays under the same version-bump discipline as
-  every other dependency here. Even with the pin, Trivy kept finding
-  the old 70.3.0 dist-info alongside the new one — the build log
-  showed pip correctly resolving 83.0.0, but ensurepip's original
-  bootstrap install doesn't get cleaned up by a normal ``pip
-  install`` upgrade. Fixed with an explicit ``pip install
-  --ignore-installed "setuptools==83.0.0"`` ahead of
-  ``requirements.txt`` in the Dockerfile, forcing a clean install
-  over whatever ensurepip left behind.
+  every other dependency here.
+
+  Even with the pin correctly resolving in site-packages (confirmed
+  in the build log), Trivy kept reporting 70.3.0 — the actual
+  remaining copy turned out to be ensurepip's own bundled wheel at
+  ``.../ensurepip/_bundled/setuptools-70.3.0-*.whl``, a static
+  stdlib resource file untouched by any ``pip install``. Nothing in
+  this image re-runs ``python -m ensurepip`` after build, so the
+  Dockerfile now finds and deletes it outright.
 
 ### Fixed
 

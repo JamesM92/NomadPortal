@@ -33,20 +33,22 @@ WORKDIR /app
 # Install Python dependencies first (layer-cached). requirements.txt
 # pins setuptools explicitly (see its own comment there) — the base
 # image's ensurepip-installed setuptools (70.3.0) carries CVE-2025-47273.
-#
-# --ignore-installed on that one package specifically: ensurepip's
-# bootstrap install doesn't clean up under a normal `pip install`
-# upgrade the way a pip-managed install does — confirmed real, not
-# hypothetical: `pip install -r requirements.txt` alone correctly
-# resolved and installed setuptools==83.0.0 (visible in the build
-# log), but Trivy still found the untouched 70.3.0 dist-info
-# alongside it. --ignore-installed forces a clean install over
-# whatever ensurepip left behind instead of trying to detect/upgrade
-# it. requirements.txt's own setuptools==83.0.0 line then no-ops
-# (already satisfied) when the second command runs.
+# A plain `pip install -r requirements.txt` correctly resolves and
+# installs the pinned setuptools==83.0.0 into site-packages, confirmed
+# clean in the build log — no --ignore-installed/--force-reinstall
+# needed there.
 COPY requirements.txt .
-RUN pip install --no-cache-dir --ignore-installed "setuptools==83.0.0" \
- && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# The site-packages install above doesn't touch this: ensurepip bundles
+# its own static copy of the setuptools wheel it originally used to
+# bootstrap pip, at .../ensurepip/_bundled/setuptools-70.3.0-*.whl —
+# not an installed package, just a stdlib resource file, so Trivy kept
+# finding 70.3.0 here even after the real install was confirmed clean
+# at 83.0.0. Nothing in this image re-runs `python -m ensurepip` after
+# build, so it's safe to delete outright. Printed so the build log
+# confirms what (if anything) actually matched.
+RUN find / -xdev -iname "setuptools-70.3.0*" -print -delete
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
 COPY nomadnet_web/     ./nomadnet_web/
