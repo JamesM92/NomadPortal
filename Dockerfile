@@ -40,23 +40,23 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# TEMPORARY diagnostic, round 3 — rounds 1-2 found NOTHING: no
-# setuptools-named path anywhere outside the confirmed-clean 83.0.0
-# site-packages install, no "70.3.0" string in any METADATA/PKG-INFO/
-# egg-info, no dpkg package. Trivy ALSO separately reports a second,
-# never-yet-seen finding — msgpack 1.1.2 (GHSA-6v7p-g79w-8964) — that
-# doesn't appear anywhere in this build's own pip install log either
-# (grepped the full log: zero mentions of msgpack). Both look
-# increasingly like they don't correspond to anything actually in
-# this image. This round covers what 1-2 didn't: pip's own view
-# (pip list, not a filesystem walk — catches anything on sys.path a
-# naive find might miss) and a truly unrestricted filesystem search
-# (no -xdev, no path restriction, both package names) including /tmp
-# and /root. Not a fix by itself; remove once resolved.
-RUN echo "--- pip list (pip's own view) ---"; \
-    pip list --format=columns 2>/dev/null; \
-    echo "--- unrestricted find, whole fs, both names ---"; \
-    find / \( -iname "*msgpack*" -o -iname "*setuptools*" \) 2>/dev/null; \
+# TEMPORARY diagnostic, round 4 — round 3 solved half of this: `pip
+# list` confirms only setuptools 83.0.0 is actually installed, and
+# msgpack turned out to be pip's own vendored copy
+# (site-packages/pip/_vendor/msgpack — a real embedded copy at
+# whatever version pip 26.2.1 bundles, not a standalone pip-installed
+# package). setuptools 70.3.0 has no equivalent vendored directory
+# anywhere on the filesystem, though, so it must be a version-looking
+# string trivy's parser is picking up out of context from some file
+# under pip's or setuptools's own site-packages tree. Grepping
+# directly for the string there, narrowly, now that the search space
+# is this small. Not a fix by itself; remove once resolved.
+RUN echo "--- files under pip/setuptools containing 70.3.0 ---"; \
+    grep -rl "70.3.0" \
+      /usr/local/lib/python3.14/site-packages/pip \
+      /usr/local/lib/python3.14/site-packages/setuptools \
+      /usr/local/lib/python3.14/site-packages/setuptools-83.0.0.dist-info \
+      2>/dev/null; \
     echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
