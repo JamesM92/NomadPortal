@@ -91,6 +91,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also calls ``refreshNodes()``, matching the unconditional refresh
   the other two kinds already got.
 
+- **A node's ●/◑/✕/○ last-access dot took up to 15s to catch up
+  after you watched it load.** The dot only ever updated from a
+  ``refreshNodes()`` poll; fetching a page yourself didn't touch it
+  even though the backend already knows the real result the moment
+  the fetch resolves — that's the only reason ``last_load_ok``/
+  ``ever_load_ok`` exist on a node record at all. ``fetchPage()``
+  now updates the fetched node's dot immediately, in both the Nodes
+  panel and the Network tab, on success and on failure. Purely an
+  optimistic local mirror of what the client just directly observed
+  — the next real ``refreshNodes()`` always overwrites it with the
+  server's own value regardless.
+
 ## [1.3.0] - 2026-08-24
 
 ### Added

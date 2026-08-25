@@ -280,6 +280,27 @@ async function refreshNodes() {
   }
 }
 
+// Optimistic local update of a node's ●/◑/✕/○ last-access dot right
+// when fetchPage() itself resolves, instead of waiting on the next
+// poll cycle to notice — the backend already tracks last_load_ok/
+// ever_load_ok as part of handling the fetch (that's the only reason
+// these fields exist on a node record at all), this just mirrors what
+// this client already directly observed rather than leaving the
+// sidebar showing stale status for up to 15s after a page you just
+// watched load. Self-correcting either way: the next real
+// refreshNodes() call always overwrites this with the server's own
+// value. ever_load_ok is monotonic — a failure never clears it once
+// true, matching the dot's own "has worked before" semantics.
+function _updateNodeLoadStatus(hash, ok) {
+  if (!hash) return;
+  const node = _allNodes.find(n => n.hash === hash);
+  if (!node) return;
+  node.last_load_ok = ok;
+  if (ok) node.ever_load_ok = true;
+  renderNodeList();
+  if (!$('sidebar-panel-network').hidden) renderNetworkList();
+}
+
 function renderNodeList() {
   const filter = nodeFilter.value.trim().toLowerCase();
   const visible = filter
@@ -1459,11 +1480,13 @@ async function fetchPage(url, extraFields = null) {
     renderPageContent();
 
     setStatus(`Loaded: ${data.path}`, 'ok');
+    _updateNodeLoadStatus(data.hash, true);
     return true;
   } catch (e) {
     showLoading(false);
     showError(e.message);
     setStatus(humanizeError(e.message), 'error');
+    _updateNodeLoadStatus(_extractNodeHash(url), false);
     return false;
   } finally {
     state.loading = false;
