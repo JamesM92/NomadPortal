@@ -113,6 +113,11 @@ body {
   user-select: none;
 }
 
+/* Desktop sidebar collapse toggle — mobile has its own hamburger
+   (injected separately, different mechanism), so this one is hidden
+   there via the max-width:640px block below. */
+#btn-sidebar-collapse { font-size: 16px; padding: 0 4px; }
+
 #nav-bar {
   display: flex;
   align-items: center;
@@ -231,6 +236,10 @@ body {
 #sidebar-panel-nodes[hidden],
 #sidebar-panel-messages[hidden],
 #sidebar-panel-network[hidden] { display: none; }
+/* Desktop-only collapse (see #btn-sidebar-collapse's own comment in
+   index.html) — a class, not [hidden], so it doesn't fight the
+   [hidden]-driven panel switching above or #sidebar[hidden] itself. */
+#sidebar.collapsed { display: none; }
 
 .sidebar-header {
   padding: 8px 10px;
@@ -1140,6 +1149,11 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   #topbar-actions { order: 3; }
   #status-indicator { order: 4; }
   #user-area { order: 5; border-left: none; padding-left: 0; }
+  /* Mobile has its own hamburger (#btn-sidebar-toggle, injected by
+     _initMobileSidebar) for opening/closing the full-page overlay —
+     this desktop-only collapse control would be a confusing second
+     mechanism doing something similar but distinct. */
+  #btn-sidebar-collapse { display: none; }
 
   /* Sidebar overlays content on mobile, full-page — capping it to 85%/300px
      left a sliver of the underlying page visible and made the node/message

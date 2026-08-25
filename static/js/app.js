@@ -3481,6 +3481,19 @@ function applyUISettings(s) {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop sidebar collapse — distinct from the mobile overlay
+// toggle below. Matters most when only one sidebar tab is enabled
+// for the current audience (e.g. guests with just the Network panel
+// on): with nothing else to switch to, this is the only way to get
+// the content area back to full width. No persistence — always
+// starts expanded on a fresh load/reload, so an operator's kiosk
+// display never comes up unexpectedly collapsed.
+// ---------------------------------------------------------------------------
+$('btn-sidebar-collapse')?.addEventListener('click', () => {
+  $('sidebar')?.classList.toggle('collapsed');
+});
+
+// ---------------------------------------------------------------------------
 // Mobile sidebar toggle
 // ---------------------------------------------------------------------------
 // Shared with navigateTo() so picking a node/favorite/link closes the

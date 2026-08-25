@@ -158,6 +158,14 @@
 <!-- ===== Top bar ====================================================== -->
 <header id="topbar">
   <span class="brand">&#9632; NomadNet</span>
+  <!-- Desktop-only sidebar collapse/expand — mobile has its own
+       hamburger toggle (injected by _initMobileSidebar(), a separate
+       overlay-open/close mechanism, not this). Matters most when only
+       one sidebar tab is enabled for the current audience (e.g. guests
+       with just the Network panel on) — with nothing else to switch
+       to, this is the only way to get the content area back to full
+       width. Hidden at mobile widths via CSS. -->
+  <button id="btn-sidebar-collapse" class="icon-btn" title="Toggle sidebar">&#9776;</button>
   <div id="nav-bar">
     <button id="btn-back" title="Back" disabled>&#8592;</button>
     <button id="btn-forward" title="Forward" disabled>&#8594;</button>
