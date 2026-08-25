@@ -3247,7 +3247,7 @@ function renderNetworkList() {
       entries.push({
         kind: 'peer', hash: p.hash, name: contact?.name || p.name,
         last_seen: p.last_seen, first_seen: p.first_seen, hops: p.hops,
-        announce_count: p.announce_count,
+        announce_count: p.announce_count, call_capable: !!p.call_capable,
       });
     }
   }
@@ -3268,7 +3268,7 @@ function renderNetworkList() {
   }
 
   const signature = entries
-    .map(e => `${e.kind}:${e.hash}:${e.last_seen}:${e.hops}:${e.announce_count}:${e.last_load_ok}:${e.picked}:${e.favorited}`)
+    .map(e => `${e.kind}:${e.hash}:${e.last_seen}:${e.hops}:${e.announce_count}:${e.last_load_ok}:${e.picked}:${e.favorited}:${e.call_capable}`)
     .join('|') + `#${filterText}|${typeFilter}|${sortKey}|${_networkListWindow.page}`;
   if (signature === _networkListSignature) return;
   _networkListSignature = signature;
@@ -3367,6 +3367,13 @@ function makeNetworkItem(entry) {
 
   right.insertAdjacentHTML('beforeend',
     `<span class="${hopsClass}" title="Hops away on the Reticulum network">${hopsLabel}</span>` +
+    // Voice-call Phase 0 (presence only, no calling yet — see
+    // call_tracker.py's own doc comment): this peer has announced on
+    // the lxst.telephony aspect at some point, so their client likely
+    // supports calls, once this app has a calling feature of its own.
+    (entry.kind === 'peer' && entry.call_capable
+      ? `<span class="node-kind" title="This peer has announced call support (lxst.telephony)">&#128222;</span>`
+      : '') +
     // "picked" is the relay this app's own propagation sync is
     // currently using (PropagationSyncService's own doc comment) —
     // surfacing it here rather than leaving it a debug-only detail.
@@ -3469,6 +3476,11 @@ async function _openAnnounceInfo(entry) {
 
   if (entry.kind === 'peer') {
     const contact = _contacts.find(c => c.hash === entry.hash);
+    // "Call-capable" is Phase 0 presence only (see call_tracker.py's
+    // own doc comment) -- this app has no calling feature yet to
+    // actually place with, just whether their client has ever shown
+    // support for it.
+    rows.push(['Call-capable', entry.call_capable ? 'Yes' : 'No']);
     rows.push(['Blocked', contact?.blocked ? 'Yes' : 'No']);
   } else if (entry.kind === 'site') {
     let fetchLabel = 'Never fetched';

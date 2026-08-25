@@ -22,6 +22,7 @@ from .attachment_store import AttachmentStore
 from .contact_store import ContactStoreManager
 from .user_store import UserStore
 from .lxmf_tracker import LXMFPeerTracker
+from .call_tracker import CallPeerTracker
 from .ui_settings import UISettings
 from .log_buffer import buffer as log_buffer
 from .rnsh_client import RnshManager
@@ -159,6 +160,18 @@ def create_app(
         RNS.Transport.register_announce_handler(lxmf_tracker.register_announce_handler())
         log.info("LXMF peer tracker registered")
     _defer_after_rns("LXMF tracker registration", _register_lxmf_tracker)
+
+    # Voice-call Phase 0: presence only (no calling yet — see
+    # call_tracker.py's own doc comment). Listens for lxst.telephony
+    # announces so /api/lxmf-peers can flag which peers are call-capable.
+    call_tracker = CallPeerTracker(config_dir)
+    app.config["CALL_TRACKER"] = call_tracker
+
+    def _register_call_tracker():
+        import RNS
+        RNS.Transport.register_announce_handler(call_tracker.register_announce_handler())
+        log.info("LXST call-peer tracker registered")
+    _defer_after_rns("Call tracker registration", _register_call_tracker)
 
     users_yml = cfg.get("USERS_YML", "/config/users.yml")
     app.config["USER_STORE"]  = UserStore(users_yml)

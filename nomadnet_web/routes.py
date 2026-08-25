@@ -2049,6 +2049,20 @@ def api_lxmf_peers():
     already established (public regardless of guests_nodes_panel)."""
     tracker = current_app.config.get("LXMF_TRACKER")
     peers   = tracker.get_peers() if tracker else []
+
+    # Voice-call Phase 0: flag which peers have ever announced as
+    # call-capable (lxst.telephony), cross-referenced by identity hash —
+    # see lxmf_tracker.py's record()/call_tracker.py's own module doc
+    # comments for why identity hash (not destination hash) is the
+    # correct join key. A peer whose identity_hash isn't known yet (it
+    # announced before this field existed, or the identity was never
+    # captured) just reads as not call-capable rather than erroring.
+    call_tracker = current_app.config.get("CALL_TRACKER")
+    if call_tracker is not None:
+        capable = call_tracker.get_call_capable_hashes()
+        for p in peers:
+            p["call_capable"] = bool(p.get("identity_hash")) and p["identity_hash"] in capable
+
     return jsonify({"peers": peers})
 
 

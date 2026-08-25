@@ -183,6 +183,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``/api/nodes/<hash>/diagnostics`` endpoint (already generic over any
   hash, not just known sites) and fills in asynchronously after the
   dialog opens so the rest of the stats render with no round trip.
+- **Voice calls, Phase 0: presence only.** First step of a staged port
+  of the NomadPortal-Android sister project's own LXST-compatible
+  voice-call work (its own Phase 0/1a/1b staging) — no calling yet,
+  just tracking which peers' clients have ever shown call support. New
+  ``nomadnet_web/call_tracker.py`` (``CallPeerTracker``, ported near-
+  verbatim from Android's own copy — pure RNS/Python, no
+  Android-specific code) listens for announces on the ``lxst.telephony``
+  aspect, keyed by *identity* hash rather than destination hash — the
+  same identity gets a different destination hash per announced
+  aspect, so identity hash is the only value shared between an LXMF
+  peer's ``lxmf.delivery`` announce and their ``lxst.telephony`` one.
+  ``LXMFPeerTracker.record()`` gained an optional ``identity_hash``
+  param to capture that correlation key; ``/api/lxmf-peers`` now
+  cross-references it against the call tracker and adds a
+  ``call_capable`` flag per peer. Network tab peer rows show a small
+  phone icon when set, and the announce-info dialog (see the entry
+  above) gained a "Call-capable" row for peers. 17 new pytest cases
+  (``test_call_tracker_persist.py``, plus 3 more in
+  ``test_lxmf_tracker_persist.py`` for the ``identity_hash`` capture).
 
 ### Fixed
 

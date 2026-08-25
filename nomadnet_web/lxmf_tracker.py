@@ -105,7 +105,20 @@ class LXMFPeerTracker:
     # Internal
     # ------------------------------------------------------------------
 
-    def record(self, destination_hash: bytes, app_data: Optional[bytes]) -> None:
+    def record(self, destination_hash: bytes, app_data: Optional[bytes],
+               identity_hash: Optional[bytes] = None) -> None:
+        """[identity_hash] is this peer's own RNS.Identity.hash — a
+        genuinely different value from [destination_hash] (a destination
+        hash is derived from identity + aspect together, so the same
+        identity's "lxmf.delivery" and "lxst.telephony" destination
+        hashes differ). Optional and best-effort: an existing peer's
+        entry from before this field existed just won't have it until
+        its next announce. The real reason to capture it at all —
+        cross-referencing against CallPeerTracker's own identity-hash-
+        keyed call-capable set (routes.py's /api/lxmf-peers), the same
+        correlation the NomadPortal-Android sister project's own
+        call_tracker.py module doc comment describes.
+        """
         hash_hex = destination_hash.hex()
         name = ""
         if app_data:
@@ -126,6 +139,7 @@ class LXMFPeerTracker:
                 except Exception:
                     pass
 
+        identity_hash_hex = identity_hash.hex() if identity_hash else None
         now = time.time()
         with self._lock:
             existing = self._peers.get(hash_hex)
@@ -134,6 +148,8 @@ class LXMFPeerTracker:
                 existing["announce_count"] = existing.get("announce_count", 0) + 1
                 if name:
                     existing["name"] = name
+                if identity_hash_hex:
+                    existing["identity_hash"] = identity_hash_hex
             else:
                 self._peers[hash_hex] = {
                     "hash":           hash_hex,
@@ -141,6 +157,7 @@ class LXMFPeerTracker:
                     "first_seen":     now,
                     "last_seen":      now,
                     "announce_count": 1,
+                    "identity_hash":  identity_hash_hex,
                 }
 
         log.info("LXMF peer announce: %s (%s)", hash_hex[:16], name or "no name")
@@ -214,4 +231,5 @@ class _LXMFAnnounceHandler:
         self._tracker = tracker
 
     def received_announce(self, destination_hash, announced_identity, app_data):
-        self._tracker.record(destination_hash, app_data)
+        identity_hash = announced_identity.hash if announced_identity else None
+        self._tracker.record(destination_hash, app_data, identity_hash)

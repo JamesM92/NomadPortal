@@ -145,3 +145,32 @@ class TestPersistIntervalConstant:
         # this test screaming, but a "PERSIST_INTERVAL_S = 1" mistake
         # gets caught.
         assert LXMFPeerTracker.PERSIST_INTERVAL_S >= 10
+
+
+class TestIdentityHashCapture:
+    """record()'s optional identity_hash param — the join key voice-
+    call Phase 0's /api/lxmf-peers cross-reference against
+    CallPeerTracker.get_call_capable_hashes() needs (see that module's
+    own doc comment for why it's the identity hash, not the destination
+    hash). Optional and best-effort: existing calls with no third
+    argument (the pre-Phase-0 shape, still exercised by every test
+    above this class) must keep working unchanged.
+    """
+
+    def test_identity_hash_is_none_when_not_provided(self, tracker):
+        tracker.record(b"\xaa" * 16, None)
+        assert tracker.get_peers()[0]["identity_hash"] is None
+
+    def test_identity_hash_is_captured_when_provided(self, tracker):
+        tracker.record(b"\xaa" * 16, None, b"\xbb" * 16)
+        assert tracker.get_peers()[0]["identity_hash"] == "bb" * 16
+
+    def test_identity_hash_is_filled_in_by_a_later_announce(self, tracker):
+        # A peer announced before this field existed (or whose first
+        # announce this run didn't carry it) shouldn't stay permanently
+        # missing it — the next announce fills it in.
+        tracker.record(b"\xaa" * 16, None)
+        assert tracker.get_peers()[0]["identity_hash"] is None
+
+        tracker.record(b"\xaa" * 16, None, b"\xbb" * 16)
+        assert tracker.get_peers()[0]["identity_hash"] == "bb" * 16
