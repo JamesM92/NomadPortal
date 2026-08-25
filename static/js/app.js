@@ -23,10 +23,67 @@ let _identifiedNodes = new Set();
 let _lastPage = { url: '', hash: '', path: '', html: '', micron: '' };
 
 // ---------------------------------------------------------------------------
-// Contact icon — real image from FIELD_ICON_APPEARANCE, or nothing
+// Identicon — deterministic per-hash fallback avatar (GitHub/Columba-
+// style symmetric dot grid), used whenever a node or contact has no
+// explicit icon. Ported from the NomadPortal-Android sister project's
+// Identicon.kt (itself ported from Columba, torlando-tech/columba) —
+// same algorithm, re-expressed as an SVG string instead of a Compose
+// Canvas, for direct innerHTML insertion (inline SVG, not a data: URI —
+// keeps it crisp at any size and able to use this app's own CSS
+// variables for the background, unlike _contactIcon's <img> path for a
+// server-rendered icon).
+//
+// hash[0..2] become the primary color's RGB, hash[3..5] the secondary's
+// (raw byte values, no palette/HSL). A 5-row grid only computes its left
+// 3 columns — hash[(row*3+col) % hash.length] — a dot is drawn (primary
+// if that byte is even, secondary if odd) whenever the byte exceeds 127,
+// then columns 0-1 are mirrored onto columns 4-3 for left-right symmetry
+// (column 2 is the untouched center axis). A hash under 6 bytes can't
+// feed both colors, so it renders a plain grey circle instead, matching
+// the degenerate case in the original.
+// ---------------------------------------------------------------------------
+function _identiconSvg(hashHex, size = 24) {
+  const hex   = (hashHex || '').replace(/[^0-9a-f]/gi, '');
+  const bytes = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
+
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ` +
+               `width="${size}" height="${size}" style="display:block;flex-shrink:0;border-radius:50%;">`;
+
+  if (bytes.length < 6) {
+    return `${open}<circle cx="16" cy="16" r="16" fill="#808080"/></svg>`;
+  }
+
+  const primary   = `rgb(${bytes[0]},${bytes[1]},${bytes[2]})`;
+  const secondary = `rgb(${bytes[3]},${bytes[4]},${bytes[5]})`;
+  const cell = 32 / 5;
+  let dots = '';
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      const val = bytes[(row * 3 + col) % bytes.length];
+      if (val <= 127) continue;
+      const color = (val % 2 === 0) ? primary : secondary;
+      const r  = (cell / 2.5).toFixed(2);
+      const cy = (row * cell + cell / 2).toFixed(2);
+      const cx = (col * cell + cell / 2).toFixed(2);
+      dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+      if (col < 2) {
+        const mx = ((4 - col) * cell + cell / 2).toFixed(2);
+        dots += `<circle cx="${mx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+      }
+    }
+  }
+  return `${open}<circle cx="16" cy="16" r="16" fill="var(--bg3)"/>${dots}</svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Contact icon — real image from FIELD_ICON_APPEARANCE, or an identicon
+// fallback keyed to the contact's own hash (was blank space before —
+// every contact is now visually distinct at a glance without needing an
+// icon explicitly set on either end).
 // ---------------------------------------------------------------------------
 function _contactIcon(contact, size = 24) {
-  if (!contact?.icon) return '';
+  if (!contact?.icon) return contact?.hash ? _identiconSvg(contact.hash, size) : '';
   const mime = contact.icon_mime || 'image/png';
   const r    = Math.round(size * 0.12);
   return `<img src="data:${mime};base64,${contact.icon}" ` +
@@ -116,6 +173,76 @@ async function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 let _allNodes = [];
 let _favCollapsed = false;
+
+// ---------------------------------------------------------------------------
+// Windowed list rendering — shared by the node list and the LXMF peer
+// (Users tab) list below. A real mesh can announce thousands of nodes/
+// peers; rendering every matched/sorted row into the DOM unconditionally
+// on every render was a real, reported stall opening either list. Same
+// fix as the Android sister project's rememberWindowedList()/
+// LoadMoreTrigger (ui/components/WindowedList.kt), ported here as plain
+// closures instead of a Composable: most people only ever look at the
+// most recent ~50 of a list, so only ever build that many rows up
+// front, growing one more page only once the user actually scrolls (or
+// clicks) for more. Two rules, matching the Android version exactly:
+// - Page 1 stays live — it rebuilds fresh from the source array on
+//   every render, so a newly-discovered node/peer still shows up
+//   immediately at the top.
+// - The moment a second page loads, the whole window freezes against a
+//   snapshot, so rows the user already scrolled past don't reorder or
+//   shift underneath them. A changed resetKey (new filter/sort) snaps
+//   back to page 1 and live tracking resumes.
+// ---------------------------------------------------------------------------
+const LIST_PAGE_SIZE = 50;
+
+function _windowList(items, winState, resetKey) {
+  if (resetKey !== winState.resetKey) {
+    winState.resetKey = resetKey;
+    winState.page = 1;
+    winState.frozen = null;
+  }
+  const effective = winState.frozen || items;
+  const visible = effective.slice(0, winState.page * LIST_PAGE_SIZE);
+  return {
+    visible,
+    remaining: effective.length - visible.length,
+    loadMore() {
+      if (winState.frozen === null) winState.frozen = items;
+      winState.page += 1;
+    },
+  };
+}
+
+// "Show N more…" sentinel row — click it, or scroll it into view, to
+// grow a windowed list by one more page. `tag` matches the caller's own
+// row element (<li> for #node-list, <div> for the peer list). `root`
+// must be the list's real scrolling ancestor, not the viewport — these
+// panels scroll inside their own overflow-y:auto container — so the
+// IntersectionObserver fires as the user nears the actual bottom.
+function _makeLoadMoreRow(remaining, root, onLoad, tag = 'li') {
+  const el = document.createElement(tag);
+  el.className = 'list-load-more';
+  el.textContent = `Show ${Math.min(remaining, LIST_PAGE_SIZE)} more (${remaining} left)…`;
+  let fired = false;
+  const fire = () => {
+    if (fired) return;
+    fired = true;
+    onLoad();
+  };
+  el.addEventListener('click', fire);
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        io.disconnect();
+        fire();
+      }
+    }, { root, rootMargin: '200px' });
+    io.observe(el);
+  }
+  return el;
+}
+
+let _nodeListWindow = { page: 1, frozen: null, resetKey: null };
 
 async function refreshNodes() {
   try {
@@ -234,7 +361,18 @@ function renderNodeList() {
   } else {
     sortedNodes.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
   }
-  for (const node of sortedNodes) nodeList.appendChild(makeNodeItem(node));
+
+  // Windowed — see _windowList's own doc comment. resetKey covers both
+  // criteria this section depends on (filter text + sort key); changing
+  // either snaps back to page 1.
+  const w = _windowList(sortedNodes, _nodeListWindow, `${filter}|${sortKey}`);
+  for (const node of w.visible) nodeList.appendChild(makeNodeItem(node));
+  if (w.remaining > 0) {
+    nodeList.appendChild(_makeLoadMoreRow(w.remaining, nodeList, () => {
+      w.loadMore();
+      renderNodeList();
+    }, 'li'));
+  }
 }
 
 function makeNodeItem(node) {
@@ -296,9 +434,14 @@ function makeNodeItem(node) {
   if (isLocked) li.classList.add('node-locked');
 
   li.insertAdjacentHTML('beforeend',
-    `<span class="node-name">${dot}${esc(node.name)}</span>` +
-    `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
-    `<span class="node-age">${age}</span>`);
+    `<div class="node-icon-row">` +
+      `<span class="node-identicon">${_identiconSvg(node.hash, 22)}</span>` +
+      `<div class="node-text">` +
+        `<span class="node-name">${dot}${esc(node.name)}</span>` +
+        `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
+        `<span class="node-age">${age}</span>` +
+      `</div>` +
+    `</div>`);
 
   li.addEventListener('click', e => {
     if (e.target.closest('.node-fav-btn')) return;
@@ -348,9 +491,15 @@ function makePageFavItem(fav) {
   right.appendChild(starBtn);
   li.appendChild(right);
 
+  // Wrapped in .node-text (flex:1; min-width:0) same as makeNodeItem's
+  // own row — without it these two spans are direct flex children with
+  // no shrink floor, so a long bookmark name/path can't ellipsis and
+  // instead pushes the row into horizontal overflow.
   li.insertAdjacentHTML('beforeend',
-    `<span class="node-name">${esc(fav.name)}</span>` +
-    `<span class="node-hash">${fav.hash.slice(0, 12)}…${esc(fav.path)}</span>`);
+    `<div class="node-text">` +
+      `<span class="node-name">${esc(fav.name)}</span>` +
+      `<span class="node-hash">${fav.hash.slice(0, 12)}…${esc(fav.path)}</span>` +
+    `</div>`);
 
   li.addEventListener('click', e => {
     if (e.target.closest('.node-fav-btn')) return;
@@ -1208,6 +1357,22 @@ function renderPageContent() {
         return;
       }
       if (href.startsWith('http://') || href.startsWith('https://')) {
+        // NomadNet page content is untrusted (HTML-escaped, no JS
+        // execution path — see the trust model in README.md), but a
+        // plain-text link label can still claim to be anything while
+        // pointing at an arbitrary clearnet URL: a classic phishing
+        // pattern, and worse here since it's also the one way a mesh
+        // page can walk a visitor off the mesh entirely without them
+        // necessarily noticing. Always confirm — regardless of login/
+        // admin state, unlike the once-per-session external-*node*
+        // warning in navigateTo() — and show the real destination, not
+        // just whatever the link text says.
+        const go = window.confirm(
+          'This link leaves NomadPortal and opens an external website ' +
+          '(outside the Reticulum mesh) in a new tab:\n\n' + href +
+          '\n\nOnly continue if you trust this destination.'
+        );
+        if (!go) return;
         window.open(href, '_blank', 'noopener,noreferrer');
         return;
       }
@@ -1713,17 +1878,77 @@ function _safeHexColor(value, fallback) {
   return (typeof value === 'string' && _HEX_COLOR_RE.test(value)) ? value : fallback;
 }
 
+// Same rationale as _safeHexColor above, applied to MDI path "d" data
+// (fetched from this app's own bundled static/data/mdi_icons.json, not
+// remote/user-controlled — but still flows into innerHTML, so it's
+// worth the same collapse-the-dataflow treatment CodeQL's rule wants).
+// Legitimate SVG path data is only command letters, digits, '.', '-',
+// ',' and whitespace — never '"', '<', or '>' — so this is a strict
+// allowlist, not a guess at what to block.
+const _SVG_PATH_RE = /^[MmLlHhVvCcSsQqTtAaZz0-9.,\-\s]+$/;
+function _safeSvgPath(value) {
+  return (typeof value === 'string' && _SVG_PATH_RE.test(value)) ? value : null;
+}
+
+// ---------------------------------------------------------------------------
+// Real Material Design Icons catalog — lazy-fetched client-side mirror of
+// mdi_icons.py's server-side lookup, backing both this app's own live
+// icon preview (_iconSvg below) and the icon picker. Loaded once, only
+// when actually needed (icon editor opened) — static/data/mdi_icons.json
+// is ~2.7MB, no reason to fetch it on every page load. See NOTICE.md for
+// the data's own license (Apache-2.0, Material Design Icons project).
+// ---------------------------------------------------------------------------
+let _mdiPaths      = null;  // name -> SVG path "d" data, once loaded
+let _mdiCategories = null;  // category -> [names], once loaded
+let _mdiLoading    = null;  // in-flight fetch promise, so concurrent callers share it
+
+function _normalizeMdiName(name) {
+  return (name || '').trim().toLowerCase().replace(/[ _]/g, '-');
+}
+
+function _ensureMdiCatalog() {
+  if (_mdiPaths) return Promise.resolve();
+  if (_mdiLoading) return _mdiLoading;
+  _mdiLoading = Promise.all([
+    fetch('/static/data/mdi_icons.json').then(r => r.json()),
+    fetch('/static/data/mdi_categories.json').then(r => r.json()),
+  ]).then(([paths, categories]) => {
+    _mdiPaths = paths;
+    _mdiCategories = categories;
+  }).catch(e => {
+    // Missing/corrupt asset degrades every lookup to "not found" — same
+    // contract as mdi_icons.py's server-side loader. Reset _mdiLoading
+    // so a later call can retry (e.g. a transient network blip) instead
+    // of permanently remembering this one failure.
+    _mdiPaths = {};
+    _mdiCategories = {};
+    setStatus(`Could not load icon catalog: ${e.message}`, 'error');
+  }).finally(() => { _mdiLoading = null; });
+  return _mdiLoading;
+}
+
 function _iconSvg(glyph, fg, bg, size = 28) {
-  const g = (glyph || '?').slice(0, 2).toUpperCase();
-  const fontSize = size * 0.55;
   const safeFg = _safeHexColor(fg, '#ffffff');
   const safeBg = _safeHexColor(bg, '#5ba3c9');
+  const path = _mdiPaths && _safeSvgPath(_mdiPaths[_normalizeMdiName(glyph)]);
+
+  // Same 24x24-inset-in-32x32-circle math as messaging.py's
+  // _render_appearance_svg, so a self-rendered preview and a
+  // server-rendered contact icon look identical for the same inputs.
+  const glyphSvg = path
+    ? `<g transform="translate(6,6) scale(${(20 / 24).toFixed(4)})">` +
+      `<path d="${path}" fill="${safeFg}"/></g>`
+    : (() => {
+        const g = (glyph || '?').slice(0, 1).toUpperCase();
+        const fontSize = (size * 0.55) * 32 / size;
+        return `<text x="16" y="22" text-anchor="middle" font-size="${fontSize}" ` +
+               `font-family="sans-serif" font-weight="bold" fill="${safeFg}">${esc(g)}</text>`;
+      })();
+
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" ' +
     `width="${size}" height="${size}">` +
-    `<circle cx="16" cy="16" r="16" fill="${safeBg}"/>` +
-    `<text x="16" y="22" text-anchor="middle" font-size="${fontSize * 32 / size}" ` +
-    `font-family="sans-serif" font-weight="bold" fill="${safeFg}">${esc(g)}</text>` +
+    `<circle cx="16" cy="16" r="16" fill="${safeBg}"/>${glyphSvg}` +
     '</svg>'
   );
 }
@@ -1743,12 +1968,15 @@ function _renderMyIcon() {
 function _renderIconEditorPreview() {
   const slot = $('icon-editor-preview');
   if (!slot) return;
-  slot.innerHTML = _iconSvg(
-    $('icon-glyph').value,
-    $('icon-fg').value,
-    $('icon-bg').value,
-    36,
-  );
+  const glyph = $('icon-glyph').value;
+  slot.innerHTML = _iconSvg(glyph, $('icon-fg').value, $('icon-bg').value, 36);
+  const label = $('icon-glyph-label');
+  if (label) {
+    // Real MDI name once the catalog's loaded and recognizes it;
+    // otherwise show the raw stored value so a not-yet-migrated old
+    // single-letter glyph is still legible as "what's saved", not blank.
+    label.textContent = (_mdiPaths && _mdiPaths[_normalizeMdiName(glyph)]) ? glyph : (glyph || '?');
+  }
 }
 
 function _openIconEditor() {
@@ -1758,12 +1986,17 @@ function _openIconEditor() {
   $('icon-bg').value    = ic.bg;
   _renderIconEditorPreview();
   $('icon-editor').hidden = false;
+  // Warm the catalog now rather than waiting for "Choose icon…" — by the
+  // time that click happens the fetch is usually already done, so the
+  // picker opens with real icons rendered immediately instead of a
+  // blank grid for a beat.
+  _ensureMdiCatalog().then(_renderIconEditorPreview);
 }
 
 if ($('btn-edit-icon')) {
   $('btn-edit-icon').addEventListener('click', _openIconEditor);
   $('btn-icon-cancel').addEventListener('click', () => { $('icon-editor').hidden = true; });
-  ['icon-glyph', 'icon-fg', 'icon-bg'].forEach(id => {
+  ['icon-fg', 'icon-bg'].forEach(id => {
     $(id).addEventListener('input', _renderIconEditorPreview);
   });
   $('btn-icon-save').addEventListener('click', async () => {
@@ -1783,6 +2016,100 @@ if ($('btn-edit-icon')) {
         $('icon-editor').hidden = true;
       }
     } catch (e) {}
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Icon picker — search + category chips over the full MDI catalog.
+// Renders a capped number of results at a time (real result sets can run
+// into the thousands; an unbounded grid would be both slow to build and
+// useless to scroll through) — search narrows fast in practice, and a
+// truncation note tells the user to narrow further rather than silently
+// hiding results with no explanation.
+// ---------------------------------------------------------------------------
+const _ICON_PICKER_MAX_RESULTS = 300;
+let _iconPickerCategory = null;  // null = "All" / search-only mode
+
+function _renderIconPickerGrid(names) {
+  const grid = $('icon-picker-grid');
+  const status = $('icon-picker-status');
+  if (!grid) return;
+  const total = names.length;
+  const shown = names.slice(0, _ICON_PICKER_MAX_RESULTS);
+  grid.innerHTML = shown.map(name => {
+    const path = _safeSvgPath(_mdiPaths[name]);
+    if (!path) return '';  // shouldn't happen against trusted bundled data — skip, don't render garbage
+    const svg = `<svg viewBox="0 0 24 24"><path d="${path}" fill="currentColor"/></svg>`;
+    return `<button type="button" class="icon-picker-item" data-name="${esc(name)}" ` +
+           `title="${esc(name)}">${svg}</button>`;
+  }).join('');
+  status.textContent = total === 0
+    ? 'No icons match.'
+    : total > _ICON_PICKER_MAX_RESULTS
+      ? `Showing ${_ICON_PICKER_MAX_RESULTS} of ${total} — narrow your search to see more.`
+      : `${total} icon${total === 1 ? '' : 's'}`;
+}
+
+function _applyIconPickerFilter() {
+  if (!_mdiPaths) return;
+  const query = ($('icon-picker-search').value || '').trim().toLowerCase();
+  let pool = _iconPickerCategory
+    ? (_mdiCategories[_iconPickerCategory] || [])
+    : Object.keys(_mdiPaths);
+  if (query) pool = pool.filter(name => name.includes(query));
+  // Search-all-icons with no query yet would just be the first N of an
+  // unsorted 7400-entry object — not useful. Category browsing has no
+  // such problem (each category's own list is small enough to show
+  // directly), so only gate the "All + no query" combination.
+  if (!_iconPickerCategory && !query) {
+    $('icon-picker-grid').innerHTML = '';
+    $('icon-picker-status').textContent = 'Search or pick a category to browse icons.';
+    return;
+  }
+  _renderIconPickerGrid(pool.sort());
+}
+
+function _renderIconPickerCategories() {
+  const wrap = $('icon-picker-categories');
+  if (!wrap || !_mdiCategories) return;
+  const chips = ['All', ...Object.keys(_mdiCategories).sort()];
+  wrap.innerHTML = chips.map(cat => {
+    const isAll = cat === 'All';
+    const active = isAll ? !_iconPickerCategory : _iconPickerCategory === cat;
+    return `<span class="icon-picker-chip${active ? ' active' : ''}" ` +
+           `data-cat="${isAll ? '' : esc(cat)}">${esc(cat)}</span>`;
+  }).join('');
+}
+
+function _openIconPicker() {
+  $('icon-picker-modal').hidden = false;
+  $('icon-picker-search').value = '';
+  _iconPickerCategory = null;
+  _ensureMdiCatalog().then(() => {
+    _renderIconPickerCategories();
+    _applyIconPickerFilter();
+  });
+  if (_mdiCategories) _renderIconPickerCategories();
+  $('icon-picker-status').textContent = _mdiPaths ? '' : 'Loading icon catalog…';
+}
+
+if ($('btn-choose-icon')) {
+  $('btn-choose-icon').addEventListener('click', _openIconPicker);
+  $('btn-icon-picker-cancel').addEventListener('click', () => { $('icon-picker-modal').hidden = true; });
+  $('icon-picker-search').addEventListener('input', _applyIconPickerFilter);
+  $('icon-picker-categories').addEventListener('click', e => {
+    const chip = e.target.closest('.icon-picker-chip');
+    if (!chip) return;
+    _iconPickerCategory = chip.dataset.cat || null;
+    _renderIconPickerCategories();
+    _applyIconPickerFilter();
+  });
+  $('icon-picker-grid').addEventListener('click', e => {
+    const item = e.target.closest('.icon-picker-item');
+    if (!item) return;
+    $('icon-glyph').value = item.dataset.name;
+    _renderIconEditorPreview();
+    $('icon-picker-modal').hidden = true;
   });
 }
 
@@ -2104,7 +2431,7 @@ function openConversation(hash) {
   // Hide both while a conversation is open; restored on back/delete.
   $('sidebar-panel-messages').classList.add('chat-open');
   $('chat-dest-hidden').value = hash;
-  renderChatLog(conv ? conv.messages : []);
+  renderChatLog(conv ? conv.messages : [], { forceScroll: true });
 
   // Mark all unread in this conversation as read
   if (conv && conv.unread > 0) {
@@ -2139,13 +2466,104 @@ function _scrollChatToBottom() {
   });
 }
 
-function renderChatLog(messages) {
+// Human-readable byte size for attachment labels ("148 KB", "1.2 MB").
+// Reuses the same rounding as _fmtBytes elsewhere in the file but
+// scoped locally so this rendering doesn't couple to it.
+function _fmtAttachmentSize(bytes) {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024)                return `${bytes} B`;
+  if (bytes < 1024 * 1024)         return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Render a single attachment as HTML for inclusion in a chat bubble.
+// Kind-specific rendering (image inline, audio player, file link) —
+// see docs/design/chat-uploads.md. All three kinds resolve to the
+// same auth-gated endpoint (GET /api/messages/<id>/attachments/<idx>)
+// which serves the blob with the correct Content-Type stored on the
+// message metadata.
+function _renderAttachment(msgId, att) {
+  const url  = `/api/messages/${encodeURIComponent(msgId)}/attachments/${att.idx}`;
+  const alt  = esc(att.filename || 'attachment');
+  const size = _fmtAttachmentSize(att.size);
+  const sizeLabel = size ? ` <span style="color:var(--text-dim);">${esc(size)}</span>` : '';
+
+  if (att.kind === 'image') {
+    // ``loading="lazy"`` so a long chat history doesn't hammer the
+    // server with parallel image requests at scroll-into-view time.
+    // Click opens full-size in a new tab.
+    return (
+      `<div class="chat-attachment chat-attachment-image">` +
+        `<a href="${url}" target="_blank" rel="noopener noreferrer">` +
+          `<img src="${url}" alt="${alt}" loading="lazy" ` +
+               `style="max-width:100%;max-height:300px;` +
+               `border-radius:4px;display:block;">` +
+        `</a>` +
+      `</div>`
+    );
+  }
+  if (att.kind === 'audio') {
+    // Native <audio controls> — the browser handles play/pause/seek/
+    // volume for free. ``preload="none"`` avoids fetching the blob
+    // until the user actually hits play, which matters for long
+    // chats with many audio clips.
+    const mime = esc(att.mime || 'audio/mpeg');
+    return (
+      `<div class="chat-attachment chat-attachment-audio">` +
+        `<div style="font-size:11px;color:var(--text-dim);margin-bottom:2px;">` +
+          `🎧 ${alt}${sizeLabel}` +
+        `</div>` +
+        `<audio controls preload="none" style="width:100%;max-width:320px;">` +
+          `<source src="${url}" type="${mime}">` +
+          `Your browser can't play this audio format.` +
+        `</audio>` +
+      `</div>`
+    );
+  }
+  // Generic file — download link with filename + size.
+  return (
+    `<div class="chat-attachment chat-attachment-file">` +
+      `<a href="${url}" target="_blank" rel="noopener noreferrer" ` +
+         `download="${alt}" ` +
+         `style="color:var(--accent);text-decoration:underline;">` +
+        `📎 ${alt}${sizeLabel}` +
+      `</a>` +
+    `</div>`
+  );
+}
+
+// Signature of the last conversation actually painted into #chat-log —
+// lets renderChatLog skip the teardown/rebuild when polling brings back
+// the exact same messages (the common case: nothing new arrived). A full
+// rebuild re-creates every bubble, including inline <img>/<audio>
+// attachments, which is expensive and — because it always ran through
+// _scrollChatToBottom() unconditionally — also yanked the reader back to
+// the bottom every ~15s (more often right after sending) even if they
+// had scrolled up to read history. Both together read as "the messages
+// tab is laggy". Reset to null on conversation switch so the new
+// conversation always paints on first open.
+let _chatLogSignature = null;
+
+function renderChatLog(messages, { forceScroll = false } = {}) {
   const log = $('chat-log');
   if (!log) return;
   if (!messages.length) {
     log.innerHTML = '<div class="msg-empty" style="text-align:center;padding:20px 10px;">No messages yet — say hello!</div>';
+    _chatLogSignature = '';
     return;
   }
+
+  const signature = messages.map(m => `${m.id}:${m.state || ''}:${m.read}`).join('|');
+  if (!forceScroll && signature === _chatLogSignature) return;
+  _chatLogSignature = signature;
+
+  // Only follow new messages down to the bottom if the reader was
+  // already there (or this is a fresh conversation open / a message
+  // they just sent) — otherwise a background poll refresh must not
+  // move their scroll position while they're reading up-thread.
+  const wasNearBottom = forceScroll ||
+    (log.scrollHeight - log.scrollTop - log.clientHeight) < 80;
+
   log.innerHTML = '';
   for (const m of messages) {
     const bubble = document.createElement('div');
@@ -2155,6 +2573,14 @@ function renderChatLog(messages) {
     let inner = '';
     if (m.title) inner += `<div class="chat-title">${esc(m.title)}</div>`;
     inner += `<div class="chat-content">${esc(content)}</div>`;
+    // Inline any attachments below the content. Only received-message
+    // attachments render today (step 2); sent-message attachments
+    // land in step 4 when the send path exists.
+    if (Array.isArray(m.attachments) && m.attachments.length) {
+      for (const att of m.attachments) {
+        inner += _renderAttachment(m.id, att);
+      }
+    }
     inner += `<div class="chat-meta"><span class="chat-time">${formatAge(m.time)}</span>`;
     if (m.direction === 'sent') {
       const cls = m.state === 'delivered' ? 'ok' : m.state === 'failed' ? 'fail' : 'pend';
@@ -2164,7 +2590,7 @@ function renderChatLog(messages) {
     bubble.innerHTML = inner;
     log.appendChild(bubble);
   }
-  _scrollChatToBottom();
+  if (wasNearBottom) _scrollChatToBottom();
 }
 
 $('btn-rename-chat').addEventListener('click', () => {
@@ -2313,6 +2739,121 @@ if (window.visualViewport) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Chat attachments (v1.3.0 step 4 — paperclip UI)
+// ---------------------------------------------------------------------------
+// Staged before send; cleared after a successful POST /api/messages. Kept
+// as a plain array (not a FormData) because FormData is write-only in
+// browsers — we'd have no way to render chips / remove entries after
+// staging. When the send fires, we build a fresh FormData from this list.
+//
+// Size caps mirror routes.py (_MAX_ATTACHMENT_COUNT, _attachment_max_bytes).
+// The server re-checks defensively; the browser-side check exists to give
+// the user a clear rejection ("this file is too big") instead of a 413.
+
+const CHAT_ATTACH_MAX_BYTES = 500 * 1024;   // 500 KB per attachment
+const CHAT_ATTACH_MAX_TOTAL = 500 * 1024;   // 500 KB total per message
+const CHAT_ATTACH_MAX_COUNT = 10;
+let _stagedAttachments = [];   // {file: File, size: number}
+
+function _fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function _stagedTotalBytes() {
+  return _stagedAttachments.reduce((sum, s) => sum + s.size, 0);
+}
+
+function _renderAttachChips() {
+  const container = $('chat-attach-list');
+  if (!container) return;
+  if (!_stagedAttachments.length) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  container.hidden = false;
+  const total = _stagedTotalBytes();
+  const over  = total > CHAT_ATTACH_MAX_TOTAL;
+  const chips = _stagedAttachments.map((s, i) => `
+    <span class="attach-chip" style="display:inline-flex;align-items:center;
+                                     gap:4px;background:var(--bg);
+                                     border:1px solid var(--border);
+                                     padding:2px 6px;margin:2px;
+                                     border-radius:4px;font-size:11px;
+                                     max-width:200px;">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="${esc(s.file.name)}">
+        ${esc(s.file.name)}
+      </span>
+      <span style="color:var(--text-dim);">${_fmtBytes(s.size)}</span>
+      <button type="button" data-attach-idx="${i}"
+              style="background:none;border:none;color:var(--text-dim);
+                     cursor:pointer;padding:0 2px;font-size:12px;line-height:1;"
+              title="Remove">×</button>
+    </span>
+  `).join('');
+  const counterColor = over ? 'var(--error, #d33)' : 'var(--text-dim)';
+  container.innerHTML = `
+    <div style="padding:2px 4px;">
+      ${chips}
+      <div style="font-size:10px;color:${counterColor};padding:2px 4px;">
+        ${_stagedAttachments.length} file${_stagedAttachments.length === 1 ? '' : 's'},
+        ${_fmtBytes(total)} / ${_fmtBytes(CHAT_ATTACH_MAX_TOTAL)}
+      </div>
+    </div>
+  `;
+  container.querySelectorAll('button[data-attach-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-attach-idx'), 10);
+      _stagedAttachments.splice(idx, 1);
+      _renderAttachChips();
+    });
+  });
+}
+
+function _clearStagedAttachments() {
+  _stagedAttachments = [];
+  const input = $('chat-attach-input');
+  if (input) input.value = '';
+  _renderAttachChips();
+}
+
+// Wire up the paperclip button + file input
+{
+  const attachBtn   = $('btn-chat-attach');
+  const attachInput = $('chat-attach-input');
+  if (attachBtn && attachInput) {
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => {
+      const picked = Array.from(attachInput.files || []);
+      for (const file of picked) {
+        if (_stagedAttachments.length >= CHAT_ATTACH_MAX_COUNT) {
+          setStatus(
+            `Too many attachments — max ${CHAT_ATTACH_MAX_COUNT} per message.`,
+            'error',
+          );
+          break;
+        }
+        if (file.size > CHAT_ATTACH_MAX_BYTES) {
+          setStatus(
+            `"${file.name}" is ${_fmtBytes(file.size)} — cap is ` +
+            `${_fmtBytes(CHAT_ATTACH_MAX_BYTES)}.`,
+            'error',
+          );
+          continue;
+        }
+        _stagedAttachments.push({ file, size: file.size });
+      }
+      _renderAttachChips();
+      // Reset the input so the same file can be re-picked after removal.
+      attachInput.value = '';
+    });
+  }
+}
+
 async function _sendChatMessage() {
   const btn = $('btn-chat-send');
   // Re-entrancy guard. The Enter-key handler above calls this function
@@ -2326,8 +2867,10 @@ async function _sendChatMessage() {
 
   const dest_hash = $('chat-dest-hidden').value;
   const content   = $('chat-input').value.trim();
+  const hasAttach = _stagedAttachments.length > 0;
 
-  if (!dest_hash || !content) return;
+  // Empty send guard — either text OR attachments required.
+  if (!dest_hash || (!content && !hasAttach)) return;
   if (content.length > CHAT_CONTENT_MAX) {
     setStatus(
       `Message is too long (${content.length.toLocaleString()} / ` +
@@ -2336,15 +2879,38 @@ async function _sendChatMessage() {
     );
     return;
   }
+  if (hasAttach && _stagedTotalBytes() > CHAT_ATTACH_MAX_TOTAL) {
+    setStatus(
+      `Total attachment size ${_fmtBytes(_stagedTotalBytes())} exceeds ` +
+      `${_fmtBytes(CHAT_ATTACH_MAX_TOTAL)} cap.`,
+      'error',
+    );
+    return;
+  }
 
   btn.disabled = true;
   try {
-    await apiFetch('/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dest_hash, content }),
-    });
+    if (hasAttach) {
+      // Multipart branch — the server-side endpoint sniffs
+      // request.content_type and switches parsers. Don't set
+      // Content-Type manually: the browser must fill in the
+      // multipart boundary parameter for us.
+      const fd = new FormData();
+      fd.append('dest_hash', dest_hash);
+      fd.append('content', content);
+      for (const s of _stagedAttachments) {
+        fd.append('attachments', s.file, s.file.name);
+      }
+      await apiFetch('/api/messages', { method: 'POST', body: fd });
+    } else {
+      await apiFetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dest_hash, content }),
+      });
+    }
     $('chat-input').value = '';
+    _clearStagedAttachments();
     _updateChatCharCount();
     setStatus('Message queued — delivery in progress.', 'ok');
     refreshChats();
@@ -2376,6 +2942,7 @@ async function loadContacts() {
 // LXMF peer tracker (Users tab)
 // ---------------------------------------------------------------------------
 let _allPeers = [];
+let _peerListWindow = { page: 1, frozen: null, resetKey: null };
 
 async function refreshLxmfPeers() {
   if (!_authState.logged_in) return;
@@ -2390,13 +2957,13 @@ function renderPeerList() {
   const inner  = $('user-list-inner');
   const filter = ($('user-filter')?.value || '').trim().toLowerCase();
   if (!inner) return;
-  const visible = filter
+  const filtered = filter
     ? _allPeers.filter(p =>
         (p.name || '').toLowerCase().includes(filter) ||
         p.hash.toLowerCase().includes(filter))
     : _allPeers;
 
-  if (!visible.length) {
+  if (!filtered.length) {
     inner.innerHTML = filter
       ? `<div class="msg-empty">No matches for &ldquo;${esc(filter)}&rdquo;.</div>`
       : '<div class="msg-empty">' +
@@ -2407,13 +2974,21 @@ function renderPeerList() {
     return;
   }
   inner.innerHTML = '';
-  for (const peer of visible) {
+  // Windowed — see _windowList's own doc comment (also used by the node
+  // list). A large mesh can hear thousands of announces; only the most
+  // recent LIST_PAGE_SIZE render up front.
+  const w = _windowList(filtered, _peerListWindow, filter);
+  for (const peer of w.visible) {
     const contact = _contacts.find(c => c.hash === peer.hash);
     const name    = contact?.name || peer.name || peer.hash.slice(0, 16) + '…';
     const row = document.createElement('div');
     row.className = 'contact-item';
     row.style.cssText = 'cursor:pointer;display:flex;align-items:center;gap:8px;';
-    const peerIcon = _contactIcon(contact, 28);
+    // Falls back to {hash: peer.hash} so an announced peer who isn't a
+    // saved contact yet still gets an identicon keyed to their real
+    // hash, instead of no icon at all until the first click auto-adds
+    // them as a contact below.
+    const peerIcon = _contactIcon(contact || { hash: peer.hash }, 28);
     const hopsLabel = (peer.hops === null || peer.hops === undefined)
       ? '? hops'
       : peer.hops === 0
@@ -2447,6 +3022,12 @@ function renderPeerList() {
       openConversation(peer.hash);
     });
     inner.appendChild(row);
+  }
+  if (w.remaining > 0) {
+    inner.appendChild(_makeLoadMoreRow(w.remaining, inner, () => {
+      w.loadMore();
+      renderPeerList();
+    }, 'div'));
   }
 }
 
@@ -2676,6 +3257,34 @@ function _initDisclaimer() {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+// Top-left brand → navigate back to the default node's home page on
+// click. Especially load-bearing for guests / kiosk mode ("Locked" access
+// preset): the address bar and node list are both hidden by per-audience
+// access controls in that mode, leaving the brand as the only reliable
+// "home" affordance at all — it has to actually work, not just usually
+// work. Attached synchronously here, before init()'s async boot sequence
+// (auth/settings/site-info fetches) even starts, rather than gated behind
+// it: the old code only wired this up once those awaits resolved, so a
+// tap on the logo before boot finished — plausible on any slow/mesh-
+// adjacent connection, and kiosk touchscreens are exactly the case where
+// an impatient tap on the one available affordance is likely — did
+// nothing, silently, forever (the listener didn't exist yet, and nothing
+// ever re-attached it later). Reads _defaultHash/_hostedHash live at
+// click time instead of a value captured once during boot, so it
+// self-heals the moment either populates, however long boot takes.
+document.querySelectorAll('.brand').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.title = 'Home';
+  el.addEventListener('click', () => {
+    const home = _defaultHash || _hostedHash;
+    if (!home) {
+      setStatus('No home page configured yet.', 'error');
+      return;
+    }
+    navigateTo(`hash://${home}/page/index.mu`);
+  });
+});
+
 (async function init() {
   setStatus('Connecting…', 'busy');
   // Auth/settings/site-info are fetched (and lockdown state fully resolved)
@@ -2730,25 +3339,6 @@ function _initDisclaimer() {
 
   const params = new URLSearchParams(location.search);
   const startUrl = params.get('url');
-
-  // Make the top-left brand element navigate back to the default node's
-  // home page on click. Especially load-bearing for guests / kiosk mode:
-  // the address bar and node list may both be hidden by per-audience
-  // access controls, leaving the brand as the only reliable "home"
-  // affordance. Applied for everyone (not just guests) since it's a
-  // useful shortcut regardless of role. Click handler is attached once
-  // at boot — applyUISettings replaces .brand's innerHTML with the
-  // configured app title, but that only touches children, not the
-  // element's own listeners.
-  if (effectiveDefault) {
-    document.querySelectorAll('.brand').forEach(el => {
-      el.style.cursor = 'pointer';
-      el.title = 'Home';
-      el.addEventListener('click', () => {
-        navigateTo(`hash://${effectiveDefault}/page/index.mu`);
-      });
-    });
-  }
 
   // Boot-time URL resolution. Priority:
   //   1. Explicit ``?url=`` query param — preserved for the legacy

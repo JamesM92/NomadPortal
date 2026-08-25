@@ -31,6 +31,46 @@ jobs:
       - name: Ruff check
         run: ruff check --select F,E9 .
 
+      # Shell scripts had no syntax check at all until now — entrypoint.sh
+      # in particular is 400+ lines handling SSL cert generation, MTU
+      # detection, and container startup, and is otherwise only ever
+      # exercised implicitly by the docker-build job's smoke test (which
+      # won't reach every branch). `bash -n` catches a real syntax error
+      # (unmatched quote/paren, bad heredoc, etc.) for free.
+      - name: Shell syntax check
+        run: find . -name "*.sh" -not -path "./.git/*" -print0 | xargs -0 -n1 bash -n
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Matches Dockerfile's system deps — rns/lxmf/nomadnet's crypto
+      # extensions need these to build from source on a fresh runner.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc libssl-dev openssl
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # tests/ existed and was pinned via requirements.txt (pytest==9.1.1)
+      # but nothing in CI ever actually ran it — the whole suite was
+      # enforcing nothing beyond whatever a developer remembered to run
+      # locally. No RNS/LXMF network activity here: every test stubs past
+      # __init__ (which would otherwise spin up real RNS) and exercises
+      # the specific method under test in isolation.
+      - name: Run pytest
+        run: pytest tests/ -v
+
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest

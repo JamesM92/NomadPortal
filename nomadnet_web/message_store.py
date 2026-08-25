@@ -10,25 +10,44 @@ MAX_MESSAGES = 500
 
 
 class MessageStore:
-    def __init__(self, storage_dir: str):
+    def __init__(self, storage_dir: str, attachment_store=None):
         self._path = os.path.join(storage_dir, "messages.json")
         self._lock = threading.Lock()
         self._sent:     list = []
         self._received: list = []
+        # Optional companion store — ``AttachmentStore``. When present,
+        # every message eviction path (explicit delete, MAX_MESSAGES
+        # overflow) tells it to evict the corresponding on-disk blobs
+        # so they don't accumulate as orphans. Kept optional so unit
+        # tests and older callers don't have to construct one.
+        self._attachments = attachment_store
         self._load()
 
     def save_sent(self, entry: dict) -> None:
         with self._lock:
             self._sent.insert(0, entry)
+            # Capture the ones being pushed off the LIFO cap so their
+            # attachment blobs can be evicted after we release the
+            # lock. The old code silently dropped them; that's fine for
+            # text-only messages but leaks attachment bytes on disk
+            # forever once attachments become a real thing (v1.3.0).
+            evicted_ids = [m.get("id") for m in self._sent[MAX_MESSAGES:]
+                           if m.get("id")]
             self._sent = self._sent[:MAX_MESSAGES]
             snapshot = self._snapshot()
+        if self._attachments and evicted_ids:
+            self._attachments.evict_many(evicted_ids)
         self._persist(snapshot)
 
     def save_received(self, entry: dict) -> None:
         with self._lock:
             self._received.insert(0, entry)
+            evicted_ids = [m.get("id") for m in self._received[MAX_MESSAGES:]
+                           if m.get("id")]
             self._received = self._received[:MAX_MESSAGES]
             snapshot = self._snapshot()
+        if self._attachments and evicted_ids:
+            self._attachments.evict_many(evicted_ids)
         self._persist(snapshot)
 
     def sent_messages(self) -> list:
@@ -68,10 +87,19 @@ class MessageStore:
                 if m.get("source") != hash_hex:
                     return True
                 return bool(owner) and m.get("owner") != owner
+            # Collect ids of removed messages so the companion
+            # attachment store can drop their blobs. Same "capture
+            # before mutation" pattern as save_sent / save_received.
+            removed_ids = (
+                [m.get("id") for m in self._sent     if not _keep_sent(m) and m.get("id")]
+                + [m.get("id") for m in self._received if not _keep_recv(m) and m.get("id")]
+            )
             self._sent     = [m for m in self._sent     if _keep_sent(m)]
             self._received = [m for m in self._received if _keep_recv(m)]
             removed = before - len(self._sent) - len(self._received)
             snapshot = self._snapshot()
+        if self._attachments and removed_ids:
+            self._attachments.evict_many(removed_ids)
         self._persist(snapshot)
         return removed
 

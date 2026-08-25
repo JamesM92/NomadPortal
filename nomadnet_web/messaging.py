@@ -9,10 +9,13 @@ of whether they are currently logged in.
 """
 
 import logging
+import mimetypes
 import os
 import threading
 import time
 from typing import Optional
+
+from . import mdi_icons
 
 log = logging.getLogger(__name__)
 
@@ -41,36 +44,192 @@ def _detect_image_mime(data: bytes) -> str:
     return "image/png"
 
 
+# Map the ``image_type_str`` component of ``FIELD_IMAGE (0x06)`` to a
+# canonical MIME type. MeshChat sends the file's extension (``"jpg"``,
+# ``"png"``, ``"webp"``, ...) — not always the MIME. Falls back to
+# byte-sniffing via ``_detect_image_mime`` when the extension is
+# unrecognized or the sender didn't include one.
+_IMAGE_EXT_TO_MIME = {
+    "jpg":  "image/jpeg", "jpeg": "image/jpeg",
+    "png":  "image/png",  "gif":  "image/gif",
+    "webp": "image/webp", "svg":  "image/svg+xml",
+}
+
+
+# ``audio_mode`` component of ``FIELD_AUDIO (0x07)`` → MIME type +
+# file extension. MeshChat's own recorder produces ``"opus"``. Other
+# clients may send container-wrapped forms (webm audio, ogg, mp3);
+# we accept those too so playback works via the recipient's
+# ``<audio>`` element. Unknown modes fall back to
+# ``application/octet-stream`` at the call site so at least the
+# blob can be downloaded even if the browser can't decode it.
+_AUDIO_MODE_TO_MIME = {
+    "opus":  "audio/opus",  "ogg":  "audio/ogg",  "oga": "audio/ogg",
+    "mp3":   "audio/mpeg",  "mpeg": "audio/mpeg",
+    "wav":   "audio/wav",   "wave": "audio/wav",
+    "webm":  "audio/webm",  "m4a":  "audio/mp4",  "mp4": "audio/mp4",
+    "aac":   "audio/aac",   "flac": "audio/flac",
+}
+_AUDIO_MODE_TO_EXT = {
+    "opus":  "opus", "ogg":  "ogg",  "oga":  "oga",
+    "mp3":   "mp3",  "mpeg": "mp3",
+    "wav":   "wav",  "wave": "wav",
+    "webm":  "webm", "m4a":  "m4a",  "mp4":  "mp4",
+    "aac":   "aac",  "flac": "flac",
+}
+
+
+# Reverse of ``_IMAGE_EXT_TO_MIME`` for the send side. Given a MIME
+# type of an outbound image (browser-supplied via <input type="file">),
+# return the short extension string MeshChat expects in the first slot
+# of ``FIELD_IMAGE = [image_type_str, image_bytes]``. Unknown or non-
+# image MIMEs return "" so the caller can fall back to a filename-
+# derived hint.
+_MIME_TO_IMAGE_EXT = {
+    "image/jpeg":   "jpg",
+    "image/pjpeg":  "jpg",
+    "image/png":    "png",
+    "image/gif":    "gif",
+    "image/webp":   "webp",
+    "image/svg+xml": "svg",
+}
+
+# Reverse of ``_AUDIO_MODE_TO_MIME`` for the send side. Picks the
+# canonical ``audio_mode_str`` MeshChat sends in slot 0 of
+# ``FIELD_AUDIO = [audio_mode_str, audio_bytes]``. Where multiple
+# extensions map to the same MIME (opus / ogg / mp4 / mp3), the value
+# below is the one MeshChat's own recorder + player expect. Unknown
+# audio MIMEs return "" and the caller demotes the attachment to
+# ``FIELD_FILE_ATTACHMENTS`` rather than guessing.
+_MIME_TO_AUDIO_MODE = {
+    "audio/opus":       "opus",
+    "audio/ogg":        "ogg",
+    "audio/mpeg":       "mp3",
+    "audio/mp3":        "mp3",
+    "audio/wav":        "wav",
+    "audio/x-wav":      "wav",
+    "audio/wave":       "wav",
+    "audio/webm":       "webm",
+    "audio/mp4":        "m4a",
+    "audio/x-m4a":      "m4a",
+    "audio/aac":        "aac",
+    "audio/flac":       "flac",
+    "audio/x-flac":     "flac",
+}
+
+
+def _classify_attachment_kind(mime: str) -> str:
+    """MIME → outbound attachment kind. ``"image"`` if the browser
+    handed us an image the recipient can render inline, ``"audio"``
+    if likewise for audio, ``"file"`` otherwise. Falls through to
+    ``"file"`` for image/audio MIMEs the wire format can't carry
+    natively (e.g. ``image/heic`` — no MeshChat parser) so those
+    still transfer as a generic download rather than being dropped.
+    """
+    m = (mime or "").lower()
+    if m in _MIME_TO_IMAGE_EXT:
+        return "image"
+    if m in _MIME_TO_AUDIO_MODE:
+        return "audio"
+    return "file"
+
+
+def _channel_to_255(v):
+    """One color channel — accepts either an int already in 0-255
+    or a 0-1 float (Sideband's shape). Clamped to bounds either way.
+    """
+    if isinstance(v, bool):
+        return 255 if v else 0
+    if isinstance(v, int):
+        return max(0, min(255, v))
+    if isinstance(v, float):
+        return max(0, min(255, round(v * 255)))
+    return 128
+
+
+def _appearance_color_to_hex(value) -> str:
+    """LXMF FIELD_ICON_APPEARANCE color → '#rrggbb'. Two shapes exist
+    in the wild:
+
+    - MeshChat / this app: raw 3-byte ``bytes`` object, no alpha —
+      sent via ``bytes.fromhex(rrggbb)``.
+    - Sideband (LXMF library's reference client): a ``[r, g, b]`` or
+      ``[r, g, b, a]`` sequence of 0-1 floats. Its
+      DEFAULT_APPEARANCE is ``["account", [0,0,0,1], [1,1,1,1]]``.
+
+    Historically our converter only accepted the bytes shape, so
+    Sideband-users' colors rendered as a flat grey ``#888888``
+    circle. Ported from the ``python-core`` of the
+    NomadPortal-Android sister project, which hit this interop
+    failure explicitly. Unknown shapes still fall back to grey.
+    """
+    if isinstance(value, (bytes, bytearray)) and len(value) >= 3:
+        return "#%02x%02x%02x" % (value[0], value[1], value[2])
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        r, g, b = (_channel_to_255(value[i]) for i in range(3))
+        return "#%02x%02x%02x" % (r, g, b)
+    return "#888888"
+
+
 def _render_appearance_svg(name, fg, bg) -> tuple:
     """Render LXMF FIELD_ICON_APPEARANCE to (base64_svg, mime).
 
-    appearance is [icon_name, fg_color_bytes(3), bg_color_bytes(3)]. We produce
-    a 32×32 colored circle with the first letter of the icon name as a glyph
-    placeholder — material-symbol rendering would require shipping a webfont.
+    ``fg`` / ``bg`` are colors in either MeshChat's ``bytes(3)`` or
+    Sideband's ``[r,g,b]`` float shape (see
+    ``_appearance_color_to_hex``). Produces a 32×32 colored circle.
+
+    When ``name`` resolves against the real Material Design Icons
+    catalog (``mdi_icons.py`` — the same namespace Sideband/MeshChat
+    actually pick icon names from), draws the real icon shape inset
+    within the circle. Real MeshChat/Sideband contacts routinely send
+    genuine MDI names (``"hiking"``, ``"account-supervisor"``, ...), so
+    this is the common case, not the fallback — the previous behaviour
+    (always drawing just the icon name's first letter as text; a real
+    webfont would've been needed for anything richer) is now only the
+    degraded path for a name the catalog doesn't recognize, matching how
+    the NomadPortal-Android sister project resolved the same gap.
     """
     import base64
-    def _hex(c):
-        if isinstance(c, (bytes, bytearray)) and len(c) >= 3:
-            return "#%02x%02x%02x" % (c[0], c[1], c[2])
-        return "#888888"
-    fg_hex  = _hex(fg)
-    bg_hex  = _hex(bg)
-    initial = ((name[:1] if isinstance(name, str) else "") or "?").upper()
+    fg_hex = _appearance_color_to_hex(fg)
+    bg_hex = _appearance_color_to_hex(bg)
+
+    icon_path = mdi_icons.get_path(name) if isinstance(name, str) else None
+    if icon_path:
+        # MDI's own viewBox is 24x24; inset it to 20x20 centered in the
+        # 32x32 circle (6px margin each side) rather than edge-to-edge —
+        # matches the visual weight of a typical avatar-with-icon look.
+        glyph_svg = (
+            f'<g transform="translate(6,6) scale({20/24:.4f})">'
+            f'<path d="{icon_path}" fill="{fg_hex}"/></g>'
+        )
+    else:
+        initial = ((name[:1] if isinstance(name, str) else "") or "?").upper()
+        glyph_svg = (
+            f'<text x="16" y="22" text-anchor="middle" font-size="18" '
+            f'font-family="sans-serif" font-weight="bold" fill="{fg_hex}">{initial}</text>'
+        )
+
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
         f'<circle cx="16" cy="16" r="16" fill="{bg_hex}"/>'
-        f'<text x="16" y="22" text-anchor="middle" font-size="18" '
-        f'font-family="sans-serif" font-weight="bold" fill="{fg_hex}">{initial}</text>'
+        f'{glyph_svg}'
         '</svg>'
     )
     return base64.b64encode(svg.encode("utf-8")).decode("ascii"), "image/svg+xml"
 
 
 class MessagingService:
-    def __init__(self, storage_path: str, message_store=None, contact_store=None):
+    def __init__(self, storage_path: str, message_store=None,
+                 contact_store=None, attachment_store=None):
         self._storage        = storage_path
         self._msg_store      = message_store
         self._contact_mgr    = contact_store  # ContactStoreManager (param kept for compat)
+        # Blob store for inbound message attachments (images, audio,
+        # files). Optional so tests and older callers can construct
+        # without one; when None, inbound attachments are dropped
+        # (their metadata isn't recorded in the message entry).
+        # See ``docs/design/chat-uploads.md``.
+        self._attachments    = attachment_store
         self._lock           = threading.Lock()
         self._identity_store = None
         # user_sub -> {"router": LXMRouter, "dest": Destination}
@@ -160,6 +319,28 @@ class MessagingService:
                 identity_id[:16], registered.hexhash[:16],
                 user_sub[:16] if user_sub else "anon",
             )
+
+            # RNS path discovery is announce-based with no other mechanism —
+            # a destination that has never announced is unreachable by
+            # anyone, full stop. Without this, a brand-new identity (or one
+            # whose last announce has aged out of peers' routing tables)
+            # sat unreachable until the user discovered and clicked the
+            # manual Announce button themselves; a message sent to them in
+            # the meantime just failed after PATH_WAIT with no obvious
+            # reason why. This fires on every process restart too (routers
+            # are rebuilt in-memory on each boot via setup_delivery()/
+            # setup_user(), not just on first creation) — deliberately, not
+            # just for new identities: it doubles as the periodic
+            # re-announce that keeps an existing user's path from going
+            # stale on their peers' end. Best-effort; a failure here
+            # shouldn't take down router registration.
+            try:
+                router.announce(registered.hash)
+            except Exception as exc:
+                log.warning(
+                    "Bootstrap announce failed for %s: %s", identity_id[:16], exc,
+                )
+
             return data
 
         except Exception as exc:
@@ -213,6 +394,46 @@ class MessagingService:
         data = self._get_user_router(user_sub)
         return data["dest"].hexhash if data else None
 
+    def refresh_router_display_name(self, user_sub: str, name: str) -> None:
+        """Applies a rename to the *live* router's destination immediately
+        (if one is running for ``user_sub``), so an announce made right
+        after a rename doesn't still carry the old name.
+
+        Real bug, found on the NomadPortal-Android sister project via a
+        live on-device report ("the announce is sending out with the
+        hash and not the assigned name"), root-caused by reading
+        LXMRouter.py directly: ``LXMRouter.announce()`` does *not*
+        consult ``Destination.default_app_data`` — it always calls
+        ``delivery_destination.announce(app_data=
+        self.get_announce_app_data(destination_hash), ...)`` with an
+        explicit ``app_data`` argument that unconditionally wins.
+        ``get_announce_app_data()`` in turn reads the plain
+        ``delivery_destination.display_name`` attribute, set once at
+        ``register_delivery_identity(identity, display_name=...)`` time
+        (see ``_init_user_router()`` above) and never touched again by
+        anything short of this method. Without it, a rename persists to
+        disk correctly (identity_store.rename()) but never changes what
+        any *live* announce actually carries — mesh peers keep seeing
+        the identity's original name until the next full process
+        restart re-registers the delivery identity with the new
+        persisted name. ``display_name`` has no dedicated setter; this
+        is a plain attribute assignment, confirmed directly against
+        ``register_delivery_identity()``'s own body.
+
+        Best-effort and silent about "nothing to refresh": a no-op if no
+        live router exists yet for ``user_sub`` (e.g. renaming before
+        first login) isn't an error, just nothing to do — the next
+        ``_init_user_router()`` call picks up the new name from disk
+        regardless.
+        """
+        data = self._user_routers.get(user_sub)
+        if data is None:
+            return
+        try:
+            data["dest"].display_name = name
+        except Exception as exc:
+            log.warning("Renamed identity but couldn't update live display_name: %s", exc)
+
     def do_announce(self, user_sub: str = "") -> tuple[bool, str]:
         """Announce via the user's LXMRouter so app_data (display name) is included."""
         data = self._get_user_router(user_sub)
@@ -239,12 +460,23 @@ class MessagingService:
         content: str,
         title: str = "",
         user_sub: str = "",
+        attachments: Optional[list] = None,
     ) -> tuple[bool, str]:
+        """Queue an outbound LXMF message.
+
+        ``attachments`` is an optional list of dicts of the form
+        ``{"data": bytes, "filename": str, "mime": str}``. Callers
+        (currently the ``POST /api/messages`` multipart branch in
+        ``routes.py``) are responsible for enforcing per-attachment
+        and total-message size caps upstream; this layer trusts what
+        it's given and just persists / wire-formats it.
+        """
         return self._send(
             dest_hash_hex=dest_hash_hex,
             title=title,
             content=content,
             user_sub=user_sub,
+            attachments=attachments or None,
         )
 
     def sent_messages(self) -> list:
@@ -266,7 +498,23 @@ class MessagingService:
     # ------------------------------------------------------------------
 
     def _on_delivery(self, message, user_sub: str = "") -> None:
-        """Called by a user's LXMRouter when an inbound message arrives."""
+        """Called by a user's LXMRouter when an inbound message arrives.
+
+        Extracts contact-icon updates and message attachments from the
+        LXMF ``fields`` dict. Icon-vs-attachment split — see
+        ``docs/design/chat-uploads.md``:
+
+        - ``FIELD_ICON_APPEARANCE`` (0x04) is a vector descriptor and
+          is ALWAYS a contact-icon update (never an attachment).
+        - ``FIELD_IMAGE`` (0x06) is treated as a contact icon when the
+          message has no text content (announce-shaped delivery) and
+          as an inline image attachment when the message DOES have
+          text (chat-shaped delivery). Falsifies to receive-side
+          testing if this heuristic doesn't match MeshChat's actual
+          behaviour in the wild.
+        """
+        import base64
+
         source_hex = message.source_hash.hex() if message.source_hash else ""
         msg_id     = message.hash.hex()         if message.hash         else ""
 
@@ -275,20 +523,23 @@ class MessagingService:
                 return ""
             return val.decode("utf-8", errors="replace") if isinstance(val, bytes) else str(val)
 
-        # Extract icon from LXMF fields. Two formats are supported:
-        #   FIELD_ICON_APPEARANCE (0x04) = [icon_name_str, fg_bytes(3), bg_bytes(3)]
-        #     — the MeshChat vector-icon descriptor. Rendered server-side to an SVG.
-        #   FIELD_IMAGE          (0x06) = [image_type_str, image_bytes]
-        #     — a raw image. Stored directly with detected MIME type.
-        # Some older clients may also send raw bytes under 0x04; we accept that too.
+        title       = _decode(message.title)
+        content     = _decode(message.content)
+        has_content = bool(title.strip() or content.strip())
+
+        fields     = getattr(message, "fields", None) or {}
+        appearance = fields.get(0x04)  # FIELD_ICON_APPEARANCE
+        files      = fields.get(0x05)  # FIELD_FILE_ATTACHMENTS
+        image      = fields.get(0x06)  # FIELD_IMAGE
+        audio      = fields.get(0x07)  # FIELD_AUDIO
+
+        # --------------------------------------------------------------
+        # Contact-icon extraction (0x04 always icon; 0x06 icon-only when
+        # the message carries no text — announce-shaped delivery)
+        # --------------------------------------------------------------
         icon_b64  = None
         icon_mime = "image/png"
         try:
-            import base64
-            fields = getattr(message, "fields", None) or {}
-            appearance = fields.get(0x04)
-            image      = fields.get(0x06)
-
             if isinstance(appearance, list) and len(appearance) >= 3:
                 icon_b64, icon_mime = _render_appearance_svg(
                     appearance[0], appearance[1], appearance[2]
@@ -296,31 +547,127 @@ class MessagingService:
             elif isinstance(appearance, (bytes, bytearray)) and appearance:
                 icon_b64  = base64.b64encode(appearance).decode("ascii")
                 icon_mime = _detect_image_mime(appearance)
-            elif isinstance(image, list) and len(image) >= 2 and isinstance(image[1], (bytes, bytearray)):
+            elif (not has_content and isinstance(image, list)
+                    and len(image) >= 2
+                    and isinstance(image[1], (bytes, bytearray))):
+                # No text content → this FIELD_IMAGE is a contact icon.
                 icon_b64  = base64.b64encode(image[1]).decode("ascii")
                 ext = (image[0] or "").lower() if isinstance(image[0], str) else ""
-                icon_mime = {
-                    "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                    "png": "image/png",  "gif":  "image/gif",
-                    "webp":"image/webp", "svg":  "image/svg+xml",
-                }.get(ext, _detect_image_mime(image[1]))
+                icon_mime = _IMAGE_EXT_TO_MIME.get(ext, _detect_image_mime(image[1]))
         except Exception as exc:
             log.debug("Icon extraction skipped: %s", exc)
+
+        # --------------------------------------------------------------
+        # Attachment extraction (v1.3.0 steps 2 + 3). Each accepted
+        # field appends one or more entries to ``attachments`` and
+        # writes the blob under a per-message ``idx``. Ordering:
+        # image first (0x06), then files (0x05 — array of files), then
+        # audio (0x07). Matches MeshChat's own send-side ordering,
+        # which — while not a wire-protocol requirement — is what
+        # existing peers produce, so a chat-log rendered the same way
+        # in both apps looks the same.
+        # --------------------------------------------------------------
+        attachments = []
+        if has_content and self._attachments:
+            # FIELD_IMAGE (0x06) — single inline image
+            try:
+                if (isinstance(image, list) and len(image) >= 2
+                        and isinstance(image[1], (bytes, bytearray))):
+                    ext = (image[0] or "").lower() if isinstance(image[0], str) else ""
+                    mime = _IMAGE_EXT_TO_MIME.get(ext, _detect_image_mime(image[1]))
+                    filename = f"image.{ext}" if ext else "image"
+                    idx = len(attachments)
+                    self._attachments.write(msg_id, idx, filename, bytes(image[1]))
+                    attachments.append({
+                        "kind":     "image",
+                        "idx":      idx,
+                        "filename": filename,
+                        "mime":     mime,
+                        "size":     len(image[1]),
+                    })
+            except Exception as exc:
+                log.warning("Image attachment persist failed for %s: %s",
+                            msg_id[:16] if msg_id else "?", exc)
+
+            # FIELD_FILE_ATTACHMENTS (0x05) — array of [name, bytes]
+            # tuples. Each entry becomes its own attachment slot.
+            # Extension is derived from the sender's filename; mime is
+            # guessed by extension or falls back to
+            # ``application/octet-stream``.
+            if isinstance(files, list):
+                for f in files:
+                    try:
+                        if (not isinstance(f, (list, tuple))
+                                or len(f) < 2
+                                or not isinstance(f[1], (bytes, bytearray))):
+                            continue
+                        raw_name = f[0]
+                        filename = raw_name if isinstance(raw_name, str) else "file"
+                        # Extension → MIME. mimetypes.guess_type gives a
+                        # good default for most non-image, non-audio
+                        # types (pdf, txt, zip, docx, ...). Explicit
+                        # fallback so we always send a Content-Type.
+                        mime, _ = mimetypes.guess_type(filename)
+                        if not mime:
+                            mime = "application/octet-stream"
+                        idx = len(attachments)
+                        self._attachments.write(msg_id, idx, filename, bytes(f[1]))
+                        attachments.append({
+                            "kind":     "file",
+                            "idx":      idx,
+                            "filename": filename,
+                            "mime":     mime,
+                            "size":     len(f[1]),
+                        })
+                    except Exception as exc:
+                        log.warning("File attachment persist failed for %s: %s",
+                                    msg_id[:16] if msg_id else "?", exc)
+
+            # FIELD_AUDIO (0x07) — [audio_mode_str, audio_bytes].
+            # ``audio_mode`` is a codec/container identifier from the
+            # sender (MeshChat uses ``"opus"`` for its recordings).
+            # We map it to a real MIME so the recipient's <audio>
+            # element can decode. Unknown modes fall back to
+            # ``application/octet-stream`` so at minimum the byte
+            # can be downloaded, even if the browser can't play it.
+            try:
+                if (isinstance(audio, list) and len(audio) >= 2
+                        and isinstance(audio[1], (bytes, bytearray))):
+                    mode = (audio[0] or "").lower() if isinstance(audio[0], str) else ""
+                    mime = _AUDIO_MODE_TO_MIME.get(mode, "application/octet-stream")
+                    ext = _AUDIO_MODE_TO_EXT.get(mode, "")
+                    filename = f"audio.{ext}" if ext else "audio"
+                    idx = len(attachments)
+                    self._attachments.write(msg_id, idx, filename, bytes(audio[1]))
+                    attachments.append({
+                        "kind":     "audio",
+                        "idx":      idx,
+                        "filename": filename,
+                        "mime":     mime,
+                        "size":     len(audio[1]),
+                    })
+            except Exception as exc:
+                log.warning("Audio attachment persist failed for %s: %s",
+                            msg_id[:16] if msg_id else "?", exc)
 
         entry = {
             "id":          msg_id,
             "source":      source_hex,
-            "title":       _decode(message.title),
-            "content":     _decode(message.content),
+            "title":       title,
+            "content":     content,
             "received_at": time.time(),
             "read":        False,
             "owner":       user_sub,
         }
+        if attachments:
+            entry["attachments"] = attachments
 
         log.info(
-            "Received LXMF message from %s: %s",
+            "Received LXMF message from %s: %s (%d attachment%s)",
             source_hex[:16] if source_hex else "?",
             entry["title"] or "(no subject)",
+            len(attachments),
+            "" if len(attachments) == 1 else "s",
         )
 
         if self._msg_store:
@@ -335,8 +682,18 @@ class MessagingService:
         title: str,
         content: str,
         user_sub: str = "",
+        attachments: Optional[list] = None,
     ) -> tuple[bool, str]:
-        """Queue a message for background delivery and return immediately."""
+        """Queue a message for background delivery and return immediately.
+
+        ``attachments`` — see ``send_message`` docstring. Each item
+        gets persisted to the ``AttachmentStore`` under a slot index,
+        classified into ``FIELD_IMAGE`` / ``FIELD_AUDIO`` /
+        ``FIELD_FILE_ATTACHMENTS`` at wire-format time (see
+        ``_deliver`` below), and recorded in the sent-message
+        metadata so the sender's own chat log can render the same
+        bubbles the recipient sees.
+        """
         import uuid
 
         user_data = self._get_user_router(user_sub)
@@ -352,6 +709,39 @@ class MessagingService:
             return False, "Invalid destination hash"
 
         msg_id = str(uuid.uuid4())
+
+        # ------------------------------------------------------------------
+        # Persist attachment blobs before we start the delivery thread,
+        # while we still hold the raw bytes. On disk goes the payload;
+        # the ``attachments`` metadata list goes into ``messages.json``
+        # so the sent-tab chat-log renders each bubble with the same
+        # attachment chips the recipient will see.
+        # ------------------------------------------------------------------
+        att_meta: list[dict] = []
+        if attachments and self._attachments:
+            for a in attachments:
+                data = a.get("data") or b""
+                if not isinstance(data, (bytes, bytearray)):
+                    continue
+                filename = a.get("filename") or "file"
+                mime     = (a.get("mime") or "").lower() \
+                           or "application/octet-stream"
+                kind     = _classify_attachment_kind(mime)
+                idx      = len(att_meta)
+                try:
+                    self._attachments.write(msg_id, idx, filename, bytes(data))
+                except Exception as exc:
+                    log.warning("Outbound attachment persist failed for %s: %s",
+                                msg_id[:16], exc)
+                    continue
+                att_meta.append({
+                    "kind":     kind,
+                    "idx":      idx,
+                    "filename": filename,
+                    "mime":     mime,
+                    "size":     len(data),
+                })
+
         entry = {
             "id":      msg_id,
             "dest":    dest_hash_hex,
@@ -371,6 +761,8 @@ class MessagingService:
             "sent_at": time.time(),
             "owner":   user_sub,
         }
+        if att_meta:
+            entry["attachments"] = att_meta
         if self._msg_store:
             self._msg_store.save_sent(entry)
 
@@ -413,6 +805,52 @@ class MessagingService:
                             _hex_to_bytes(icon.get("fg", "#ffffff")),
                             _hex_to_bytes(icon.get("bg", "#5ba3c9")),
                         ]
+
+                # Attachments: route each persisted blob into the LXMF
+                # field the recipient expects for its kind. Ordering:
+                # image → FIELD_IMAGE (singleton — first one wins;
+                # additional images demoted to FIELD_FILE_ATTACHMENTS),
+                # audio → FIELD_AUDIO (singleton — same rule), rest →
+                # FIELD_FILE_ATTACHMENTS array. Matches MeshChat's own
+                # send-side structure so a two-image message shows
+                # image-one inline and image-two in the file chip list
+                # on both ends.
+                if att_meta and self._attachments:
+                    image_slot = None
+                    audio_slot = None
+                    file_slots = []
+                    for meta in att_meta:
+                        blob = self._attachments.read(msg_id, meta["idx"])
+                        if blob is None:
+                            log.warning(
+                                "Missing blob for outbound msg %s idx %d — "
+                                "skipping this attachment",
+                                msg_id[:8], meta["idx"],
+                            )
+                            continue
+                        kind = meta.get("kind")
+                        mime = meta.get("mime", "")
+                        name = meta.get("filename") or "file"
+                        if kind == "image" and image_slot is None:
+                            ext = _MIME_TO_IMAGE_EXT.get(mime.lower(), "")
+                            image_slot = [ext, blob]
+                        elif kind == "audio" and audio_slot is None:
+                            mode = _MIME_TO_AUDIO_MODE.get(mime.lower(), "")
+                            if mode:
+                                audio_slot = [mode, blob]
+                            else:
+                                # Unknown audio codec — demote to a file
+                                # attachment so at least the recipient
+                                # can download the bytes.
+                                file_slots.append([name, blob])
+                        else:
+                            file_slots.append([name, blob])
+                    if image_slot is not None:
+                        fields[0x06] = image_slot
+                    if audio_slot is not None:
+                        fields[0x07] = audio_slot
+                    if file_slots:
+                        fields[0x05] = file_slots
 
                 # Prefer OPPORTUNISTIC (single encrypted packet, no link needed).
                 # LXMessage automatically falls back to DIRECT if the content

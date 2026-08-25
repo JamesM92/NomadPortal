@@ -106,6 +106,51 @@
       background: none; border: none; cursor: pointer;
       color: var(--accent); font-size: 13px; padding: 0 2px; flex-shrink: 0;
     }
+
+    /* Same fix as #icon-picker-modal below, for a pre-existing instance
+       of the identical bug: an inline display:flex on #icon-editor beat
+       the browser's default [hidden]{display:none}, so the icon editor
+       panel was permanently visible (and its Cancel button inert) the
+       moment #sidebar-panel-messages itself became visible, regardless
+       of whether "Edit your icon" had actually been clicked. */
+    #icon-editor { display: flex; }
+    #icon-editor[hidden] { display: none; }
+
+    /* ---- Icon picker (search + category chips + icon grid) ---- */
+    /* display:flex as a real rule (not inline on the element) so
+       #icon-picker-modal[hidden]'s higher-specificity override below
+       actually wins — an inline style attribute would beat any CSS rule
+       targeting [hidden], including this one, and the modal would stay
+       visible (and un-closeable) regardless of the hidden attribute.
+       Exact same pattern #msg-modal above already uses correctly. */
+    #icon-picker-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #icon-picker-modal[hidden] { display: none; }
+    #icon-picker-categories {
+      display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
+      padding-bottom: 6px; margin-bottom: 4px; flex-shrink: 0;
+    }
+    .icon-picker-chip {
+      background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim);
+      font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
+      border-radius: 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    .icon-picker-chip:hover  { color: var(--text); border-color: var(--accent); }
+    .icon-picker-chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+    #icon-picker-grid {
+      flex: 1; overflow-y: auto; min-height: 220px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+      gap: 4px; align-content: start;
+    }
+    .icon-picker-item {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      border-radius: 3px; cursor: pointer; aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center; padding: 4px;
+    }
+    .icon-picker-item:hover { border-color: var(--accent); color: var(--accent); }
+    .icon-picker-item svg { width: 100%; height: 100%; display: block; }
   </style>
 </head>
 <body>
@@ -239,18 +284,22 @@
         <!-- Icon editor (hidden by default) -->
         <div id="icon-editor" hidden
              style="margin-top:8px;padding:8px;background:var(--bg3);border-radius:3px;
-                    display:flex;flex-direction:column;gap:6px;">
+                    flex-direction:column;gap:6px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span id="icon-editor-preview"
                   style="width:36px;height:36px;border-radius:50%;flex-shrink:0;"></span>
-            <div style="flex:1;display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-dim);">
-              <label style="display:flex;align-items:center;gap:6px;">
-                Letter
-                <input type="text" id="icon-glyph" maxlength="2"
-                       style="background:var(--bg);border:1px solid var(--border);color:var(--text);
-                              font-family:var(--font-mono);font-size:13px;padding:2px 6px;
-                              border-radius:2px;width:40px;text-align:center;outline:none;">
-              </label>
+            <div style="flex:1;display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--text-dim);">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <!-- Holds the real MDI icon name (e.g. "hiking"), or a
+                     short fallback string whose first char renders as a
+                     plain letter if it isn't a recognized MDI name — see
+                     _iconSvg()/mdi_icons.py's shared normalize/lookup. -->
+                <input type="hidden" id="icon-glyph" value="?">
+                <span id="icon-glyph-label"
+                      style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                <button type="button" id="btn-choose-icon" class="btn btn-sm btn-neutral"
+                        style="white-space:nowrap;">Choose icon…</button>
+              </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <label style="display:flex;align-items:center;gap:4px;">
                   Text <input type="color" id="icon-fg"
@@ -266,6 +315,30 @@
           <div style="display:flex;justify-content:flex-end;gap:6px;">
             <button id="btn-icon-cancel" class="btn btn-sm btn-neutral">Cancel</button>
             <button id="btn-icon-save"   class="btn btn-sm btn-primary">Save</button>
+          </div>
+        </div>
+
+        <!-- Icon picker modal — search + category chips over the real
+             Material Design Icons catalog (static/data/mdi_icons.json,
+             fetched lazily on first open — see _ensureMdiCatalog() in
+             app.js). Sits above icon-editor (z-index) since it opens
+             from within it. -->
+        <div id="icon-picker-modal" hidden>
+          <div class="modal-box" style="width:480px;max-width:95vw;max-height:82vh;
+                                         display:flex;flex-direction:column;padding:20px 22px;">
+            <div class="modal-title" style="margin-bottom:10px;">Choose an icon</div>
+            <input type="text" id="icon-picker-search" placeholder="Search icons…"
+                   spellcheck="false"
+                   style="background:var(--bg);border:1px solid var(--border);color:var(--text);
+                          font-family:var(--font-mono);font-size:13px;padding:6px 8px;
+                          border-radius:2px;outline:none;margin-bottom:8px;">
+            <div id="icon-picker-categories"></div>
+            <div id="icon-picker-grid"></div>
+            <div id="icon-picker-status"
+                 style="font-size:10px;color:var(--text-dim);margin-top:6px;min-height:12px;"></div>
+            <div class="modal-actions">
+              <button type="button" id="btn-icon-picker-cancel" class="btn-modal-cancel">Close</button>
+            </div>
           </div>
         </div>
 
@@ -323,7 +396,22 @@
           <div id="chat-log"></div>
           <div id="chat-compose">
             <input type="hidden" id="chat-dest-hidden">
+            <!-- Hidden file picker driven by the paperclip button below.
+                 accept="*/*" so the user can attach any file type; MIME
+                 routing (image → FIELD_IMAGE, audio → FIELD_AUDIO, else
+                 FIELD_FILE_ATTACHMENTS) happens server-side. -->
+            <input type="file" id="chat-attach-input" multiple hidden
+                   accept="image/*,audio/*,*/*">
+            <!-- Attachment chips list — one entry per staged attachment,
+                 with a × button to remove. Populated by _updateAttachChips. -->
+            <div id="chat-attach-list" hidden></div>
             <div class="chat-input-row">
+              <button id="btn-chat-attach"
+                      title="Attach file (image, audio, or any file — 500 KB cap)"
+                      style="background:none;border:none;font-size:16px;
+                             cursor:pointer;padding:2px 6px;color:var(--text-dim);">
+                📎
+              </button>
               <textarea id="chat-input" rows="2" placeholder="Message… (Enter to send)"></textarea>
               <button id="btn-chat-send">&#10140;</button>
             </div>

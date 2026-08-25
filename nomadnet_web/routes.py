@@ -1179,6 +1179,41 @@ def api_auth_status():
 # Messaging  (login required)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Chat attachment caps  (see docs/design/chat-uploads.md, "Locked decisions")
+# ---------------------------------------------------------------------------
+# LXMF is transported as RNS Resources; there's no hard protocol cap on
+# message size but transfer time on multi-hop mesh links makes multi-MB
+# payloads impractical. The 500 KB per-attachment / per-message cap
+# below is comfortable headroom over a well-compressed JPEG (~50-200
+# KB) or a ~90-second Opus voice note at 32 kbps (~360 KB), while
+# staying inside a handful of RNS packet round-trips on a healthy link.
+# Overridable via env var so operators on faster links can raise it,
+# or on slower links can tighten it. Same value gates both dimensions
+# so the semantics stay simple.
+
+def _attachment_max_bytes() -> int:
+    """Read the configured per-attachment / per-message attachment cap.
+
+    Env var ``LXMF_ATTACHMENT_MAX_BYTES`` overrides the 500 KB default
+    (524288). Bad values fall back to the default rather than crashing
+    request handling — an operator typo shouldn't wedge messaging.
+    """
+    import os
+    raw = os.environ.get("LXMF_ATTACHMENT_MAX_BYTES", "").strip()
+    if raw:
+        try:
+            n = int(raw)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    return 500 * 1024
+
+
+_MAX_ATTACHMENT_COUNT = 10
+
+
 @bp.post("/api/messages")
 @login_required
 def api_message_send():
@@ -1193,10 +1228,69 @@ def api_message_send():
         if ui and not ui.get_all().get("users_can_message", True):
             return jsonify({"error": "LXMF messaging is disabled by the administrator"}), 403
 
-    data      = request.get_json(silent=True) or {}
-    dest_hash = data.get("dest_hash", "")
-    title     = data.get("title", "")
-    content   = data.get("content", "")
+    # Two request shapes accepted:
+    #   1. Text-only (existing) — Content-Type: application/json,
+    #      body: {"dest_hash", "title", "content"}.
+    #   2. With attachments (v1.3.0 step 4) — Content-Type:
+    #      multipart/form-data with the same three text fields plus
+    #      one or more file parts named "attachments".
+    ct = (request.content_type or "").lower()
+    is_multipart = ct.startswith("multipart/form-data")
+
+    attachments = None
+
+    if is_multipart:
+        dest_hash = request.form.get("dest_hash", "")
+        title     = request.form.get("title", "")
+        content   = request.form.get("content", "")
+        files     = request.files.getlist("attachments")
+
+        if len(files) > _MAX_ATTACHMENT_COUNT:
+            return jsonify({
+                "error": f"too many attachments (max {_MAX_ATTACHMENT_COUNT})"
+            }), 413
+
+        cap = _attachment_max_bytes()
+        total = 0
+        parsed = []
+        for f in files:
+            if not f or not f.filename:
+                continue
+            data = f.read()
+            n = len(data)
+            if n > cap:
+                return jsonify({
+                    "error": (
+                        f"attachment '{f.filename}' is {n} bytes; "
+                        f"per-file cap is {cap}"
+                    )
+                }), 413
+            total += n
+            if total > cap:
+                return jsonify({
+                    "error": (
+                        f"total attachment size exceeds {cap} bytes"
+                    )
+                }), 413
+            # ``mimetype`` on FileStorage is the browser-supplied Content-Type
+            # from the multipart part. Trust it as a hint — the wire format
+            # doesn't care about MIME per se, only about which LXMF field
+            # slot to use, and the frontend's <input type="file"> gives us
+            # the browser's best guess. Fall back to octet-stream so an
+            # ancient client that omits the header still works.
+            parsed.append({
+                "data":     data,
+                "filename": f.filename,
+                "mime":     (f.mimetype or "application/octet-stream").lower(),
+            })
+
+        if parsed:
+            attachments = parsed
+    else:
+        data      = request.get_json(silent=True) or {}
+        dest_hash = data.get("dest_hash", "")
+        title     = data.get("title", "")
+        content   = data.get("content", "")
 
     if not dest_hash:
         abort(400, description="dest_hash is required")
@@ -1207,8 +1301,16 @@ def api_message_send():
     if len(content) > 65536:
         abort(400, description="content exceeds 64 KB")
 
+    # Reject empty sends — no text AND no attachments is not a message.
+    if not (content or "").strip() and not attachments:
+        abort(400, description="message must have content or an attachment")
+
     messaging = current_app.config["MESSAGING"]
-    ok, result = messaging.send_message(dest_hash, content, title=title, user_sub=current_user.id)
+    ok, result = messaging.send_message(
+        dest_hash, content,
+        title=title, user_sub=current_user.id,
+        attachments=attachments,
+    )
     if not ok:
         return jsonify({"error": result}), 503
     return jsonify({"ok": True, "message_id": result})
@@ -1245,6 +1347,74 @@ def api_conversation_delete(hash_hex: str):
     store = current_app.config.get("MESSAGE_STORE")
     removed = store.delete_conversation(hash_hex, owner=current_user.id) if store else 0
     return jsonify({"ok": True, "removed": removed})
+
+
+@bp.get("/api/messages/<msg_id>/attachments/<int:idx>")
+@login_required
+def api_message_attachment(msg_id: str, idx: int):
+    """Stream an inbound message's attachment blob.
+
+    Auth-gated to the message's owner — a peer can't guess a
+    (msg_id, idx) tuple to exfiltrate someone else's attachment
+    because the ownership check gates access. Bytes are served from
+    ``AttachmentStore`` (see ``docs/design/chat-uploads.md``);
+    ``messages.json`` carries only the metadata that lets us find
+    the right blob + emit the correct ``Content-Type``.
+    """
+    from flask import Response
+
+    msg_store = current_app.config.get("MESSAGE_STORE")
+    att_store = current_app.config.get("ATTACHMENT_STORE")
+    if msg_store is None or att_store is None:
+        abort(404)
+
+    # Find the message + verify ownership + verify the attachment slot
+    # is real. Scanning `received_messages()` is O(N=500) worst case;
+    # trivial for a message store this size and avoids a schema change
+    # to key messages by id.
+    uid = current_user.id
+    entry = next(
+        (m for m in msg_store.received_messages()
+         if m.get("id") == msg_id and m.get("owner") == uid),
+        None,
+    )
+    # Sent messages can also carry attachments once step 4 lands;
+    # allow the endpoint to serve them too for symmetry.
+    if entry is None:
+        entry = next(
+            (m for m in msg_store.sent_messages()
+             if m.get("id") == msg_id and m.get("owner") == uid),
+            None,
+        )
+    if entry is None:
+        abort(404)
+
+    atts = entry.get("attachments") or []
+    if idx < 0 or idx >= len(atts):
+        abort(404)
+    meta = atts[idx]
+
+    data = att_store.read(msg_id, idx)
+    if data is None:
+        # Message metadata says the attachment should exist but the
+        # blob is gone — inconsistent state (manual disk cleanup,
+        # corrupted store). Return 404 rather than a confusing 500.
+        log.warning("Attachment metadata but no blob: %s/%s", msg_id[:16], idx)
+        abort(404)
+
+    resp = Response(data, mimetype=meta.get("mime") or "application/octet-stream")
+    # Inline disposition so images render in-page rather than
+    # triggering a download. If we ever add a "download this
+    # attachment" button, that can call the same endpoint with a
+    # ``?download=1`` query param and swap to ``attachment``.
+    filename = meta.get("filename") or f"attachment-{idx}"
+    safe_ascii  = filename.encode("ascii", "replace").decode("ascii")
+    quoted_utf8 = urllib.parse.quote(filename, safe="")
+    resp.headers["Content-Disposition"] = (
+        f'inline; filename="{safe_ascii}"; filename*=UTF-8\'\'{quoted_utf8}'
+    )
+    resp.headers["Content-Length"] = str(len(data))
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -1292,9 +1462,30 @@ def api_identity_rename(identity_id: str):
     new_name = (data.get("name") or "").strip()
     if not new_name:
         return jsonify({"ok": False, "error": "Name is required"}), 400
-    if _id_store().rename(identity_id, new_name):
-        return jsonify({"ok": True})
-    return jsonify({"ok": False, "error": "Identity not found"}), 404
+
+    # Ownership check. IdentityStore.rename() itself has none — without
+    # this, identity_id being taken straight from the URL meant any
+    # logged-in user could rename *any other user's* LXMF identity just
+    # by knowing/obtaining its hex ID (visible in plenty of places: a
+    # message's source hash, a contact record, an admin panel). Only the
+    # owning user may rename their own identity; no admin feature relies
+    # on renaming someone else's (checked — nothing in admin_routes.py
+    # or the admin templates calls this route for another user).
+    entry = _id_store().get(identity_id)
+    if entry is None:
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+    if entry.get("user_sub") != current_user.id:
+        return jsonify({"ok": False, "error": "Not authorized to rename this identity"}), 403
+
+    if not _id_store().rename(identity_id, new_name):
+        return jsonify({"ok": False, "error": "Identity not found"}), 404
+
+    # Live-refresh so an announce made right after this doesn't still
+    # carry the old name — see MessagingService.refresh_router_display_name
+    # for the real bug this closes (a rename alone is dead code for any
+    # announce until the next process restart).
+    current_app.config["MESSAGING"].refresh_router_display_name(current_user.id, new_name)
+    return jsonify({"ok": True})
 
 
 _HEX24_RE = re.compile(r"^[0-9a-f]+$")

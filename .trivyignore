@@ -1,9 +1,43 @@
-# Trivy CVE allow-list — paired with .github/workflows/security.yml
+# Trivy image-vulnerability-scan exclusions — paired with
+# .github/workflows/security.yml (trivy job) and .hadolint.yaml (same
+# "document the exception, don't silence it blind" convention).
 #
-# Each entry below names a specific CVE that we've reviewed and decided
-# to accept rather than fix. Include the rationale so the next reviewer
-# knows whether the entry is still valid or needs revisiting.
+# Both entries below were investigated exhaustively, not waved through
+# to unblock a pipeline — see each entry's own rationale.
+
+# CVE-2025-47273 — reported as "setuptools 70.3.0" (fixed in 78.1.1).
 #
-# (Currently empty — CVE-2026-4878 retired in v0.9.24 when the base
-# image moved to python:3.14-slim / Debian 13, which ships the
-# patched libcap2.)
+# This does not correspond to anything actually present in the built
+# image. requirements.txt pins setuptools==83.0.0 (well past the fixed
+# version); `pip list`, `pip show`, and the build log all confirm
+# 83.0.0 is the only setuptools pip itself knows about. A four-round
+# diagnostic investigation (temporarily added to the Dockerfile,
+# removed once concluded — see the v1.3.0 release PR history for the
+# full trail) found:
+#   - No file anywhere on the filesystem with "setuptools" in its path
+#     outside the confirmed-clean setuptools-83.0.0 site-packages
+#     install (unrestricted `find /`, no -xdev, no path filter).
+#   - No dpkg-level python3-setuptools package (`dpkg -l` clean).
+#   - No occurrence of the literal string "70.3.0" in any file under
+#     site-packages/pip or site-packages/setuptools, nor in any
+#     METADATA/PKG-INFO/egg-info anywhere in the image.
+#   - `pip list` itself reports exactly one setuptools entry: 83.0.0.
+# Conclusion: a Trivy scanner/DB matching artifact, not a real
+# installed vulnerable copy. Re-investigate if this ever starts
+# showing a different "installed version" than 70.3.0, or if a
+# filesystem search someday does turn up a real match — that would
+# mean the situation changed and this exception no longer applies.
+CVE-2025-47273
+
+# GHSA-6v7p-g79w-8964 — msgpack 1.1.2 -> 1.2.1 (out-of-bounds read /
+# crash on Unpacker reuse after an error).
+#
+# Real, but not ours to bump directly: this is pip's own internal
+# vendored copy (site-packages/pip/_vendor/msgpack), used for pip's
+# own HTTP cache serialization, not exposed to this app's own
+# attacker-reachable input. pip 26.2.1 (what this image has) is the
+# current latest release on PyPI as of when this was checked — no
+# newer pip exists to bump to that might vendor a patched msgpack.
+# Re-evaluate whenever pip is next bumped in this Dockerfile/CI
+# tooling: if a newer pip vendors msgpack>=1.2.1, this entry can go.
+GHSA-6v7p-g79w-8964

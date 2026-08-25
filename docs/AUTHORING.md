@@ -140,6 +140,25 @@ Standard Micron link forms:
 
 The `|`-separated input names refer to the `name` attribute of `<...>` inputs above the link. NomadPortal tries to find each by exact match against `<input name="...">`.
 
+### The separator rule — this is the bug you will hit
+
+If your script needs to append its own parameter to a link that already has a field spec (a session token is the common case — NomadNet requests carry no cookies or headers you control, so a token has to travel in the link itself if you're building login/sessions on top of `remote_identity`), the separator you use depends on whether a field-spec section already exists on that link:
+
+```
+`[Label`url`tkn=abc123]              ← no existing field spec: backtick introduces it
+`[Label`url`action=save`tkn=abc123]  ← WRONG: a second backtick starts a new field-spec
+                                         section instead of extending the first — most
+                                         renderers only honor the first one
+`[Label`url`action=save|tkn=abc123]  ← RIGHT: pipe-separate within the existing section
+```
+
+Two failure modes, both real, both silent in the sense that nothing errors — the link just doesn't do what you wanted:
+
+- A `|` that appears **before** any backtick has introduced a field-spec section gets parsed as part of the *filename* — NomadNet answers "Page not found" for the whole link.
+- A link with **4 or more backtick-separated parts** breaks MeshChat's parser specifically (NomadNet itself tolerates it). If a link already carries a field spec and you need to add another parameter, join it with `|`, never with another backtick.
+
+The practical rule: count backticks before deciding. If the link body (everything before the closing `]`) already contains two backticks (label, url, and one field-spec section), your next parameter joins with `|`. Only reach for a third backtick if the link genuinely has no field spec yet.
+
 ## Debugging
 
 - **stdout** becomes the page body — what you `print()` is what users see.

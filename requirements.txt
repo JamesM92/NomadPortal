@@ -38,5 +38,22 @@ pyyaml==6.0.3
 gunicorn==26.0.0
 pytest==9.1.1
 
-# Renderer — published to PyPI from v1.0.7 onwards
-Micron2HTML==1.0.8
+# Renderer — published to PyPI from v1.0.7 onwards.
+# 1.1.1 adds NomadNet parity + restores the ``FT<6hex>`` /
+# ``BT<6hex>`` 24-bit exact-color escape (see the site examples
+# page for the demo and the portability caveat).
+Micron2HTML==1.1.1
+
+# Explicit pin, not an app dependency — the base image's ensurepip-
+# installed setuptools (70.3.0) carries CVE-2025-47273 (path
+# traversal). 78.1.1 fixes that one but pip-audit's broader OSV feed
+# flagged a second, newer issue (PYSEC-2026-3447 — MANIFEST.in
+# exclusions bypassed by Unicode NFC/NFD filename mismatches on
+# macOS APFS/HFS+, irrelevant to how we build/run but still flagged)
+# fixed only in 83.0.0 — verified clean with `pip-audit -r
+# requirements.txt` locally before pinning here. `pip install -r`
+# upgrades it in place; pinning through this file rather than a bare
+# Dockerfile `pip install --upgrade` keeps it under the same
+# version-bump discipline as every other dependency here instead of
+# floating unpinned.
+setuptools==83.0.0

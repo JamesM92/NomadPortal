@@ -1,11 +1,18 @@
-FROM python:3.14-slim-trixie@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
+FROM python:3.14-slim-trixie@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
 LABEL org.opencontainers.image.title="NomadPortal"
 LABEL org.opencontainers.image.description="Web browser for NomadNet nodes with LXMF messaging"
 LABEL org.opencontainers.image.source="https://github.com/JamesM92/NomadPortal"
 
 # System dependencies for Reticulum (cryptography / serial transports).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` pulls in Debian's own security-repo patches for
+# packages already baked into the base image (util-linux and friends —
+# CVE-2026-53612/-53613/-53614/-53615) that the next scheduled
+# python:3.14-slim-trixie rebuild hasn't picked up yet. Bumping the
+# pinned base-image digest alone isn't enough while that gap exists;
+# this is the standard "don't just trust the base image is fresh"
+# Docker hardening step, and belongs here regardless of digest churn.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       gcc \
       libssl-dev \
       openssl \
@@ -23,7 +30,17 @@ RUN groupadd -r -g 1000 nomadnet \
 
 WORKDIR /app
 
-# Install Python dependencies first (layer-cached)
+# Install Python dependencies first (layer-cached). requirements.txt
+# pins setuptools explicitly (see its own comment there) — the base
+# image's ensurepip-installed setuptools (70.3.0) carries CVE-2025-47273.
+# A plain `pip install -r requirements.txt` correctly resolves and
+# installs the pinned setuptools==83.0.0 into site-packages, confirmed
+# clean in the build log. Two Trivy findings that remain after this —
+# a phantom "setuptools 70.3.0" (no such version exists anywhere in
+# this image; see the diligence trail in .trivyignore) and pip's own
+# vendored msgpack copy (pip 26.2.1 is the current PyPI release, so
+# there's nothing newer to bump to) — are accepted-risk exceptions,
+# not overlooked. See .trivyignore for the full investigation.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

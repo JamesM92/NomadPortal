@@ -146,11 +146,18 @@ class IdentityStore:
     # ------------------------------------------------------------------
 
     def set_icon_appearance(self, identity_id: str, glyph: str, fg_hex: str, bg_hex: str) -> bool:
-        """Store the user's icon descriptor: a single-char glyph and two hex colors."""
+        """Store the user's icon descriptor: an icon glyph and two hex
+        colors. ``glyph`` is either a real Material Design Icons name
+        (kebab-case, e.g. ``"account-supervisor-outline"`` — up to 40
+        chars for the longest real MDI names, so 64 leaves headroom) or,
+        for a name the picker's search didn't match against the real
+        catalog, a short fallback string whose first character renders
+        as a plain letter glyph instead (see mdi_icons.py /
+        messaging.py's _render_appearance_svg)."""
         entry = self._data.get(identity_id)
         if not entry:
             return False
-        glyph  = (glyph or "?")[:8].strip() or "?"
+        glyph  = (glyph or "?")[:64].strip() or "?"
         fg_hex = _normalise_hex(fg_hex, "#ffffff")
         bg_hex = _normalise_hex(bg_hex, "#5ba3c9")
         entry["icon"] = {"glyph": glyph, "fg": fg_hex, "bg": bg_hex}

@@ -8,7 +8,7 @@ from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
 # visible in `docker logs` without needing `docker inspect`.
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 from .routes import bp
 from .cache import PageCache
 from .browser import NodeBrowser
@@ -18,6 +18,7 @@ from .identity_store import IdentityStore
 from .messaging import MessagingService
 from .lxmf_sync import PropagationSyncService
 from .message_store import MessageStore
+from .attachment_store import AttachmentStore
 from .contact_store import ContactStoreManager
 from .user_store import UserStore
 from .lxmf_tracker import LXMFPeerTracker
@@ -73,15 +74,23 @@ def create_app(
         """
         _deferred_rns_actions.append((name, fn))
 
-    msg_store = MessageStore(config_dir)
+    # Attachment blob store — holds message-attachment bytes on disk
+    # (images, audio, files) so ``messages.json`` doesn't inflate with
+    # base64-encoded blobs. Wired into MessageStore so eviction fires
+    # automatically on delete_conversation and MAX_MESSAGES overflow.
+    # See ``docs/design/chat-uploads.md`` for the full lifecycle.
+    att_store = AttachmentStore(config_dir)
+    msg_store = MessageStore(config_dir, attachment_store=att_store)
     con_store = ContactStoreManager(config_dir)
-    app.config["IDENTITY_STORE"] = IdentityStore(rns_dir)
-    app.config["MESSAGE_STORE"]  = msg_store
-    app.config["CONTACT_STORE"]  = con_store
+    app.config["IDENTITY_STORE"]   = IdentityStore(rns_dir)
+    app.config["MESSAGE_STORE"]    = msg_store
+    app.config["ATTACHMENT_STORE"] = att_store
+    app.config["CONTACT_STORE"]    = con_store
     messaging = MessagingService(
         storage_path=os.path.join(rns_dir, "lxmf"),
         message_store=msg_store,
         contact_store=con_store,
+        attachment_store=att_store,
     )
     app.config["MESSAGING"] = messaging
 
@@ -250,8 +259,15 @@ def create_app(
             x_host=1,
         )
 
-    # Request size cap — prevents oversized JSON/form bodies
-    app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB
+    # Request size cap — prevents oversized JSON/form bodies. Raised
+    # from 512 KB to accommodate chat-attachment multipart uploads:
+    # the design caps message attachments at 500 KB total (see
+    # docs/design/chat-uploads.md and _MAX_ATTACHMENT_TOTAL_BYTES in
+    # routes.py) but multipart form encoding adds ~1-2% overhead, plus
+    # the message body / title / boundary framing. 1 MB gives comfy
+    # headroom; the per-endpoint cap in routes.py still enforces the
+    # tighter 500 KB attachment rule.
+    app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # 1 MB
 
     https_mode = cfg.get("HTTPS_REDIRECT", False)
 

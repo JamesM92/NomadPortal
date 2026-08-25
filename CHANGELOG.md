@@ -7,6 +7,303 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-24
+
+### Added
+
+- **Real node/contact icons — identicon fallback + a Material Design
+  Icons picker for your own identity.** Ported from the NomadPortal-
+  Android sister project. Nodes and contacts with no
+  ``FIELD_ICON_APPEARANCE`` set now render a deterministic identicon
+  (GitHub/Columba-style symmetric dot grid keyed to the entity's
+  hash) instead of blank space, applied across the node list, the
+  LXMF peer (Users tab) list, and the conversation list.
+  ``FIELD_ICON_APPEARANCE`` itself now renders as a real icon shape
+  instead of just the first letter of the glyph name — the full
+  Material Design Icons catalog (~7400 icons, Apache-2.0, bundled as
+  ``static/data/mdi_icons.json`` / ``mdi_categories.json``) backs
+  both the server-side SVG render (``nomadnet_web/mdi_icons.py``,
+  ``messaging.py``'s ``_render_appearance_svg``) and a new client-
+  side icon picker (search + category chips) that replaces the old
+  2-character glyph text field for setting your own identity's icon.
+  A regex-allowlist validator on the SVG path data (client
+  ``_safeSvgPath``, a matching server-side pattern) closes the same
+  XSS-dataflow surface ``_safeHexColor`` already covers for colors.
+  15 new pytest cases cover the MDI catalog loader — including a
+  real UTF-8 BOM bug in the bundled file that the first test run
+  caught — and the appearance-SVG renderer's real-icon-vs-letter-
+  fallback behavior.
+
+- **Favoriting a node's home page before it's ever announced.**
+  Ported from the NomadPortal-Android sister project. Index-page
+  favorites (the node-list star) used to require a cached node
+  record to already exist, even though page bookmarks (path !=
+  ``/``) could already create one on the fly — so a node reached
+  only by a manually-typed or pasted address couldn't be starred
+  until it happened to announce first. A missing record is now
+  synthesized from the given name (falling back to the hash prefix);
+  an existing record's real announce data is never overwritten.
+  Also factors three separately hand-written 13-field node-record
+  dict literals into one ``_new_node_record()`` helper so the fields
+  can't drift out of sync between call sites. 9 new pytest cases in
+  ``tests/test_favorite_unannounced.py``.
+
+- **Outbound chat attachments — paperclip UI + multipart send**
+  (v1.3.0 step 4). Composer gains a 📎 button that opens a native
+  file picker (multi-select, ``image/*,audio/*,*/*``); staged
+  attachments render as chips with filename + size + × remove, plus
+  a live "N files, X KB / 500 KB" counter that turns red when the
+  cap is hit. Send switches transparently to ``multipart/form-data``
+  when any attachment is staged; text-only sends still use JSON.
+  Server (``POST /api/messages``) sniffs ``Content-Type`` and dual-
+  paths — new multipart branch enforces the 500 KB per-attachment /
+  per-message total cap AND the 10-attachment count cap; returns
+  413 with a specific error on overflow (no silent truncation).
+  Cap is overridable via the ``LXMF_ATTACHMENT_MAX_BYTES`` env var
+  (default 524288). ``MessagingService.send_message`` now accepts
+  ``attachments=[{data, filename, mime}, ...]``; each blob is
+  written to the ``AttachmentStore`` under the outbound msg_id
+  before the delivery thread starts (so a sender-side chat log can
+  render the bubble even if the RNS delivery fails). LXMF field
+  assembly at delivery time: MIME → kind (image / audio / file)
+  routes to ``FIELD_IMAGE`` (0x06) / ``FIELD_AUDIO`` (0x07) /
+  ``FIELD_FILE_ATTACHMENTS`` (0x05) — image and audio are
+  singletons, extras of either kind demote into the file array
+  (matches MeshChat's send-side structure). ``MAX_CONTENT_LENGTH``
+  raised 512 KB → 1 MB to accommodate the multipart envelope
+  around a 500 KB attachment; the tighter per-endpoint cap still
+  enforces the design's 500 KB rule. 16 new pytest cases cover
+  the MIME classifier, single/multi-kind persistence, missing-MIME
+  fallback, empty-list handling, non-bytes skip, and reverse-map
+  parity with the receive-side extension → MIME tables.
+
+- **Inbound file and audio attachments in chat** (v1.3.0 step 3).
+  ``_on_delivery`` now also extracts ``FIELD_FILE_ATTACHMENTS``
+  (0x05, array of ``[filename, bytes]`` tuples) and ``FIELD_AUDIO``
+  (0x07, ``[audio_mode_str, bytes]`` — MeshChat sends ``"opus"``,
+  ``"webm"``, ``"mp3"``, etc. as the codec identifier). Files land
+  with their original filename; audio lands as ``audio.<ext>`` with
+  the codec-derived MIME (``audio/opus``, ``audio/webm``, …) and
+  falls back to ``application/octet-stream`` for unknown codecs so
+  the download link still works. Malformed entries in the
+  file-array are skipped rather than crashing the receive path.
+  Frontend renders audio with ``<audio controls preload="none">``
+  and files as a 📎 download link with human-formatted byte size.
+  All three attachment kinds (image / file / audio) can coexist in
+  one message and are rendered in that order. 9 new pytest cases
+  cover single/multiple files, unknown extensions, malformed
+  entries, image+files+audio coexistence, and codec MIME mapping.
+
+- **Inbound image attachments in chat** (v1.3.0 step 2). When an
+  LXMF message arrives with a ``FIELD_IMAGE`` field AND has text
+  content (title or body), the image is persisted to the
+  ``AttachmentStore`` and rendered inline in the chat bubble.
+  Contact-icon path stays intact — ``FIELD_IMAGE`` without text
+  content is still treated as an icon-update announce.
+  ``FIELD_ICON_APPEARANCE`` (0x04) is always an icon regardless.
+  New endpoint ``GET /api/messages/<msg_id>/attachments/<idx>``
+  serves the blob with the correct ``Content-Type`` and
+  ``Content-Disposition: inline``; auth-gated to the message's
+  owner. Frontend renders images at ``max-width:100%;
+  max-height:300px`` inside the bubble with ``loading="lazy"`` so
+  scrolling a long history doesn't stampede the endpoint. Click
+  opens full-size in a new tab. 7 pytest cases cover the icon-vs-
+  attachment heuristic, MIME resolution (extension + byte-sniff
+  fallback), and the no-attachment-store code path.
+
+- **``AttachmentStore`` — on-disk blob store for LXMF message
+  attachments** (foundation for v1.3.0 chat file / image / audio
+  uploads; see ``docs/design/chat-uploads.md``). Bytes land on
+  disk under ``config/attachments/<msg_id>/<idx>.<ext>``;
+  ``messages.json`` keeps only lightweight metadata (kind /
+  filename / mime / size / disk path) so it doesn't inflate with
+  base64-encoded blobs (the same NAS/GIL pathology v0.9.x fixed
+  on the peer + node trackers). Store owns write/read/evict.
+  Wired into ``MessageStore`` so ``delete_conversation`` and the
+  silent ``MAX_MESSAGES`` overflow both evict the corresponding
+  blobs — no orphans accumulate. Path-traversal defenses on
+  untrusted ``msg_id`` / ``filename`` inputs: hex-only msg_id
+  sanitizer, whitelist-based extension check. 22 pytest cases
+  cover write/read/evict lifecycle, path-traversal defenses,
+  and MessageStore integration. Wiring only in this drop — no
+  UI, no LXMF-field integration yet; those land in the next
+  chat-uploads steps.
+
+- **`` `FT<6hex> `` / `` `BT<6hex> `` 24-bit exact-color demo on the
+  site examples page.** NomadNet's reference parser accepts these
+  for exact colors and Micron2HTML 1.1.1 restored the parser
+  branch (Micron2HTML dropped it in an earlier version citing
+  MeshChat compatibility). The examples page now shows the demo
+  with a "discouraged for general use" note in red — MeshChat
+  doesn't render the T-form and every byte counts on a mesh, so
+  the 3-hex `` `Fxxx `` shorthand remains the always-portable
+  default.
+
+- **Confirmation prompt before following an external (clearnet)
+  link in page content.** NomadNet page content is untrusted and
+  already HTML-escaped with no JS execution path, but a plain-text
+  link label can still claim to be anything while the ``href``
+  points off-mesh — a phishing-style mismatch a reader has no other
+  way to notice. Clicking an ``http(s)://`` link in rendered page
+  content now shows the real destination and asks for confirmation
+  before leaving the mesh.
+
+### Dependencies
+
+- **``Micron2HTML`` bumped 1.0.8 → 1.1.1** for the ``FT<6hex>``
+  parser and the NomadNet-parity table + anchor features that
+  landed in 1.1.0.
+
+- **Bump `python:3.14-slim-trixie` base image** to the latest digest
+  (``sha256:ce407646…``) and add an explicit ``apt-get upgrade`` to
+  the Dockerfile's system-deps layer. Fixes what Trivy was blocking
+  the v1.3.0 release PR on: ``util-linux`` / ``login`` /
+  ``libuuid1`` (CVE-2026-53612, -53613, -53614, -53615 — TOCTOU and
+  SUID-bypass issues in ``mount(8)``, plus an integer overflow in
+  ``libblkid``). Debian's security repo had already published these
+  patches, but the next scheduled base-image rebuild hadn't picked
+  them up yet — bumping the pinned digest alone wasn't enough, so
+  ``apt-get upgrade`` now pulls them directly at build time (see
+  ``.hadolint.yaml`` for the accompanying DL3005 exception and its
+  rationale). pip-audit / bandit / CodeQL all passed throughout.
+
+- **Pin `setuptools==83.0.0`** in ``requirements.txt`` (not an app
+  dependency — the base image's ensurepip-installed setuptools,
+  70.3.0, carries CVE-2025-47273, a path-traversal issue, fixed in
+  78.1.1). pip-audit's broader OSV feed then flagged a second, newer
+  issue at 78.1.1 (PYSEC-2026-3447, a Unicode-normalization MANIFEST.in
+  bypass on macOS APFS/HFS+, irrelevant to how this app builds/runs
+  but still flagged) fixed only in 83.0.0 — verified clean with
+  ``pip-audit -r requirements.txt`` locally before landing. Pinned
+  through this file rather than a bare Dockerfile ``pip install
+  --upgrade`` so it stays under the same version-bump discipline as
+  every other dependency here.
+
+- **New `.trivyignore`**, two entries, both investigated exhaustively
+  rather than waved through (see the file's own comments for the
+  full trail):
+
+  - ``CVE-2025-47273`` — Trivy kept reporting "setuptools 70.3.0"
+    even after the 83.0.0 pin above was confirmed as the only
+    setuptools ``pip list`` knows about. A four-round diagnostic
+    (unrestricted filesystem search, dpkg query, and a content grep
+    for the literal "70.3.0" string across pip's and setuptools's
+    entire site-packages trees) found no trace of that version
+    anywhere in the image — a Trivy matching artifact, not a real
+    installed copy.
+  - ``GHSA-6v7p-g79w-8964`` — a real finding, but not ours to fix
+    directly: pip's own vendored ``msgpack`` (1.1.2 → 1.2.1, used
+    for pip's internal HTTP cache, not attacker-reachable input).
+    pip 26.2.1 (what this image has) is the current latest PyPI
+    release — no newer pip exists yet that vendors a patched copy.
+
+### Fixed
+
+- **A favorited node's star became unclickable once its name grew
+  long enough.** ``.node-right`` (the star/pin/hops column) was
+  ``float: right`` beside a ``white-space: nowrap`` node name — a
+  float's reserved space isn't reliably excluded from nowrap text's
+  hit-testing box in every layout path, so a long enough name could
+  visually and interactively cover the star, and every tap landed on
+  the row's own navigate-to-node handler instead. Replaced the float
+  with a real flex row so the star keeps a fixed, always-clickable
+  width regardless of name length.
+
+- **Opening the node list or the Users (LXMF peer) tab was laggy on
+  an established mesh.** Both rendered every matched/sorted row into
+  the DOM unconditionally — thousands of rows on a mesh with a long
+  history. Ported the Android sister project's windowed-list
+  pattern: render only the most recent 50, with a "Show N more" row
+  (click, or scroll it into view) to load another page. The first
+  page stays live against new announces; loading a second page
+  freezes the window so already-scrolled-past rows don't reorder
+  underneath the reader.
+
+- **The messages tab felt laggy while a conversation was open.**
+  ``renderChatLog()`` unconditionally tore down and rebuilt every
+  chat bubble — including inline image/audio attachments — and
+  force-scrolled to the bottom on every poll cycle (every 15s while
+  the panel is open, plus a burst of follow-ups right after
+  sending). Now skips the rebuild when a poll brings back the exact
+  same messages, and only auto-scrolls when the reader was already
+  near the bottom, so a background refresh no longer yanks their
+  scroll position mid-read.
+
+- **Renaming your identity didn't update the name on future
+  announces.** ``LXMRouter.announce()`` reads the live
+  ``Destination.display_name`` set once at registration time, never
+  the persisted-to-disk value ``identity_store.rename()`` updates —
+  so a rename took effect in this app's own UI immediately, but any
+  announce sent afterward (including the bootstrap/reconnect
+  announce) kept broadcasting the old name to the mesh until the
+  next full process restart. ``MessagingService.
+  refresh_router_display_name()`` now pushes the new name onto the
+  live router's destination at rename time. 3 new pytest cases in
+  ``tests/test_refresh_router_display_name.py``.
+
+- **The top-left brand/logo didn't reliably navigate home when
+  clicked.** Its click handler was only wired up inside ``init()``'s
+  async boot sequence (auth state, UI settings, site info — up to
+  three sequential fetches), so a click landing before boot finished
+  did nothing. Moved the handler to attach synchronously at script
+  load, reading the current default/hosted hash live at click time
+  instead of a value captured once boot completed.
+
+- **New or restarted LXMF identities were unreachable until their
+  first outbound message.** RNS path discovery is announce-based
+  with no other mechanism — a destination that has never announced
+  is unreachable by anyone, including this app's own bootstrap/
+  reconnect flow. Registering a new identity (or restarting the
+  process) now sends an announce immediately after registration.
+  3 new pytest cases in ``tests/test_bootstrap_announce.py``.
+
+- **Hosted-site link establishment sometimes timed out even though
+  the announce reached the other side.**
+  ``set_proof_strategy(PROVE_ALL)`` on the hosted-site destination
+  was an unexplained deviation from NomadNet's own reference
+  ``Node.py`` (which sets no proof strategy at all, leaving RNS's
+  default ``PROVE_NONE``). Removed it — confirmed fixed by the
+  original reporter reaching the hosted site successfully
+  immediately after, on a build with no other change.
+
+- **Sideband-users' contact icons rendered as flat grey.** The
+  ``FIELD_ICON_APPEARANCE`` (0x04) color values can arrive in two
+  shapes in the wild: MeshChat and this app send raw ``bytes(3)``,
+  but Sideband (the LXMF library's reference client) sends
+  ``[r, g, b]`` (or ``[r, g, b, a]``) as 0-1 floats — its
+  ``DEFAULT_APPEARANCE`` is ``["account", [0,0,0,1], [1,1,1,1]]``.
+  Our converter only accepted the bytes shape; Sideband's float
+  sequence fell through to the ``#888888`` fallback, so every
+  Sideband-user's contact showed the same grey circle regardless
+  of their actual chosen colors. Adds ``_appearance_color_to_hex``
+  that handles both shapes and clamps out-of-range channels.
+  Ported from the ``python-core`` of the NomadPortal-Android
+  sister project, which hit this exact interop failure.
+
+  14 pytest cases cover the bytes shape, the float shape (with
+  and without alpha), grey fallback for unknown inputs, and the
+  channel clamping semantics — so the regression can't sneak
+  back in silently.
+
+### Security
+
+- **Identity rename had no ownership check.**
+  ``POST /api/identities/<id>/rename`` renamed any identity by ID
+  with no check that it belonged to the requesting user — any
+  logged-in user could rename another user's identity. Now returns
+  403 unless the identity's ``user_sub`` matches the current
+  session.
+
+### Docs
+
+- **README and the default hosted-site page rewritten in
+  Simplified Technical English (ASD-STE100).** Active voice, simple
+  tenses, no contractions, shorter sentences — every fact, URL,
+  environment variable, and config value preserved exactly. The
+  Micron Feature Showcase section and its ASCII art in
+  ``templates/site/index.mu`` are left untouched — it's a MeshChat
+  rendering-parity fixture, not prose.
+
 ## [1.2.0] - 2026-08-06
 
 **Mobile pass.** A round of fixes from actually operating NomadPortal on a

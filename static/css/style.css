@@ -295,14 +295,36 @@ body {
   padding: 7px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
+/* Node/favorite rows only (section headers and the placeholder row
+   don't carry data-hash) become a real flex row: .node-icon-row and
+   .node-right are both flex items now, not a float. A float let a long
+   node name visually overlap and intercept clicks meant for the star
+   button — the row's overflow:hidden clipped the *paint*, but the
+   float's reserved space wasn't reliably excluded from the nowrap
+   text's hit-testing box in every layout path (real repro: a long-
+   named favorited node whose star could never be clicked, every tap
+   landing on the row's own "navigate" handler instead). .node-right
+   keeps order:2 so it still renders on the right despite being first
+   in the DOM (see makeNodeItem's own comment for why it's inserted
+   first). */
+#node-list li[data-hash] { display: flex; align-items: flex-start; gap: 6px; }
 #node-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
 #node-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
-#node-list .node-name  { display: block; font-size: 13px; }
-#node-list .node-hash  { display: block; font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+/* Identicon + name/hash/age stack. flex:1 + min-width:0 is what lets it
+   shrink and actually hand its unclaimed space to .node-right instead
+   of pushing/overlapping it. */
+#node-list .node-icon-row { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; }
+#node-list .node-identicon { margin-top: 1px; flex-shrink: 0; }
+#node-list .node-text { min-width: 0; flex: 1; overflow: hidden; }
+#node-list .node-name  {
+  display: block; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#node-list .node-hash  {
+  display: block; font-size: 10px; color: var(--text-dim); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 #node-list .node-age   { display: block; font-size: 10px; color: var(--text-dim); }
 #node-list .node-hops  {
   display: block;
@@ -355,12 +377,17 @@ body {
   font-size: 12px;
 }
 
-/* Right-side stack: star (or pin) on top, hops badge below it */
+/* Right-side stack: star (or pin) on top, hops badge below it. A fixed-
+   width flex item now (not float:right — see li[data-hash]'s own
+   comment above), order:2 so it still lands on the right despite being
+   first in the DOM. flex-shrink:0 guarantees it never gets squeezed by
+   a long node name — it always has its own reserved, clickable space. */
 #node-list .node-right {
-  float: right;
   display: flex;
   flex-direction: column;
   align-items: center;
+  flex-shrink: 0;
+  order: 2;
   margin-left: 6px;
 }
 
@@ -377,6 +404,19 @@ body {
 .node-fav-btn:hover { color: var(--warn); }
 
 .node-placeholder { color: var(--text-dim); font-style: italic; font-size: 12px; }
+
+/* "Load N more" sentinel row — see _makeLoadMoreRow() in app.js. Shared
+   by the node list and the LXMF peer (Users tab) list. */
+.list-load-more {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.list-load-more:hover { color: var(--text); background: var(--bg3); }
+
 #node-list li.node-locked { opacity: 0.35; cursor: default; }
 #node-list li.node-locked:hover { background: transparent; }
 

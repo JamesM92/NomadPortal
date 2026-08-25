@@ -4,49 +4,61 @@
 [![Build](https://github.com/JamesM92/NomadPortal/actions/workflows/build.yml/badge.svg)](https://github.com/JamesM92/NomadPortal/actions/workflows/build.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-A web-based browser for [NomadNet](https://github.com/markqvist/NomadNet) nodes, packaged in Docker. Browse distributed NomadNet content, send LXMF messages, and manage identities — all from a standard web browser.
+A web-based browser for [NomadNet](https://github.com/markqvist/NomadNet) nodes, packaged in Docker. Browse distributed NomadNet content, send LXMF messages, and manage identities, all from a standard web browser.
 
-Built on [Reticulum](https://reticulum.network) and [LXMF](https://github.com/markqvist/LXMF).
+NomadPortal runs on [Reticulum](https://reticulum.network) and [LXMF](https://github.com/markqvist/LXMF).
 
 ![NomadPortal](docs/screenshot-loggedin.png)
 
 ## Disclaimer
 
-This software is provided **"as is"**, without warranty of any kind, express or implied. The author accepts **no risk and no liability** for any use, misuse, or consequences arising from the use of this project. Anyone who installs, runs, hosts, or otherwise uses this software does so **entirely at their own risk and on their own responsibility** — including but not limited to compliance with applicable laws, the content accessed or transmitted through it, and any harm resulting from its operation.
+This software is provided "as is," without warranty of any kind, express or implied. The author accepts no risk and no liability for any use, misuse, or consequence from this project.
+
+Anyone who installs, runs, hosts, or otherwise uses this software does so entirely at their own risk and on their own responsibility. This includes compliance with applicable laws, the content accessed or sent through it, and any harm from its operation.
 
 ## Project status — trial release
 
-NomadPortal is in **active trial-release development**. Features, configuration, and behaviour may shift between point releases as rough edges are smoothed out. Feedback, bug reports, and pull requests are welcome — please [open an issue](https://github.com/JamesM92/NomadPortal/issues) for anything you run into. A 1.0 release will follow once the major surfaces have settled.
+NomadPortal is in active trial-release development. Features, configuration, and behavior may change between releases while the project matures. Feedback, bug reports, and pull requests are welcome. [Open an issue](https://github.com/JamesM92/NomadPortal/issues) for any problem you find. A 1.0 release will follow once the main surfaces settle.
 
 ## Features
 
 - Browse NomadNet pages rendered from Micron markup to HTML
 - **File downloads from NomadNet nodes** with a confirm dialog showing
   filename, MIME type, real-time byte progress, and the source URL
-- **Optional virus scanning** for downloaded files via ClamAV (off by
-  default; flag-before-download confirm when no scan ran)
-- Send and receive LXMF messages, with per-user inboxes and per-user contact books
+- **Optional virus scanning** for downloaded files through ClamAV (off by
+  default. The app confirms with the user before download when no scan ran)
+- Send and receive LXMF messages, with a per-user inbox and a per-user
+  contact book
+- **Chat attachments** — attach images, audio, or files to outbound LXMF
+  messages with the 📎 button in the chat composer. Inbound images render
+  inline in the bubble, audio plays with the browser's `<audio>` control,
+  and files download as a link. The limit is 500 KB per attachment and per
+  message, overridable with `LXMF_ATTACHMENT_MAX_BYTES`. This matches
+  MeshChat's `FIELD_IMAGE` / `FIELD_AUDIO` / `FIELD_FILE_ATTACHMENTS` wire
+  format.
 - Manage RNS identities and announce to the mesh
 - Contact book with MeshChat icon support
-- Node discovery via Reticulum announces
-- Host a NomadNet node with auto-generated unique name
-  (`NomadPortal-<2 hex>`) — silent by default so vanilla installs don't
-  pollute the announce stream; operators publishing content opt in to
-  broadcasting
-- HTTPS with auto-generated self-signed certificate, with optional
+- Node discovery through Reticulum announces
+- Host a NomadNet node with an auto-generated unique name
+  (`NomadPortal-<2 hex>`). Silent by default, so a plain install does not
+  add noise to the announce stream. An operator who publishes content can
+  opt in to broadcasting.
+- HTTPS with an auto-generated self-signed certificate, with an optional
   HTTP→HTTPS redirector that survives port conflicts
 - Local username/password login or OIDC/SSO (Keycloak, Authentik, Auth0, Google)
 - Admin panel for interface configuration, user management,
-  diagnostics, and one-click **RNS state reset** for clearing a stale
+  diagnostics, and a one-click **RNS state reset** that clears a stale
   destination table
-- RNS-aware `/healthz` endpoint — Docker healthcheck reflects real
-  routing availability, not just "gunicorn is listening"
-- Micron-formatted application title with live preview
+- RNS-aware `/healthz` endpoint. The Docker healthcheck reflects real
+  routing availability, not just "gunicorn is listening."
+- Micron-formatted application title with a live preview
 - Node blocklist for operator abuse response
 - Mobile-responsive layout
 - Custom 404/500 error pages
 - Rate limiting and CSRF protection throughout
-- Path-based URLs — browser refresh preserves the current page, standard bookmarks work, and share-links copied from the URL bar reach the right node
+- Path-based URLs. A browser refresh preserves the current page, standard
+  bookmarks work, and a share-link copied from the URL bar reaches the
+  right node.
 
 ## Quick Start
 
@@ -69,7 +81,7 @@ ADMIN_PASSWORD: your-strong-password-here
 FLASK_SECRET_KEY: some-random-string-here
 ```
 
-> **Pre-built image** — every tagged release is also published to the GitHub Container Registry. The default `docker-compose.yml` already references `image: ghcr.io/jamesm92/nomadportal:latest`; pin a specific version like `:v0.9.4` for reproducible deployments. `git clone` is still the easiest way to get the docker-compose file and `config/` skeleton.
+> **Pre-built image** — every tagged release is also published to the GitHub Container Registry. The default `docker-compose.yml` already points at `image: ghcr.io/jamesm92/nomadportal:latest`. Pin a specific version, such as `:v0.9.4`, for a reproducible deployment. `git clone` is still the easiest way to get the docker-compose file and the `config/` skeleton.
 
 ### 2. Configure Reticulum interfaces
 
@@ -77,7 +89,7 @@ FLASK_SECRET_KEY: some-random-string-here
 cp config/config.yml.example config/config.yml
 ```
 
-Edit `config/config.yml` to enable the interfaces you want (TCP, LoRa via RNode, I2P, AutoInterface, etc.). All interfaces are disabled by default; set `enabled: true` on the ones you want, or use the **Admin → Settings** UI after first start. The Reticulum-side `config/reticulum/config` is regenerated from this file on every start, so don't edit it directly.
+Edit `config/config.yml` to enable the interfaces you want (TCP, LoRa through RNode, I2P, AutoInterface, etc.). All interfaces are disabled by default. Set `enabled: true` on the ones you want, or use the **Admin → Settings** UI after the first start. The Reticulum-side `config/reticulum/config` is regenerated from this file on every start, so do not edit it directly.
 
 ### 3. Start
 
@@ -85,7 +97,7 @@ Edit `config/config.yml` to enable the interfaces you want (TCP, LoRa via RNode,
 ./start.sh
 ```
 
-Then open **https://localhost:8443** in your browser. Accept the self-signed certificate warning. HTTP on port 8080 redirects automatically to HTTPS.
+Then open **https://localhost:8443** in your browser. Accept the self-signed certificate warning. HTTP on port 8080 redirects to HTTPS automatically.
 
 To rebuild after a code change:
 
@@ -101,7 +113,7 @@ To stream logs to the terminal instead of running in the background:
 
 ## Configuration
 
-All options are set via environment variables in `docker-compose.yml`.
+All options are set through environment variables in `docker-compose.yml`.
 
 ### Core
 
@@ -129,7 +141,7 @@ All options are set via environment variables in `docker-compose.yml`.
 | `TRUSTED_PROXIES` | `0` | Number of upstream proxy hops to trust for `X-Forwarded-For`. Set to `1` when behind nginx/Caddy |
 | `HTTPS_REDIRECT` | `false` | Set to `true` when TLS is terminated by a reverse proxy and you want the app to redirect HTTP → HTTPS at the application layer |
 | `WEB_PORT` | `8080` | The plain-HTTP port. When `WEB_PORT_HTTPS` is also set, this port runs an HTTP→HTTPS redirector. When `WEB_PORT_HTTPS` is empty, this is the main port and gunicorn binds **plain HTTP** here (use behind a reverse proxy). |
-| `WEB_PORT_HTTPS` | `8443` | The TLS port. When set, gunicorn binds HTTPS here and the entrypoint auto-generates a self-signed cert if `/config/ssl/cert.pem` doesn't exist. Set to `""` (empty) to disable TLS and run plain HTTP only. |
+| `WEB_PORT_HTTPS` | `8443` | The TLS port. When set, gunicorn binds HTTPS here and the entrypoint auto-generates a self-signed cert if `/config/ssl/cert.pem` does not exist. Set to `""` (empty) to disable TLS and run plain HTTP only. |
 
 ### OIDC / SSO
 
@@ -142,9 +154,9 @@ All options are set via environment variables in `docker-compose.yml`.
 | `OIDC_ALLOWED_SUBJECTS` | Comma-separated subject claim allowlist |
 | `OIDC_ADMIN_EMAILS` | Comma-separated list of admin emails |
 | `OIDC_ADMIN_SUBJECTS` | Comma-separated list of admin subject claims |
-| `OIDC_INSECURE_SKIP_VERIFY` | `true`/`false` — when `true`, NomadPortal skips TLS verification **for the OIDC provider's hostname only**. Use ONLY for trusted-LAN setups with a self-signed Authentik/Keycloak. Logs a warning at startup. |
+| `OIDC_INSECURE_SKIP_VERIFY` | `true`/`false` — when `true`, NomadPortal skips TLS verification **for the OIDC provider's hostname only**. Use this only for a trusted-LAN setup with a self-signed Authentik/Keycloak. Logs a warning at startup. |
 
-> If both `OIDC_ADMIN_EMAILS` and `OIDC_ADMIN_SUBJECTS` are empty, OIDC users log in as **non-admins** by default. Use the local admin account (`ADMIN_PASSWORD`) to bootstrap, then promote users from the Users page or set the env-var allowlists. The local admin user is always admin.
+> If both `OIDC_ADMIN_EMAILS` and `OIDC_ADMIN_SUBJECTS` are empty, OIDC users log in as **non-admins** by default. Use the local admin account (`ADMIN_PASSWORD`) to bootstrap, then promote users from the Users page, or set the env-var allowlists. The local admin user is always admin.
 
 **Discovery URL examples:**
 
@@ -157,27 +169,27 @@ All options are set via environment variables in `docker-compose.yml`.
 
 ### Setting up Authentik (walkthrough)
 
-1. **Create the Provider.** *Applications → Providers → Create → OAuth2/OpenID Provider*. Client type **Confidential**, copy the auto-generated Client ID and Client Secret. **Redirect URIs** must include `https://<your-nomadportal-host>/auth/callback` (one per line in Strict mode, or use Regex mode for multiple hosts).
-2. **Create the Application.** *Applications → Applications → Create*. Set **Provider** to the one above; the **Slug** becomes part of the discovery URL.
-3. **Get the Discovery URL.** Authentik shows it on the provider page as the "OpenID Configuration URL". Paste the full URL into `OIDC_DISCOVERY_URL`.
+1. **Create the Provider.** *Applications → Providers → Create → OAuth2/OpenID Provider*. Set client type to **Confidential**, then copy the auto-generated Client ID and Client Secret. **Redirect URIs** must include `https://<your-nomadportal-host>/auth/callback` (one per line in Strict mode, or Regex mode for multiple hosts).
+2. **Create the Application.** *Applications → Applications → Create*. Set **Provider** to the one above. The **Slug** becomes part of the discovery URL.
+3. **Get the Discovery URL.** Authentik shows it on the provider page as the "OpenID Configuration URL." Paste the full URL into `OIDC_DISCOVERY_URL`.
 4. **Paste credentials** into `docker-compose.yml` (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_DISCOVERY_URL`).
 5. **Set a stable `FLASK_SECRET_KEY`** (`openssl rand -hex 32`) so sessions survive restarts.
-6. Restart NomadPortal and click **Sign in** — you'll be redirected to Authentik for login.
+6. Restart NomadPortal and click **Sign in**. Authentik then redirects you back after login.
 
-If your Authentik runs on a self-signed cert (default Docker install on port 9443), set `OIDC_INSECURE_SKIP_VERIFY: "true"` for trusted-LAN setups, or import Authentik's CA into the NomadPortal container for a stricter setup.
+If your Authentik runs on a self-signed cert (the default for a Docker install on port 9443), set `OIDC_INSECURE_SKIP_VERIFY: "true"` for a trusted-LAN setup, or import Authentik's CA into the NomadPortal container for a stricter setup.
 
 Common pitfalls:
-- **`redirect_uri_mismatch`** → the redirect URI registered in Authentik must exactly match what NomadPortal sends (including scheme). Behind a reverse proxy, set `TRUSTED_PROXIES: "1"` and `HTTPS_REDIRECT: "true"` so URLs come out as `https://`.
-- **`certificate verify failed: self-signed certificate`** → see `OIDC_INSECURE_SKIP_VERIFY` above.
-- **Stuck logged-out after a restart** → `FLASK_SECRET_KEY` is empty or changing.
+- **`redirect_uri_mismatch`** — the redirect URI registered in Authentik must exactly match what NomadPortal sends, including the scheme. Behind a reverse proxy, set `TRUSTED_PROXIES: "1"` and `HTTPS_REDIRECT: "true"` so URLs come out as `https://`.
+- **`certificate verify failed: self-signed certificate`** — see `OIDC_INSECURE_SKIP_VERIFY` above.
+- **Stuck logged out after a restart** — `FLASK_SECRET_KEY` is empty or keeps changing.
 
 ## Using a reverse proxy
 
-If you run NomadPortal behind nginx, Caddy, or similar:
+If you run NomadPortal behind nginx, Caddy, or a similar proxy:
 
-1. Set `TRUSTED_PROXIES: "1"` so client IPs are read from `X-Forwarded-For`
-2. Set `HTTPS_REDIRECT: "true"` if you want the app to redirect plain HTTP
-3. The self-signed certificate from the entrypoint is only used for direct access — your proxy can terminate TLS with its own certificate instead
+1. Set `TRUSTED_PROXIES: "1"` so client IPs are read from `X-Forwarded-For`.
+2. Set `HTTPS_REDIRECT: "true"` if you want the app to redirect plain HTTP.
+3. The self-signed certificate from the entrypoint is only for direct access. Your proxy can terminate TLS with its own certificate instead.
 
 Example Caddy snippet:
 
@@ -193,13 +205,13 @@ nomadnet.example.com {
 
 ## Running behind a VPN (Gluetun, WireGuard, etc.)
 
-When NomadPortal reaches Reticulum hubs through a VPN with an MTU smaller than 1500, TCP connections can silently blackhole after ~30–60 s: fetches work briefly after a container restart, then every subsequent fetch times out with "No response from node" or "Link closed before response". At the RNS level the interface logs `Connection reset by peer` and reconnects, works briefly, dies again. Nothing in Reticulum or the application code is broken — it's straight path-MTU-discovery blackhole, or fragmentation from Reticulum's default TCP hardware-MTU (8192) writing chunks the tunnel can't carry.
+When NomadPortal reaches Reticulum hubs through a VPN with an MTU under 1500, TCP connections can silently blackhole after about 30–60 seconds. Fetches work right after a container restart, then every later fetch times out with "No response from node" or "Link closed before response." At the RNS level, the interface logs `Connection reset by peer`, reconnects, works briefly, and dies again. Nothing in Reticulum or the application code is broken. This is a path-MTU-discovery blackhole, or fragmentation from Reticulum's default TCP hardware-MTU (8192) writing chunks the tunnel cannot carry.
 
-Two different setups produce this, with two different fixes:
+Two different setups cause this, each with its own fix:
 
 ### Setup A — container NOT sharing a VPN namespace (default docker bridge, VPN upstream on host)
 
-The container's `eth0` is at MTU 1500 (docker default). Traffic leaves the container, hits the host's VPN interface with a smaller MTU, packets stall. Fix by matching the docker network MTU to whatever the upstream VPN uses:
+The container's `eth0` sits at MTU 1500 (the Docker default). Traffic leaves the container, hits the host's VPN interface at a smaller MTU, and packets stall. Fix this by matching the docker network MTU to whatever the upstream VPN uses:
 
 ```yaml
 services:
@@ -214,11 +226,11 @@ networks:
       com.docker.network.driver.mtu: 1280   # match your VPN's actual MTU
 ```
 
-Or share a VPN container's namespace directly — the same option as Setup B below, which sidesteps the docker-network-MTU dance entirely.
+Or share a VPN container's namespace directly. This is the same option as Setup B below, and it avoids the docker-network-MTU adjustment entirely.
 
-### Setup B — container IS sharing a VPN namespace (e.g., `network_mode: "container:gluetun"`) with a low-MTU tunnel
+### Setup B — container IS sharing a VPN namespace (for example, `network_mode: "container:gluetun"`) with a low-MTU tunnel
 
-Here the tunnel interface (`tun0` / `wg0`) is inside the container's namespace but its MTU is low — many providers land in the 1170–1300 range on WireGuard. Even with MSS clamping active, Reticulum's default 8192 hardware-MTU produces payloads that get fragmented at the tunnel. Fix by constraining Reticulum itself:
+Here the tunnel interface (`tun0` / `wg0`) sits inside the container's namespace, but its MTU is low. Many providers land in the 1170–1300 range on WireGuard. Even with MSS clamping active, Reticulum's default 8192 hardware-MTU produces payloads that get fragmented at the tunnel. Fix this by constraining Reticulum itself:
 
 ```yaml
 interfaces:
@@ -230,7 +242,7 @@ interfaces:
       fixed_mtu: 1000     # ← under whatever your tun MTU is
 ```
 
-`fixed_mtu: 1000` is a safe default under any tunnel MTU ≥ 1100 (leaves room for IP + TCP + IFAC headers). If throughput matters and your tunnel MTU is comfortably higher, you can raise it — as a rule of thumb, `tunnel_mtu − 80` is a good ceiling. Set per-`tcp_clients` entry so hubs reached via different paths can be tuned independently.
+`fixed_mtu: 1000` is a safe default under any tunnel MTU of 1100 or more (it leaves room for IP, TCP, and IFAC headers). If throughput matters and your tunnel MTU runs comfortably higher, you can raise it. As a rule of thumb, `tunnel_mtu − 80` is a good ceiling. Set this per `tcp_clients` entry, so hubs reached over different paths can be tuned independently.
 
 ### Diagnosing which setup you have
 
@@ -246,13 +258,13 @@ done
 awk 'NR==1 || $2=="00000000"' /proc/net/route
 ```
 
-If you see a `tun0` / `wg0` interface at MTU < 1400, you're in **Setup B**. If you see only `eth0` at MTU 1500 and the default route goes through it, you're in **Setup A**.
+If you see a `tun0` / `wg0` interface at MTU under 1400, you have **Setup B**. If you see only `eth0` at MTU 1500 and the default route runs through it, you have **Setup A**.
 
-`entrypoint.sh` runs this check at boot and prints a warning matched to whichever setup it detects. Silence with `NOMADPORTAL_SKIP_MTU_WARNING=true` on deployments where neither shape applies.
+`entrypoint.sh` runs this check at boot and prints a warning that matches whichever setup it detects. Silence it with `NOMADPORTAL_SKIP_MTU_WARNING=true` on a deployment where neither shape applies.
 
 ## SSL certificate
 
-On first start, `entrypoint.sh` generates a self-signed RSA-2048 certificate at `/config/ssl/cert.pem` (valid 10 years). To use your own certificate, place `cert.pem` and `key.pem` in `config/ssl/` before starting.
+On the first start, `entrypoint.sh` generates a self-signed RSA-2048 certificate at `/config/ssl/cert.pem`, valid for 10 years. To use your own certificate, place `cert.pem` and `key.pem` in `config/ssl/` before starting.
 
 ## Hosting a NomadNet site
 
@@ -260,17 +272,17 @@ NomadPortal can run as a full NomadNet node, serving your own pages and files to
 
 ### Quick setup
 
-1. Add your pages to `./site/pages/` — create at least `index.mu` as your home page
-2. Optionally add downloadable files to `./site/files/`
+1. Add your pages to `./site/pages/`. Create at least `index.mu` as your home page.
+2. Optionally, add downloadable files to `./site/files/`.
 3. Set your node name in `docker-compose.yml`:
    ```yaml
    SITE_NAME: "My Node"
    ```
-4. Start (or restart) the container
+4. Start, or restart, the container.
 
-The node is detected automatically when `./site/pages/` exists. No extra flag needed.
+NomadPortal detects the node automatically when `./site/pages/` exists. No extra flag is needed.
 
-When hosting is active, the web UI automatically loads your site's home page (`index.mu`) for all visitors instead of the default welcome screen.
+When hosting is active, the web UI loads your site's home page (`index.mu`) for every visitor automatically, instead of the default welcome screen.
 
 ### Site structure
 
@@ -304,17 +316,17 @@ Welcome to my node on the mesh.
 
 ### Executable pages
 
-Pages with the execute bit set (`chmod +x`) are run as scripts. The script's stdout is served as the page content. Useful for dynamic content. Available environment variables:
+A page with the execute bit set (`chmod +x`) runs as a script. The script's stdout serves as the page content. This is useful for dynamic content. Available environment variables:
 
 | Variable | Value |
 |----------|-------|
 | `node_destination` | This node's destination hex hash |
-| `link_id` | Hex ID of the RNS link (unset for local browse from the node owner) |
+| `link_id` | Hex ID of the RNS link (unset for local browsing by the node owner) |
 | `remote_identity` | Hex hash of the requesting identity (set if identified, including for local NomadPortal users) |
 | `field_*` / `var_*` | Form field values submitted with the request |
-| `PYTHONPATH` | `/site/lib` so packages from `requirements.txt` import |
+| `PYTHONPATH` | `/site/lib`, so packages from `requirements.txt` import |
 
-For a deeper walkthrough — env vars, form handling, persistence, the trust model — see [docs/AUTHORING.md](docs/AUTHORING.md).
+For a deeper walkthrough of env vars, form handling, persistence, and the trust model, see [docs/AUTHORING.md](docs/AUTHORING.md).
 
 ### Adding Python packages
 
@@ -327,17 +339,18 @@ psycopg2-binary>=2.9
 
 On the next container start, the entrypoint runs
 `pip install --target /site/lib -r site/requirements.txt`. Packages persist
-across restarts; first install is slower (download), subsequent starts skip
-already-satisfied entries. Executable `.mu` pages can `import` them directly
-because `PYTHONPATH=/site/lib` is exported.
+across restarts. The first install is slower, since it downloads the
+packages. Later starts skip entries that are already satisfied. An
+executable `.mu` page can `import` these packages directly, because
+`PYTHONPATH=/site/lib` is exported.
 
 For local persistence in your scripts, use `site/data/` and Python's stdlib
-`sqlite3` — no install needed. For external databases, add the driver to
+`sqlite3`. No install is needed. For an external database, add the driver to
 `requirements.txt` and connect over the host network.
 
 ### Node identity
 
-The node's RNS identity (and thus its mesh address) is stored at `config/reticulum/site_identity.id` and persists across container restarts. The node re-scans the pages/files directories every 5 minutes. Announces are **off by default** (vanilla installs don't broadcast) — flip `SITE_ANNOUNCE=true` to publish to the mesh every 6 hours, or use Admin → Dashboard → "Announce now" for a one-shot.
+The node's RNS identity, and so its mesh address, is stored at `config/reticulum/site_identity.id` and persists across container restarts. The node re-scans the pages and files directories every 5 minutes. Announces are **off by default**, so a plain install does not broadcast. Set `SITE_ANNOUNCE=true` to publish to the mesh every 6 hours, or use Admin → Dashboard → "Announce now" for a one-time announce.
 
 ### Environment variables
 
@@ -349,11 +362,11 @@ The node's RNS identity (and thus its mesh address) is stored at `config/reticul
 | `SITE_HOSTING` | `true` | Set `false` to disable hosting entirely (pure browser mode — no destination registered, no served pages) |
 | `SITE_ANNOUNCE` | `false` | Set `true` to broadcast the node's existence to the mesh every 6 hours. Off by default to keep readers off the announce stream. The "Announce now" button always works regardless. |
 
-### File downloads & virus scanning
+### File downloads and virus scanning
 
-Clicking a `/file/` link on a NomadNet page opens a confirm dialog (filename, MIME type, source URL), then transfers the file asynchronously with byte-level progress reporting. Once the transfer completes, the browser's native save dialog opens.
+Clicking a `/file/` link on a NomadNet page opens a confirm dialog showing the filename, MIME type, and source URL, then transfers the file with byte-level progress reporting. Once the transfer completes, the browser's native save dialog opens.
 
-NomadPortal can optionally scan files through ClamAV before they reach the user. Off by default — the frontend pops a *"no virus scan was performed"* confirm before saving so users are explicitly informed. Enable by setting `VIRUS_SCAN=clamd` (or `required` for fail-closed) and pointing at a clamd instance.
+NomadPortal can scan files through ClamAV before they reach the user. This is off by default. When it is off, the frontend confirms with the user that *"no virus scan was performed"* before saving. To turn it on, set `VIRUS_SCAN=clamd` (or `required` to fail closed) and point at a clamd instance.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -361,7 +374,7 @@ NomadPortal can optionally scan files through ClamAV before they reach the user.
 | `CLAMD_SOCKET` | `/var/run/clamav/clamd.ctl` | Unix socket path. Empty when using TCP. |
 | `CLAMD_HOST` | *(unset)* | clamd hostname or docker-compose service name (e.g. `clamav`). Mutually exclusive with `CLAMD_SOCKET`. |
 | `CLAMD_PORT` | `3310` | clamd TCP port |
-| `VIRUS_SCAN_MAX_BYTES` | `104857600` | Files larger than this are passed through without scanning (verdict: `too-large`); the no-scan confirm still fires |
+| `VIRUS_SCAN_MAX_BYTES` | `104857600` | Files larger than this pass through without scanning (verdict: `too-large`). The no-scan confirm still fires |
 
 Two common deployment shapes:
 
@@ -408,14 +421,14 @@ Docker container
 
 ## Development
 
-Run directly without Docker (requires Reticulum and dependencies installed):
+Run directly without Docker (this needs Reticulum and its dependencies installed):
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-For a more turnkey native dev loop with persistent state and venv handling:
+For a more complete native dev loop with persistent state and venv handling:
 
 ```bash
 ./run-local.sh                           # http://127.0.0.1:8080 with empty config
@@ -424,21 +437,21 @@ FRESH_CONFIG=1 ./run-local.sh            # wipe and start over
 PORT=9000 LOG_LEVEL=INFO ./run-local.sh  # custom port / quieter logs
 ```
 
-CI runs a Docker image build on every push and pull request — see [.github/workflows/build.yml](.github/workflows/build.yml). Tests for the Micron rendering library live in the [Micron2HTML](https://github.com/JamesM92/Micron2HTML) repository.
+CI runs a Docker image build on every push and pull request. See [.github/workflows/build.yml](.github/workflows/build.yml). Tests for the Micron rendering library live in the [Micron2HTML](https://github.com/JamesM92/Micron2HTML) repository.
 
 ### Operational endpoints
 
-- **`/healthz`** — returns 200 when at least one RNS interface is online, 503 otherwise. Used by the Docker `HEALTHCHECK`; a hung-RNS container reports `unhealthy` instead of false-positive `healthy`.
-- **`/api/status`** — service-level snapshot (uptime, node count, cache stats). Always 200 if gunicorn is up.
+- **`/healthz`** — returns 200 when at least one RNS interface is online, 503 otherwise. The Docker `HEALTHCHECK` uses this, so a hung-RNS container reports `unhealthy` instead of a false-positive `healthy`.
+- **`/api/status`** — a service-level snapshot (uptime, node count, cache stats). Always returns 200 if gunicorn is up.
 
 ### Diagnostics admin actions
 
-- **Admin → Cache → "Clear all cached pages"** — drops the in-memory `PageCache` so the next fetch re-pulls from the source node.
-- **Admin → Cache → "Reset RNS cache"** — moves `config/reticulum/storage/` aside to a timestamped backup, triggers a graceful gunicorn worker reload, and re-initialises RNS against an empty state directory. Use when RNS hangs during startup (a stale multi-megabyte `destination_table` is the usual cause).
+- **Admin → Cache → "Clear all cached pages"** — drops the in-memory `PageCache`, so the next fetch re-pulls from the source node.
+- **Admin → Cache → "Reset RNS cache"** — moves `config/reticulum/storage/` aside to a timestamped backup, triggers a graceful gunicorn worker reload, and reinitializes RNS against an empty state directory. Use this when RNS hangs during startup — a stale, multi-megabyte `destination_table` is the usual cause.
 
 ## URL scheme
 
-The browser URL reflects the page you're viewing, so refresh preserves state and standard browser bookmarks work for any NomadNet page. The scheme collapses the default node's hash for cleaner URLs and reserves an `/n/` prefix for everything else:
+The browser URL reflects the page you are viewing, so a refresh preserves state and a standard browser bookmark works for any NomadNet page. The scheme collapses the default node's hash for a cleaner URL and reserves an `/n/` prefix for everything else:
 
 | URL                              | Target                               |
 |----------------------------------|--------------------------------------|
@@ -449,11 +462,11 @@ The browser URL reflects the page you're viewing, so refresh preserves state and
 | `/n/<hash>/page/foo.mu`          | external node's page                 |
 | `/?url=hash%3A//<hash>/...`      | legacy entry point, transparently rewritten to the pathname form on first navigation |
 
-Reserved prefixes (won't be treated as SPA paths): `/api`, `/admin`, `/auth`, `/static`, `/healthz`, `/robots.txt`.
+Reserved prefixes (not treated as SPA paths): `/api`, `/admin`, `/auth`, `/static`, `/healthz`, `/robots.txt`.
 
 ## Data storage
 
-All persistent data is stored in `./config/` (volume-mounted into the container):
+NomadPortal stores all persistent data in `./config/` (volume-mounted into the container):
 
 | Path | Contents |
 |------|----------|
@@ -465,60 +478,60 @@ All persistent data is stored in `./config/` (volume-mounted into the container)
 | `config/contacts/` | Per-user contact books (one file per user) |
 | `config/nodes.json` | Discovered NomadNet nodes |
 | `config/blocklist.json` | Admin-managed node blocklist |
-| `config/favorites.json` | Per-user node favourites |
+| `config/favorites.json` | Per-user node favorites |
 | `config/users.yml` | User account records |
 
-> **Back up `config/reticulum/identities/` regularly** — these files contain your RNS private keys and cannot be recovered if lost.
+> **Back up `config/reticulum/identities/` regularly.** These files hold your RNS private keys. You cannot recover them if you lose them.
 
 ### Storage backend performance
 
-**Keep `config/` on local disk.** Bind-mounting `config/` from network storage (NAS via NFS/SMB/CIFS, remote block storage, or anything else with non-trivial write latency) can degrade — or, in extreme cases, effectively break — mesh reachability. Symptoms range from occasional link handshake timeouts to complete inability to reach other nodes despite receiving their announces fine.
+**Keep `config/` on local disk.** Bind-mounting `config/` from network storage (a NAS over NFS/SMB/CIFS, remote block storage, or anything else with real write latency) can degrade mesh reachability, and in extreme cases can effectively break it. Symptoms range from occasional link handshake timeouts to a complete inability to reach other nodes, even though the container receives their announces fine.
 
-**Why:** Several persistent stores (LXMF peer database, discovered-nodes registry, message history) are updated as mesh events arrive. Even after the batching improvements in the 0.9.x line, writes still land on the config directory in the hot path. If those writes take tens or hundreds of milliseconds per operation (typical of network filesystems under any real load), Python holds the GIL through the write and starves every other thread — including the ones supposed to be sending RNS Link handshakes on the wire.
+**Why this happens:** Several persistent stores (the LXMF peer database, the discovered-nodes registry, message history) update as mesh events arrive. Even after the batching improvements in the 0.9.x line, writes still land on the config directory in the hot path. If those writes take tens or hundreds of milliseconds per operation, which is typical for a network filesystem under real load, Python holds the GIL through the write. This starves every other thread, including the ones that should be sending RNS Link handshakes on the wire.
 
 **What to do:**
 
-- Use a local SSD (or, on constrained hosts, a local rotational disk) for the `config/` bind mount
-- If your data-lifecycle policy requires the state to live on shared storage, snapshot from local disk to your NAS on a schedule (nightly rsync, ZFS send, etc.) rather than serving directly from it
-- If you're already on network storage and can't move, watch for these signals:
-  - `ss -tnp` on the host shows a large `Recv-Q` on the container's connection to your hub
-  - The interface's `txb` in `/api/_debug/state` is much smaller than `rxb` (say, more than 10 : 1)
-  - Frequent "Link establishment timed out" in the logs even though the destination just announced
-  - Other clients (MeshChat, Sideband) on the same LAN reach the same peers fine
+- Use a local SSD, or on a constrained host a local rotational disk, for the `config/` bind mount.
+- If your data-lifecycle policy requires the state to live on shared storage, snapshot from local disk to your NAS on a schedule (nightly rsync, ZFS send, etc.) instead of serving directly from it.
+- If you are already on network storage and cannot move it, watch for these signals:
+  - `ss -tnp` on the host shows a large `Recv-Q` on the container's connection to your hub.
+  - The interface's `txb` in `/api/_debug/state` runs much smaller than `rxb`, for example more than 10 to 1.
+  - The logs show frequent "Link establishment timed out" messages, even though the destination just announced.
+  - Other clients (MeshChat, Sideband) on the same LAN reach the same peers fine.
 
-Volumes for `site/` (hosted pages and files) can safely live on network storage — that content is read-only from the server's perspective and updated on the operator's schedule, not on every mesh event.
+Volumes for `site/` (hosted pages and files) can safely live on network storage. That content is read-only from the server's point of view, and it updates on the operator's schedule, not on every mesh event.
 
 ## Security notes
 
-- Change `ADMIN_PASSWORD` before exposing the service to any network
-- Set `FLASK_SECRET_KEY` to a stable random value so sessions survive restarts
-- The self-signed certificate will trigger browser warnings — expected for direct access; use a reverse proxy with a real certificate for public deployment
-- CSRF tokens are required on all state-changing requests
-- Rate limiting applies to page fetches and message sends
-- Session cookies are always marked `Secure` — the service must be accessed over HTTPS
-- `robots.txt` is served automatically, blocking search engine indexing of API and admin paths
-- See [SECURITY.md](SECURITY.md) for vuln-reporting and full hardening guidance
+- Change `ADMIN_PASSWORD` before you expose the service to any network.
+- Set `FLASK_SECRET_KEY` to a stable random value, so sessions survive restarts.
+- The self-signed certificate triggers browser warnings for direct access. This is expected. Use a reverse proxy with a real certificate for a public deployment.
+- CSRF tokens are required on every state-changing request.
+- Rate limiting applies to page fetches and message sends.
+- Session cookies are always marked `Secure`, so the service must be accessed over HTTPS.
+- `robots.txt` is served automatically, and it blocks search-engine indexing of API and admin paths.
+- See [SECURITY.md](SECURITY.md) for vulnerability reporting and full hardening guidance.
 
 ### Trust model
 
-NomadPortal is a single-operator application. The security boundary is between **the operator** (you) and **the network** (everything else):
+NomadPortal is a single-operator application. The security boundary sits between **the operator** (you) and **the network** (everything else):
 
-- **Logged-in users** can submit forms, send LXMF messages, and (depending on access mode) browse external nodes. They cannot upload content or change configuration unless also admins.
+- **Logged-in users** can submit forms, send LXMF messages, and, depending on the access mode, browse external nodes. They cannot upload content or change configuration unless they are also admins.
 - **Admin users** can edit configuration, change interfaces, and reach the admin panel. Treat the admin role like root on the host.
-- **Executable pages in `site/pages/` and packages listed in `site/requirements.txt` are FULLY TRUSTED** — they run as the NomadPortal process. Anything in those locations is effectively code you wrote. **Don't accept user-uploaded `.mu` pages or `pip` packages.**
+- **Executable pages in `site/pages/` and packages listed in `site/requirements.txt` are FULLY TRUSTED.** They run as the NomadPortal process. Anything in those locations is effectively code you wrote. **Do not accept user-uploaded `.mu` pages or `pip` packages.**
 - **External NomadNet nodes are untrusted.** Their content is HTML-escaped and rendered through Micron2HTML, which has no JavaScript execution path. Field submissions to external nodes go through `_can_interact` access-control gating.
 
 ## Operator guidance
 
-NomadPortal acts as a conduit to the NomadNet mesh network. Content fetched from other nodes passes through your server but is not created, selected, or modified by you. The following guidance applies if you expose this service to the public internet:
+NomadPortal acts as a conduit to the NomadNet mesh network. Content fetched from other nodes passes through your server, but you do not create, select, or modify it. The following guidance applies if you expose this service to the public internet.
 
 ### Default configuration (recommended for public hosting)
 
-The defaults are conservative and appropriate for site-hosting use cases:
+The defaults are conservative and fit a site-hosting use case:
 
-- **Access mode: Gated** — unauthenticated visitors are restricted to your hosted site; the server refuses to fetch pages from other nodes for them. Logged-in users have full access.
-- **Nodes/Messages sidebar: Logged-in users only** — reduces surface area for guests
-- **Address bar: Hidden for guests** — guests cannot enter arbitrary node addresses
+- **Access mode: Gated** — an unauthenticated visitor is restricted to your hosted site. The server refuses to fetch pages from other nodes for them. A logged-in user has full access.
+- **Nodes/Messages sidebar: Logged-in users only** — this reduces surface area for guests.
+- **Address bar: Hidden for guests** — a guest cannot enter an arbitrary node address.
 
 The three access modes (Admin → Settings):
 
@@ -528,19 +541,19 @@ The three access modes (Admin → Settings):
 | **Gated** *(default)* | Restricted to your site | Browse anywhere | Browse anywhere |
 | **Locked** | Restricted to your site | Restricted to your site | Browse anywhere |
 
-Setting access mode to "Public" means visitors can browse the full NomadNet network freely. The network is **unmoderated** — content from other nodes may be unsuitable, offensive, or illegal in some jurisdictions. A content warning dialog is shown to logged-in users before they navigate to an external node.
+Setting the access mode to "Public" means a visitor can browse the full NomadNet network freely. That network is **unmoderated**. Content from other nodes may be unsuitable, offensive, or illegal in some jurisdictions. A logged-in user sees a content warning dialog before they navigate to an external node.
 
 ### Liability considerations
 
-This is not legal advice. Consult a lawyer in your jurisdiction before operating a public-facing instance.
+This is not legal advice. Consult a lawyer in your jurisdiction before you operate a public-facing instance.
 
-- **You are a conduit, not a publisher.** Under most safe-harbour frameworks (US CDA §230, DMCA §512, EU E-Commerce Directive equivalents), operators who do not initiate, select, or modify transmitted content have reduced liability. The key is not to cache content longer than necessary and to respond to abuse reports promptly.
-- **Set an abuse contact** in Admin → Settings. This provides users with a way to report problematic content and demonstrates good-faith operation.
-- **Use the node blocklist** (Admin → Settings) to block nodes serving harmful content. Keeping a record of your responses to abuse reports is valuable.
-- **Page cache** (`CACHE_TTL`, default 300 seconds) briefly stores fetched content on your server. A shorter TTL reduces the window during which cached content is stored. Consider setting `CACHE_TTL: 60` for public instances.
-- **LXMF message storage** — sent and received messages are stored in `config/messages.json`. Advise users of this in your terms of service.
-- **Private operation** (a closed group with OIDC/OIDC allowlist) carries significantly lower risk than anonymous public access.
-- **Jurisdiction matters** — what is legal to transmit in one country is not in another. Know your local laws before operating publicly.
+- **You are a conduit, not a publisher.** Under most safe-harbor frameworks (US CDA §230, DMCA §512, EU E-Commerce Directive equivalents), an operator who does not start, select, or modify transmitted content has reduced liability. The key is to not cache content longer than necessary, and to respond to abuse reports promptly.
+- **Set an abuse contact** in Admin → Settings. This gives users a way to report a problem and shows good-faith operation.
+- **Use the node blocklist** (Admin → Settings) to block a node that serves harmful content. Keep a record of your responses to abuse reports.
+- **Page cache** (`CACHE_TTL`, default 300 seconds) briefly stores fetched content on your server. A shorter TTL reduces the time cached content stays on your server. Consider `CACHE_TTL: 60` for a public instance.
+- **LXMF message storage** — NomadPortal stores sent and received messages in `config/messages.json`. Tell your users about this in your terms of service.
+- **Private operation**, such as a closed group with an OIDC allowlist, carries far lower risk than open public access.
+- **Jurisdiction matters.** What is legal to transmit in one country may not be legal in another. Know your local laws before you go public.
 
 ## License
 
@@ -552,7 +565,7 @@ MIT — see [LICENSE](LICENSE).
 - [Reticulum](https://github.com/markqvist/Reticulum) — the network stack
 - [LXMF](https://github.com/markqvist/LXMF) — the messaging protocol
 - [Micron2HTML](https://github.com/JamesM92/Micron2HTML) — the Micron → HTML library used by this project
-- [Ansi2MicronMU](https://github.com/JamesM92/Ansi2MicronMU) — convert ANSI terminal output to Micron. Useful for exposing existing CLI tools as executable `.mu` pages on your hosted site:
+- [Ansi2MicronMU](https://github.com/JamesM92/Ansi2MicronMU) — converts ANSI terminal output to Micron. Use it to expose an existing CLI tool as an executable `.mu` page on your hosted site:
   ```bash
   #!/bin/bash
   git -C /repo log --color=always -n 20 | ansi2micron
