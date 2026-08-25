@@ -170,6 +170,31 @@ RATCHET_MAX_AGE_DAYS="${NOMADPORTAL_RATCHET_MAX_AGE_DAYS:-30}"
 RATCHET_MAX_COUNT="${NOMADPORTAL_RATCHET_MAX_COUNT:-5000}"
 RATCHET_DIR="${RNS_CONFIG_DIR:-/config/reticulum}/storage/ratchets"
 if [ -d "$RATCHET_DIR" ]; then
+  # Orphaned *.out temp files first, unconditionally, regardless of the
+  # age/count gate below. RNS writes a ratchet atomically as
+  # "<hash>.out" then renames it to its final "<hash>" (no extension);
+  # a container killed mid-write (restart, OOM) can leave the ".out"
+  # temp file behind forever. A REAL bug in RNS's own Identity.
+  # _clean_ratchets() (confirmed directly against installed RNS 1.3.9
+  # source, not guessed) then makes this permanent: it calls
+  # bytes.fromhex(filename) on the *whole* filename including the
+  # ".out" suffix before ever reaching the os.unlink() that would
+  # delete it — the dot after the 32 hex chars always raises
+  # ("non-hexadecimal number ... at position 32"), the exception is
+  # caught by an outer handler that only logs it, and the file is
+  # never actually removed. Every subsequent restart hits the exact
+  # same file again, forever — RNS's own "removing file" log line is
+  # a lie in this specific case. Since we're running before RNS starts
+  # (nothing could legitimately be mid-write into one of these right
+  # now), any ".out" file here is safe to delete outright — this
+  # starves that upstream bug of the input that triggers it, rather
+  # than patching RNS's own internals.
+  out_before=$(find "$RATCHET_DIR" -maxdepth 1 -name '*.out' -type f 2>/dev/null | wc -l)
+  if [ "$out_before" -gt 0 ]; then
+    find "$RATCHET_DIR" -maxdepth 1 -name '*.out' -type f -delete 2>/dev/null || true
+    echo "[startup] Removed ${out_before} orphaned ratchet .out temp file(s) (interrupted write, upstream RNS cleanup bug — see entrypoint.sh comment)"
+  fi
+
   count_before=$(find "$RATCHET_DIR" -type f 2>/dev/null | wc -l)
 
   # Fast path: nothing to do — no files, or already at/below the cap
