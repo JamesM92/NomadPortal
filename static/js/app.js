@@ -399,18 +399,25 @@ function renderNodeList() {
   }
 }
 
-function makeNodeItem(node) {
-  const li = document.createElement('li');
-  li.dataset.hash = node.hash;
-  if (node.hash === state.activeNodeHash) li.classList.add('active');
-  const age = formatAge(node.last_seen);
-  const dot = node.last_load_ok === true
+// Shared with the Network tab's site rows (makeNetworkItem) — one
+// definition of "what does last-access status look like" rather than
+// two copies that could drift.
+function _nodeStatusDot(node) {
+  return node.last_load_ok === true
     ? '<span class="node-dot node-dot-ok"       title="Last access succeeded">●</span>'
     : node.last_load_ok === false && node.ever_load_ok
     ? '<span class="node-dot node-dot-degraded" title="Last access failed — has worked before">◑</span>'
     : node.last_load_ok === false
     ? '<span class="node-dot node-dot-err"      title="Last access failed — never successfully loaded">✕</span>'
     : '<span class="node-dot node-dot-none"     title="Never accessed">○</span>';
+}
+
+function makeNodeItem(node) {
+  const li = document.createElement('li');
+  li.dataset.hash = node.hash;
+  if (node.hash === state.activeNodeHash) li.classList.add('active');
+  const age = formatAge(node.last_seen);
+  const dot = _nodeStatusDot(node);
 
   // hops badge — `null` from server means "unreachable / unknown route"
   const hopsLabel = (node.hops === null || node.hops === undefined)
@@ -3112,6 +3119,7 @@ function renderNetworkList() {
         kind: 'site', hash: n.hash, name: n.name,
         last_seen: n.last_seen, hops: n.hops,
         announce_count: n.announce_count,
+        last_load_ok: n.last_load_ok, ever_load_ok: n.ever_load_ok,
       });
     }
   }
@@ -3210,11 +3218,16 @@ function makeNetworkItem(entry) {
     `<span class="node-kind"${entry.picked ? ' title="Currently syncing through this relay"' : ''}>${kindLabel}${entry.picked ? ' ★' : ''}</span>`);
   li.appendChild(right);
 
+  // Last-access status dot — same meaning as the Nodes panel's own
+  // (page-fetch success/failure), so it only applies to sites: peers
+  // and relays are announce-only, this app never "loads" from them.
+  const dot = entry.kind === 'site' ? _nodeStatusDot(entry) : '';
+
   li.insertAdjacentHTML('beforeend',
     `<div class="node-icon-row">` +
       `<span class="node-identicon">${_identiconSvg(entry.hash, 22, ringColor)}</span>` +
       `<div class="node-text">` +
-        `<span class="node-name">${esc(name)}</span>` +
+        `<span class="node-name">${dot}${esc(name)}</span>` +
         `<span class="node-hash">${entry.hash.slice(0, 24)}…</span>` +
         `<span class="node-age">${formatAge(entry.last_seen)}</span>` +
       `</div>` +
