@@ -235,6 +235,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state" bug class, audio-frame relay plumbing, state-change
   notification), ``test_call_manager_registry.py`` (10, the per-
   account wrapper), ``test_call_settings.py`` (9, persistence).
+- **Voice calls, Phase 1b: real audio.** An established call now
+  actually carries sound — mic capture, Opus encode/decode, and
+  playback, all via the browser's own WebCodecs API
+  (``AudioEncoder``/``AudioDecoder``/``AudioData``), Chromium-only in
+  practice today (no WebCodecs audio codecs in Firefox/Safari as of
+  this writing) — entirely feature-detected, so call *signalling*
+  (dial/ring/answer/hang-up, Phase 1a) keeps working everywhere
+  regardless of whether a given browser can play the audio once a call
+  actually connects. Same wire shape the NomadPortal-Android sister
+  project's own Kotlin ``CallAudioEngine`` uses for real interop over a
+  real mesh link: 48kHz mono, 20ms/960-sample frames, Opus @ 24kbps, a
+  1-byte codec header (0x01 = Opus) in front of each already-encoded
+  frame. New ``static/js/call-audio-worklet.js`` (an
+  ``AudioWorkletProcessor`` chunking raw mic samples into exact 20ms
+  frames on the audio render thread) and ``static/js/call-audio.js``
+  (encode/send + poll/decode/scheduled-playback, plus a Mute toggle in
+  the call overlay). New ``POST /api/calls/audio/send`` /
+  ``GET /api/calls/audio/recv`` (both login-required) — thin wrappers
+  over ``CallManager.send_audio_frame()``/``pop_audio_frame()``, which
+  Phase 1a's own test suite already covers; ``/recv`` drains the
+  entire ~200ms server-side jitter buffer per poll (same convention
+  ``/api/rnsh/output`` already established) so a 100ms client poll
+  interval keeps up without a dedicated streaming connection. This
+  layer has zero codec knowledge of its own by design — Python only
+  ever relays opaque bytes, matching the split Phase 1a's own
+  ``call_manager.py`` doc comment already established.
 
 ### Fixed
 

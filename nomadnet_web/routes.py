@@ -2359,3 +2359,59 @@ def api_calls_settings_set():
         mgr.set_contacts_only(settings.get_contacts_only())
 
     return jsonify({"ok": True, **settings.as_dict()})
+
+
+# ---------------------------------------------------------------------------
+# Voice calls — Phase 1b: audio frame relay. CallManager.send_audio_frame()/
+# pop_audio_frame() treat a frame as fully opaque bytes (a 1-byte codec
+# header + an already-encoded Opus frame, per call_manager.py's own doc
+# comment) — all real encode/decode/mic/speaker work is the browser's
+# own job (static/js/call-audio.js), same "no codec knowledge in this
+# layer" split the signalling half already keeps.
+# ---------------------------------------------------------------------------
+
+_MAX_CALL_AUDIO_FRAME_BYTES = 4096  # generous headroom over a real ~60-byte Opus@24kbps/20ms frame
+
+
+@bp.post("/api/calls/audio/send")
+@login_required
+def api_calls_audio_send():
+    """One already-encoded audio frame, base64-encoded. Silently a
+    no-op (not an error) if there's no established call to send it
+    over — CallManager.send_audio_frame() itself already degrades that
+    way, and the browser's own capture loop can keep running briefly
+    around a call's start/end edges."""
+    import base64
+    data = request.get_json(silent=True) or {}
+    try:
+        frame = base64.b64decode(data.get("frame_b64") or "", validate=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid frame"}), 400
+    if not frame or len(frame) > _MAX_CALL_AUDIO_FRAME_BYTES:
+        return jsonify({"ok": False, "error": "Invalid frame size"}), 400
+    mgr = _ensure_call_manager()
+    if mgr is not None:
+        mgr.send_audio_frame(frame)
+    return jsonify({"ok": True})
+
+
+@bp.get("/api/calls/audio/recv")
+@login_required
+def api_calls_audio_recv():
+    """Drains and returns every audio frame currently buffered
+    (CallManager's own AUDIO_JITTER_MAX-deep jitter queue — up to
+    ~200ms), base64-encoded each, oldest first. Same "drain the whole
+    buffer per poll" convention /api/rnsh/output already established,
+    so the client can poll well below real-time frame rate (100ms is
+    plenty against a 200ms buffer) and still keep up without a
+    dedicated streaming connection."""
+    import base64
+    mgr = _ensure_call_manager()
+    frames = []
+    if mgr is not None:
+        while True:
+            frame = mgr.pop_audio_frame(timeout_s=0)
+            if frame is None:
+                break
+            frames.append(base64.b64encode(frame).decode("ascii"))
+    return jsonify({"frames": frames})

@@ -4398,9 +4398,10 @@ async function _loadCallsHistory() {
 let _callLastState = null;    // dedupes redundant re-renders, same idea as _rnshLastState
 let _callDismissTimer = null;
 
-function _callOverlaySetButtons({ answer, reject, hangup, dismiss }) {
+function _callOverlaySetButtons({ answer, reject, mute, hangup, dismiss }) {
   $('btn-call-answer').hidden  = !answer;
   $('btn-call-reject').hidden  = !reject;
+  $('btn-call-mute').hidden    = !mute;
   $('btn-call-hangup').hidden  = !hangup;
   $('btn-call-dismiss').hidden = !dismiss;
 }
@@ -4440,6 +4441,15 @@ function _renderCallOverlay(status) {
 
   if (st === 'ringing_incoming') {
     _callOverlaySetButtons({ answer: true, reject: true });
+  } else if (st === 'established') {
+    // Phase 1b: real audio starts the moment both ends are actually
+    // connected — call-audio.js's own startCallAudio() is a no-op if
+    // this browser lacks WebCodecs (signalling keeps working either
+    // way, just silent). Idempotent, safe even if a duplicate
+    // "established" render somehow got through the key-dedupe above.
+    startCallAudio();
+    _callOverlaySetButtons({ mute: true, hangup: true });
+    _updateMuteButtonLabel();
   } else if (_CALL_ACTIVE_STATES.includes(st)) {
     _callOverlaySetButtons({ hangup: true });
   } else {
@@ -4447,6 +4457,7 @@ function _renderCallOverlay(status) {
     // a moment (matches the Android sister project's own CallOverlay
     // 2.5s auto-dismiss) so "call ended" is visible rather than
     // instantly disappearing; Close is a manual fallback.
+    stopCallAudio();
     _callOverlaySetButtons({ dismiss: true });
     _callDismissTimer = setTimeout(() => {
       apiFetch('/api/calls/dismiss', { method: 'POST' }).catch(() => {});
@@ -4455,6 +4466,15 @@ function _renderCallOverlay(status) {
     }, 2500);
   }
 }
+
+function _updateMuteButtonLabel() {
+  $('btn-call-mute').textContent = isCallAudioMuted() ? 'Unmute' : 'Mute';
+}
+
+$('btn-call-mute')?.addEventListener('click', () => {
+  setCallAudioMuted(!isCallAudioMuted());
+  _updateMuteButtonLabel();
+});
 
 async function _pollCallStatus() {
   if (!_authState.logged_in) return;
