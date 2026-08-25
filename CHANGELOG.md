@@ -23,24 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   simple favorites/announces sections exactly as they already do)
   unifies every announce heard — sites, LXMF peers, and now mesh
   relays too — into one filterable (All/Sites/Peers/Relays chips),
-  searchable, sortable list. Relays (``lxmf.propagation``-aspect
-  announces, the store-and-forward mesh infrastructure
-  ``PropagationSyncService`` already auto-discovers for its own
-  outbound-sync picker) get their own gold ring and were never
-  surfaced anywhere in the UI before this — that data existed, just
-  as an aggregate count. New ``PropagationSyncService.
-  list_known_nodes()`` exposes the individual entries; new
-  ``GET /api/relays`` (login-required, matching ``/api/lxmf-peers``)
-  serves them. The relay currently being synced through is flagged
-  in the list. Sites stay visible to guests inside the Network tab
-  (same as the Nodes panel); peers/relays still need login.
+  searchable, sortable, live-updating (same ~15s cycle as everything
+  else) list, windowed 50-at-a-time like the node/peer lists already
+  are. Relays (``lxmf.propagation``-aspect announces, the store-and-
+  forward mesh infrastructure ``PropagationSyncService`` already
+  auto-discovers for its own outbound-sync picker) get their own
+  gold ring and were never surfaced anywhere in the UI before this —
+  that data existed, just as an aggregate count. New
+  ``PropagationSyncService.list_known_nodes()`` exposes the
+  individual entries; new ``GET /api/relays`` serves them, and the
+  relay currently being synced through is flagged in the list. Site
+  rows carry the same ●/◑/✕/○ last-access status dot the Nodes panel
+  already shows.
+
+  Sites, peers, and relays are all public reads — same as
+  ``/api/nodes`` already is regardless of the Nodes panel's own
+  visibility toggle: the per-audience panel toggles below curate
+  what the *UI* offers, they aren't the data's security boundary.
+  This matters for a "Network only" guest deployment (Nodes/Messages
+  panels off, only Network on) — guests get the full picture, not
+  just sites. Messaging a peer still genuinely needs a real identity
+  either way; a guest clicking a peer row gets told to sign in
+  rather than the click doing nothing silently.
 
   New per-audience visibility toggle ("Network panel") in Admin →
   Settings, same guests/users/admins × public/gated/locked structure
-  as the existing Nodes/Messages panel toggles. 5 new pytest cases
-  cover ``PropagationSyncService.list_known_nodes()`` (empty state,
-  a single announce, repeat-announce count/hops updates, multiple
-  relays, and the currently-picked flag).
+  as the existing Nodes/Messages panel toggles. New desktop sidebar-
+  collapse button (``#btn-sidebar-collapse``, next to the brand) —
+  matters most for a guest down to one enabled panel, who'd otherwise
+  have no way to reclaim the content area's full width. 5 new pytest
+  cases cover ``PropagationSyncService.list_known_nodes()`` (empty
+  state, a single announce, repeat-announce count/hops updates,
+  multiple relays, and the currently-picked flag).
 
 ## [1.3.0] - 2026-08-24
 

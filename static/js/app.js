@@ -3086,24 +3086,21 @@ let _networkTypeFilter = 'all'; // 'all' | 'site' | 'peer' | 'relay'
 let _networkListWindow = { page: 1, frozen: null, resetKey: null };
 
 async function refreshNetworkPanel() {
-  const tasks = [];
-  // Peers/relays need login (same as the Users tab and /api/lxmf-peers
-  // itself) — sites don't, so those always refresh regardless of
-  // auth state, matching the Nodes panel's own guest-visible behavior.
-  if (_authState.logged_in) {
-    tasks.push(loadContacts());
-    tasks.push(
-      apiFetch('/api/lxmf-peers')
-        .then(d => { _allPeers = d.peers || []; })
-        .catch(() => {}),
-    );
-    tasks.push(
-      apiFetch('/api/relays')
-        .then(d => { _allRelays = d.relays || []; })
-        .catch(() => {}),
-    );
-  }
-  await Promise.all(tasks);
+  // Sites/peers/relays are all public reads now (per explicit
+  // direction, for "Network only" guest deployments — see
+  // /api/lxmf-peers's own doc comment in routes.py) — fetch all
+  // three regardless of auth state. loadContacts() already no-ops
+  // for guests on its own (no account, no contacts), so calling it
+  // unconditionally here is safe and simpler than gating it too.
+  await Promise.all([
+    loadContacts(),
+    apiFetch('/api/lxmf-peers')
+      .then(d => { _allPeers = d.peers || []; })
+      .catch(() => {}),
+    apiFetch('/api/relays')
+      .then(d => { _allRelays = d.relays || []; })
+      .catch(() => {}),
+  ]);
   renderNetworkList();
 }
 
@@ -3139,7 +3136,7 @@ function renderNetworkList() {
       });
     }
   }
-  if ((typeFilter === 'all' || typeFilter === 'peer') && _authState.logged_in) {
+  if (typeFilter === 'all' || typeFilter === 'peer') {
     for (const p of _allPeers) {
       const contact = _contacts.find(c => c.hash === p.hash);
       entries.push({
@@ -3149,7 +3146,7 @@ function renderNetworkList() {
       });
     }
   }
-  if ((typeFilter === 'all' || typeFilter === 'relay') && _authState.logged_in) {
+  if (typeFilter === 'all' || typeFilter === 'relay') {
     for (const r of _allRelays) {
       entries.push({
         kind: 'relay', hash: r.hash, name: null,
@@ -3177,9 +3174,7 @@ function renderNetworkList() {
   if (!entries.length) {
     inner.innerHTML = filterText
       ? `<li class="node-placeholder">No matches for &ldquo;${esc(filterText)}&rdquo;.</li>`
-      : (!_authState.logged_in && typeFilter !== 'site')
-        ? '<li class="node-placeholder">Log in to see LXMF peers and mesh relays.</li>'
-        : '<li class="node-placeholder">Waiting for announces…</li>';
+      : '<li class="node-placeholder">Waiting for announces…</li>';
     return;
   }
 
@@ -3209,18 +3204,6 @@ function renderNetworkList() {
       w.loadMore();
       renderNetworkList();
     }, 'li'));
-  }
-
-  // Sites-only content (guest, viewing "All") shouldn't silently omit
-  // peers/relays with no explanation — the empty-state message above
-  // only covers the "filtered to Peers/Relays and got nothing" case;
-  // this covers "viewing All and sites filled the list fine".
-  if (!_authState.logged_in && typeFilter === 'all') {
-    const hint = document.createElement('li');
-    hint.className = 'node-placeholder';
-    hint.style.cssText = 'font-size:11px;padding:6px 12px;cursor:default;';
-    hint.textContent = 'Log in to also see LXMF peers and mesh relays.';
-    inner.appendChild(hint);
   }
 }
 
@@ -3271,7 +3254,14 @@ function makeNetworkItem(entry) {
     li.addEventListener('click', () => navigateTo(`hash://${entry.hash}/page/index.mu`));
   } else if (entry.kind === 'peer') {
     li.addEventListener('click', async () => {
-      if (!_authState.logged_in) return;
+      // Peers are guest-viewable now (see /api/lxmf-peers's own doc
+      // comment), but messaging still genuinely needs a real identity
+      // — give guests a real reason instead of the click doing
+      // nothing with no explanation.
+      if (!_authState.logged_in) {
+        setStatus('Sign in to start a conversation.', 'error');
+        return;
+      }
       const contact = _contacts.find(c => c.hash === entry.hash);
       if (!contact) {
         try {

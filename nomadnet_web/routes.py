@@ -1790,21 +1790,28 @@ def api_ui_settings():
 
 
 @bp.get("/api/lxmf-peers")
-@login_required
 def api_lxmf_peers():
+    """Public read, same as /api/nodes — per explicit direction, a
+    "Network only" guest deployment needs sites/peers/relays all
+    viewable without an account. The Messages panel's own Users tab
+    still gates itself behind login client-side (refreshLxmfPeers()'s
+    own check) — this only opens the Network tab's read of the same
+    global peer-announce data; nothing about *messaging* a peer
+    changes, that still requires a real identity either way. Panel-
+    visibility toggles (guests_network_panel etc.) are a UI curation
+    feature, not the security boundary — same pattern /api/nodes
+    already established (public regardless of guests_nodes_panel)."""
     tracker = current_app.config.get("LXMF_TRACKER")
     peers   = tracker.get_peers() if tracker else []
     return jsonify({"peers": peers})
 
 
 @bp.get("/api/relays")
-@login_required
 def api_relays():
     """LXMF propagation-node (store-and-forward mesh infrastructure)
-    announces heard so far — the Network tab's Relays list. Gated the
-    same as /api/lxmf-peers rather than /api/nodes: this is mesh
-    infrastructure detail, not something a guest browsing a hosted
-    site needs to see."""
+    announces heard so far — the Network tab's Relays list. Public
+    read, same reasoning as /api/lxmf-peers above (see its own doc
+    comment) — mesh topology, not per-account data."""
     prop_sync = current_app.config.get("PROP_SYNC")
     relays = prop_sync.list_known_nodes() if prop_sync else []
     return jsonify({"relays": relays})
