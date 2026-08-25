@@ -40,20 +40,23 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# TEMPORARY diagnostic, round 2 — the filesystem-path guess found
-# nothing at all (no setuptools-named path outside the confirmed-clean
-# 83.0.0 site-packages install, no "70.3.0" string in any METADATA/
-# PKG-INFO/egg-info anywhere). That rules out anything under
-# site-packages entirely, which points at a dpkg-level Debian package
-# (python3-setuptools, e.g. pulled in transitively by gcc/build
-# tooling) — a completely separate install mechanism from our own
-# /usr/local Python, invisible to both prior searches. Not a fix by
-# itself; remove once the real location is known.
-RUN echo "--- dpkg packages matching python3/setuptools ---"; \
-    dpkg -l 'python3*' 2>/dev/null; \
-    dpkg -l '*setuptools*' 2>/dev/null; \
-    echo "--- non-/usr/local python-looking dirs ---"; \
-    find /usr/lib /usr/share -maxdepth 4 -iname "*python3*" 2>/dev/null; \
+# TEMPORARY diagnostic, round 3 — rounds 1-2 found NOTHING: no
+# setuptools-named path anywhere outside the confirmed-clean 83.0.0
+# site-packages install, no "70.3.0" string in any METADATA/PKG-INFO/
+# egg-info, no dpkg package. Trivy ALSO separately reports a second,
+# never-yet-seen finding — msgpack 1.1.2 (GHSA-6v7p-g79w-8964) — that
+# doesn't appear anywhere in this build's own pip install log either
+# (grepped the full log: zero mentions of msgpack). Both look
+# increasingly like they don't correspond to anything actually in
+# this image. This round covers what 1-2 didn't: pip's own view
+# (pip list, not a filesystem walk — catches anything on sys.path a
+# naive find might miss) and a truly unrestricted filesystem search
+# (no -xdev, no path restriction, both package names) including /tmp
+# and /root. Not a fix by itself; remove once resolved.
+RUN echo "--- pip list (pip's own view) ---"; \
+    pip list --format=columns 2>/dev/null; \
+    echo "--- unrestricted find, whole fs, both names ---"; \
+    find / \( -iname "*msgpack*" -o -iname "*setuptools*" \) 2>/dev/null; \
     echo "--- done ---"
 
 # Copy application source (Micron2HTML is installed via pip, not bundled)
