@@ -2344,7 +2344,7 @@ function openConversation(hash) {
   // Hide both while a conversation is open; restored on back/delete.
   $('sidebar-panel-messages').classList.add('chat-open');
   $('chat-dest-hidden').value = hash;
-  renderChatLog(conv ? conv.messages : []);
+  renderChatLog(conv ? conv.messages : [], { forceScroll: true });
 
   // Mark all unread in this conversation as read
   if (conv && conv.unread > 0) {
@@ -2445,13 +2445,38 @@ function _renderAttachment(msgId, att) {
   );
 }
 
-function renderChatLog(messages) {
+// Signature of the last conversation actually painted into #chat-log —
+// lets renderChatLog skip the teardown/rebuild when polling brings back
+// the exact same messages (the common case: nothing new arrived). A full
+// rebuild re-creates every bubble, including inline <img>/<audio>
+// attachments, which is expensive and — because it always ran through
+// _scrollChatToBottom() unconditionally — also yanked the reader back to
+// the bottom every ~15s (more often right after sending) even if they
+// had scrolled up to read history. Both together read as "the messages
+// tab is laggy". Reset to null on conversation switch so the new
+// conversation always paints on first open.
+let _chatLogSignature = null;
+
+function renderChatLog(messages, { forceScroll = false } = {}) {
   const log = $('chat-log');
   if (!log) return;
   if (!messages.length) {
     log.innerHTML = '<div class="msg-empty" style="text-align:center;padding:20px 10px;">No messages yet — say hello!</div>';
+    _chatLogSignature = '';
     return;
   }
+
+  const signature = messages.map(m => `${m.id}:${m.state || ''}:${m.read}`).join('|');
+  if (!forceScroll && signature === _chatLogSignature) return;
+  _chatLogSignature = signature;
+
+  // Only follow new messages down to the bottom if the reader was
+  // already there (or this is a fresh conversation open / a message
+  // they just sent) — otherwise a background poll refresh must not
+  // move their scroll position while they're reading up-thread.
+  const wasNearBottom = forceScroll ||
+    (log.scrollHeight - log.scrollTop - log.clientHeight) < 80;
+
   log.innerHTML = '';
   for (const m of messages) {
     const bubble = document.createElement('div');
@@ -2478,7 +2503,7 @@ function renderChatLog(messages) {
     bubble.innerHTML = inner;
     log.appendChild(bubble);
   }
-  _scrollChatToBottom();
+  if (wasNearBottom) _scrollChatToBottom();
 }
 
 $('btn-rename-chat').addEventListener('click', () => {
