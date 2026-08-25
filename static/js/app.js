@@ -174,6 +174,76 @@ async function apiFetch(url, opts = {}) {
 let _allNodes = [];
 let _favCollapsed = false;
 
+// ---------------------------------------------------------------------------
+// Windowed list rendering — shared by the node list and the LXMF peer
+// (Users tab) list below. A real mesh can announce thousands of nodes/
+// peers; rendering every matched/sorted row into the DOM unconditionally
+// on every render was a real, reported stall opening either list. Same
+// fix as the Android sister project's rememberWindowedList()/
+// LoadMoreTrigger (ui/components/WindowedList.kt), ported here as plain
+// closures instead of a Composable: most people only ever look at the
+// most recent ~50 of a list, so only ever build that many rows up
+// front, growing one more page only once the user actually scrolls (or
+// clicks) for more. Two rules, matching the Android version exactly:
+// - Page 1 stays live — it rebuilds fresh from the source array on
+//   every render, so a newly-discovered node/peer still shows up
+//   immediately at the top.
+// - The moment a second page loads, the whole window freezes against a
+//   snapshot, so rows the user already scrolled past don't reorder or
+//   shift underneath them. A changed resetKey (new filter/sort) snaps
+//   back to page 1 and live tracking resumes.
+// ---------------------------------------------------------------------------
+const LIST_PAGE_SIZE = 50;
+
+function _windowList(items, winState, resetKey) {
+  if (resetKey !== winState.resetKey) {
+    winState.resetKey = resetKey;
+    winState.page = 1;
+    winState.frozen = null;
+  }
+  const effective = winState.frozen || items;
+  const visible = effective.slice(0, winState.page * LIST_PAGE_SIZE);
+  return {
+    visible,
+    remaining: effective.length - visible.length,
+    loadMore() {
+      if (winState.frozen === null) winState.frozen = items;
+      winState.page += 1;
+    },
+  };
+}
+
+// "Show N more…" sentinel row — click it, or scroll it into view, to
+// grow a windowed list by one more page. `tag` matches the caller's own
+// row element (<li> for #node-list, <div> for the peer list). `root`
+// must be the list's real scrolling ancestor, not the viewport — these
+// panels scroll inside their own overflow-y:auto container — so the
+// IntersectionObserver fires as the user nears the actual bottom.
+function _makeLoadMoreRow(remaining, root, onLoad, tag = 'li') {
+  const el = document.createElement(tag);
+  el.className = 'list-load-more';
+  el.textContent = `Show ${Math.min(remaining, LIST_PAGE_SIZE)} more (${remaining} left)…`;
+  let fired = false;
+  const fire = () => {
+    if (fired) return;
+    fired = true;
+    onLoad();
+  };
+  el.addEventListener('click', fire);
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        io.disconnect();
+        fire();
+      }
+    }, { root, rootMargin: '200px' });
+    io.observe(el);
+  }
+  return el;
+}
+
+let _nodeListWindow = { page: 1, frozen: null, resetKey: null };
+
 async function refreshNodes() {
   try {
     const data = await apiFetch('/api/nodes');
@@ -291,7 +361,18 @@ function renderNodeList() {
   } else {
     sortedNodes.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
   }
-  for (const node of sortedNodes) nodeList.appendChild(makeNodeItem(node));
+
+  // Windowed — see _windowList's own doc comment. resetKey covers both
+  // criteria this section depends on (filter text + sort key); changing
+  // either snaps back to page 1.
+  const w = _windowList(sortedNodes, _nodeListWindow, `${filter}|${sortKey}`);
+  for (const node of w.visible) nodeList.appendChild(makeNodeItem(node));
+  if (w.remaining > 0) {
+    nodeList.appendChild(_makeLoadMoreRow(w.remaining, nodeList, () => {
+      w.loadMore();
+      renderNodeList();
+    }, 'li'));
+  }
 }
 
 function makeNodeItem(node) {
@@ -410,9 +491,15 @@ function makePageFavItem(fav) {
   right.appendChild(starBtn);
   li.appendChild(right);
 
+  // Wrapped in .node-text (flex:1; min-width:0) same as makeNodeItem's
+  // own row — without it these two spans are direct flex children with
+  // no shrink floor, so a long bookmark name/path can't ellipsis and
+  // instead pushes the row into horizontal overflow.
   li.insertAdjacentHTML('beforeend',
-    `<span class="node-name">${esc(fav.name)}</span>` +
-    `<span class="node-hash">${fav.hash.slice(0, 12)}…${esc(fav.path)}</span>`);
+    `<div class="node-text">` +
+      `<span class="node-name">${esc(fav.name)}</span>` +
+      `<span class="node-hash">${fav.hash.slice(0, 12)}…${esc(fav.path)}</span>` +
+    `</div>`);
 
   li.addEventListener('click', e => {
     if (e.target.closest('.node-fav-btn')) return;
@@ -2855,6 +2942,7 @@ async function loadContacts() {
 // LXMF peer tracker (Users tab)
 // ---------------------------------------------------------------------------
 let _allPeers = [];
+let _peerListWindow = { page: 1, frozen: null, resetKey: null };
 
 async function refreshLxmfPeers() {
   if (!_authState.logged_in) return;
@@ -2869,13 +2957,13 @@ function renderPeerList() {
   const inner  = $('user-list-inner');
   const filter = ($('user-filter')?.value || '').trim().toLowerCase();
   if (!inner) return;
-  const visible = filter
+  const filtered = filter
     ? _allPeers.filter(p =>
         (p.name || '').toLowerCase().includes(filter) ||
         p.hash.toLowerCase().includes(filter))
     : _allPeers;
 
-  if (!visible.length) {
+  if (!filtered.length) {
     inner.innerHTML = filter
       ? `<div class="msg-empty">No matches for &ldquo;${esc(filter)}&rdquo;.</div>`
       : '<div class="msg-empty">' +
@@ -2886,7 +2974,11 @@ function renderPeerList() {
     return;
   }
   inner.innerHTML = '';
-  for (const peer of visible) {
+  // Windowed — see _windowList's own doc comment (also used by the node
+  // list). A large mesh can hear thousands of announces; only the most
+  // recent LIST_PAGE_SIZE render up front.
+  const w = _windowList(filtered, _peerListWindow, filter);
+  for (const peer of w.visible) {
     const contact = _contacts.find(c => c.hash === peer.hash);
     const name    = contact?.name || peer.name || peer.hash.slice(0, 16) + '…';
     const row = document.createElement('div');
@@ -2930,6 +3022,12 @@ function renderPeerList() {
       openConversation(peer.hash);
     });
     inner.appendChild(row);
+  }
+  if (w.remaining > 0) {
+    inner.appendChild(_makeLoadMoreRow(w.remaining, inner, () => {
+      w.loadMore();
+      renderPeerList();
+    }, 'div'));
   }
 }
 
