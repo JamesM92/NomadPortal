@@ -103,6 +103,40 @@ class ContactStore:
         self._persist(snapshot)
         return True
 
+    def set_blocked(self, hash_hex: str, blocked: bool) -> dict:
+        """Unlike set_favorite, works even for a sender with no existing
+        contact record — you can want to block someone you've never
+        explicitly added, whereas favoriting an unknown sender doesn't
+        make sense the same way. Auto-creates a minimal record on
+        block, same "don't require a pre-existing record for a
+        legitimate user action" reasoning as favoriting a never-
+        announced node. Returns the (possibly newly-created) entry.
+        """
+        with self._lock:
+            entry = self._data.get(hash_hex)
+            if entry is None:
+                entry = {
+                    "hash":      hash_hex,
+                    "name":      hash_hex[:16],
+                    "note":      "",
+                    "favorited": False,
+                    "created":   time.time(),
+                    "updated":   time.time(),
+                }
+                self._data[hash_hex] = entry
+                log.info("Added contact (block) %s", hash_hex[:16])
+            entry["blocked"] = blocked
+            entry["updated"] = time.time()
+            snapshot = dict(self._data)
+        self._persist(snapshot)
+        log.info("%s %s", "Blocked" if blocked else "Unblocked", hash_hex[:16])
+        return entry
+
+    def is_blocked(self, hash_hex: str) -> bool:
+        with self._lock:
+            entry = self._data.get(hash_hex)
+            return bool(entry and entry.get("blocked"))
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------

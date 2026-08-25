@@ -266,6 +266,11 @@ body {
 .icon-btn:hover { color: var(--accent); }
 .icon-btn.fav-active { color: var(--warn); }
 #btn-fav-page { font-size: 18px; padding: 0 6px; }
+
+/* Chat header block/unblock toggle — inline-styled like its siblings
+   (#btn-rename-chat/#btn-delete-chat), just needs the active-state
+   color _updateBlockButton() toggles via class. */
+#btn-block-chat.blocked-active { color: var(--error); }
 /* ``display: inline-flex`` on the id selector otherwise wins over
    the HTML ``hidden`` attribute (which sets ``display: none`` via
    the browser's default stylesheet with lower specificity), leaving

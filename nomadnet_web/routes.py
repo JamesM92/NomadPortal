@@ -1623,6 +1623,22 @@ def api_contact_favorite(hash_hex: str):
     return jsonify({"ok": ok})
 
 
+@bp.post("/api/contacts/<path:hash_hex>/block")
+@login_required
+def api_contact_block(hash_hex: str):
+    """Block/unblock a sender — enforced in messaging.py's own
+    _on_delivery, which silently drops any inbound message from a
+    blocked hash before it's stored or processed. Works even for a
+    hash with no existing contact record (see ContactStore.
+    set_blocked's own doc comment for why)."""
+    data  = request.get_json(silent=True) or {}
+    store = _contact_store()
+    if not store:
+        abort(503)
+    entry = store.set_blocked(hash_hex, bool(data.get("blocked", True)))
+    return jsonify({"ok": True, "contact": entry})
+
+
 @bp.delete("/api/contacts/<path:hash_hex>")
 @login_required
 def api_contact_delete(hash_hex: str):

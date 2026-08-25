@@ -80,6 +80,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (login-required, serves ``image/svg+xml`` directly). 5 new pytest
   cases cover the payload format (including a literal round-trip
   through Android's own parser shape) and SVG rendering.
+- **Per-contact message blocking**, ported from the NomadPortal-Android
+  sister project's blocked-contacts feature. A new "Block" button in
+  the chat header toggles a ``blocked`` flag on that contact's record;
+  the blocked flag is enforced in ``MessagingService._on_delivery()``
+  with an early return right after the sender's hash is known, before
+  the message is saved or the icon is extracted from it, so a blocked
+  sender's message leaves no trace for the sender or the UI to detect
+  the block from. ``ContactStore.set_blocked()`` works even for a
+  hash with no existing contact record, since blocking a sender you
+  have never explicitly added as a contact is a normal case (unlike
+  favoriting). Blocking is per user, not global, since contacts
+  already are. The conversation list dims a blocked contact's row and
+  adds a "🚫 blocked" label so a blocked contact is not silently
+  indistinguishable from any other. New ``POST
+  /api/contacts/<hash>/block`` (login-required, mirrors the existing
+  favorite-toggle route). 10 new pytest cases cover the storage half
+  (auto-creating a minimal record, preserving other fields across a
+  block/unblock cycle, persistence across a reload) and the
+  enforcement half (a blocked sender's message is never stored, an
+  unblock lets future messages through again, blocking one account
+  does not affect another, and the guard degrades to "allow" rather
+  than crashing when no contact store is wired in).
 
 ### Fixed
 

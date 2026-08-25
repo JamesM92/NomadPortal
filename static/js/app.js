@@ -2472,15 +2472,19 @@ function renderConversationList(conversations) {
     el.style.display = 'flex';
     el.style.alignItems = 'center';
     el.style.gap = '8px';
+    if (contact?.blocked) el.style.opacity = '0.55';
     const badge = conv.unread
       ? `<span class="inbox-badge">${conv.unread}</span>`
+      : '';
+    const blockedLabel = contact?.blocked
+      ? ' <span style="color:var(--error);font-size:9px;font-weight:normal;">🚫 blocked</span>'
       : '';
     const convIcon = _contactIcon(contact, 36);
     el.innerHTML =
       (convIcon ? `<div style="width:36px;height:36px;flex-shrink:0;">${convIcon}</div>` : '') +
       `<div style="flex:1;min-width:0;">` +
         `<div class="conv-header">` +
-          `<span class="conv-name">${esc(name)}${badge}</span>` +
+          `<span class="conv-name">${esc(name)}${badge}${blockedLabel}</span>` +
           `<span class="conv-time">${formatAge(conv.lastTime)}</span>` +
         `</div>` +
         `<div class="conv-preview">` +
@@ -2491,6 +2495,19 @@ function renderConversationList(conversations) {
     el.addEventListener('click', () => openConversation(conv.hash));
     inner.appendChild(el);
   }
+}
+
+// Reflects a contact's blocked state on the chat header's block button
+// — separate from the toggle logic itself so openConversation() can
+// call it too (the button must show the right state the moment a
+// conversation opens, not just after the user clicks it).
+function _updateBlockButton(contact) {
+  const btn = $('btn-block-chat');
+  if (!btn) return;
+  const blocked = !!contact?.blocked;
+  btn.textContent = blocked ? '✅' : '🚫';
+  btn.title = blocked ? 'Unblock this contact' : 'Block this contact';
+  btn.classList.toggle('blocked-active', blocked);
 }
 
 function openConversation(hash) {
@@ -2507,6 +2524,7 @@ function openConversation(hash) {
     iconSlot.innerHTML = hdrIcon;
     iconSlot.style.display = hdrIcon ? 'block' : 'none';
   }
+  _updateBlockButton(contact);
   $('chat-list-view').hidden = true;
   $('chat-view').hidden      = false;
   // On mobile, the "Announce identity" block and Chats/Users tab bar sit
@@ -2722,6 +2740,32 @@ $('btn-rename-chat').addEventListener('click', () => {
     if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
     if (e.key === 'Escape') { input.value = current; input.blur(); }
   });
+});
+
+$('btn-block-chat').addEventListener('click', async () => {
+  if (!_currentConvHash) return;
+  const hash    = _currentConvHash;
+  const contact = _contacts.find(c => c.hash === hash);
+  const newVal  = !contact?.blocked;
+  const label   = newVal ? 'Block this contact? They will no longer be able to message you.'
+                          : 'Unblock this contact?';
+  if (!confirm(label)) return;
+  try {
+    const d = await apiFetch(`/api/contacts/${hash}/block`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blocked: newVal }),
+    });
+    if (d.ok) {
+      if (contact) contact.blocked = newVal;
+      else _contacts = [..._contacts, d.contact];
+      _updateBlockButton(d.contact || contact);
+      renderConversationList(_allConversations);
+      setStatus(newVal ? 'Contact blocked.' : 'Contact unblocked.', 'ok');
+    }
+  } catch (err) {
+    setStatus(`Could not update block status: ${err.message}`, 'error');
+  }
 });
 
 $('btn-chat-back').addEventListener('click', () => {

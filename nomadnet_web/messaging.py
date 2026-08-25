@@ -518,6 +518,22 @@ class MessagingService:
         source_hex = message.source_hash.hex() if message.source_hash else ""
         msg_id     = message.hash.hex()         if message.hash         else ""
 
+        # Per-sender blocking — checked before anything else runs, so a
+        # blocked sender's message never gets stored, never triggers an
+        # icon update, never surfaces anywhere. Deliberately silent
+        # (not a distinct error/rejection the sender could observe) —
+        # indistinguishable from any other delivery outcome on their
+        # end, same privacy reasoning this app already applies
+        # elsewhere for contacts-only enforcement (a filtered sender
+        # sees no different result than a genuine delivery failure).
+        if self._contact_mgr and source_hex and user_sub:
+            if self._contact_mgr.for_user(user_sub).is_blocked(source_hex):
+                log.info(
+                    "Dropping message from blocked contact %s",
+                    source_hex[:16],
+                )
+                return
+
         def _decode(val) -> str:
             if val is None:
                 return ""
