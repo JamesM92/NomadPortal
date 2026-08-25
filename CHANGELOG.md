@@ -166,6 +166,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the wire-protocol message classes (real pack/unpack round-trips),
   the session state machine in isolation (no real network I/O), and
   ``RnshManager``'s per-account session isolation.
+- **Network tab row clicks now open a technical-info dialog instead of
+  navigating/opening chat directly.** Per explicit direction, matching
+  the NomadPortal-Android sister project's own Network tab design:
+  clicking an announce (site, peer, or relay) surfaces its stats first
+  — the actual "go to site" / "open chat" action moved into the
+  dialog's own button rather than firing immediately on tap. Shown for
+  every kind: type, address (click to copy), next-hop interface, hop
+  count, last announce (relay: first seen + last seen separately),
+  and announces heard. Per kind: peers additionally show whether
+  they're blocked; sites show last-fetch outcome and favorite status;
+  relays show whether this instance is currently syncing through them.
+  Relays — mesh infrastructure, not an addressable destination — get
+  only a Close button, no action button, same as Android's own dialog
+  for that item type. The interface field is fetched from the existing
+  ``/api/nodes/<hash>/diagnostics`` endpoint (already generic over any
+  hash, not just known sites) and fills in asynchronously after the
+  dialog opens so the rest of the stats render with no round trip.
 
 ### Fixed
 

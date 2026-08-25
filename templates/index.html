@@ -235,6 +235,26 @@
       padding: 6px 8px; border-radius: 2px; outline: none;
     }
     .rnsh-line-input:disabled { opacity: .5; }
+
+    /* ---- Announce technical info dialog ---- */
+    /* Same real-rule-not-inline-style pattern as #settings-modal/
+       #qr-modal above — see #icon-picker-modal's own comment for why. */
+    #announce-info-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #announce-info-modal[hidden] { display: none; }
+    #announce-info-rows { display: flex; flex-direction: column; gap: 6px; }
+    .info-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px; font-size: 12px;
+    }
+    .info-row .info-label { color: var(--text-dim); flex-shrink: 0; }
+    .info-row .info-value {
+      color: var(--text); text-align: right; word-break: break-all;
+    }
+    .info-row .info-value.info-copyable { cursor: pointer; }
+    .info-row .info-value.info-copyable:hover { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -655,6 +675,18 @@
   <span id="cache-info"></span>
   <span id="abuse-contact" hidden style="margin-left:auto;font-size:10px;color:var(--text-dim);"></span>
 </footer>
+
+<!-- ===== Announce technical info dialog (Network tab row click) ======= -->
+<div id="announce-info-modal" hidden>
+  <div class="modal-box">
+    <div class="modal-title" id="announce-info-title"></div>
+    <div id="announce-info-rows"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-modal-cancel" id="btn-announce-info-close">Close</button>
+      <button type="button" class="btn-modal-send" id="btn-announce-info-action" hidden></button>
+    </div>
+  </div>
+</div>
 
 <!-- ===== Compose message modal ======================================= -->
 <div id="msg-modal" hidden>

@@ -3234,7 +3234,7 @@ function renderNetworkList() {
     for (const n of _allNodes) {
       entries.push({
         kind: 'site', hash: n.hash, name: n.name,
-        last_seen: n.last_seen, hops: n.hops,
+        last_seen: n.last_seen, first_seen: n.first_seen, hops: n.hops,
         announce_count: n.announce_count,
         last_load_ok: n.last_load_ok, ever_load_ok: n.ever_load_ok,
         is_hosted: n.is_hosted, is_default: n.is_default, favorited: n.favorited,
@@ -3246,7 +3246,7 @@ function renderNetworkList() {
       const contact = _contacts.find(c => c.hash === p.hash);
       entries.push({
         kind: 'peer', hash: p.hash, name: contact?.name || p.name,
-        last_seen: p.last_seen, hops: p.hops,
+        last_seen: p.last_seen, first_seen: p.first_seen, hops: p.hops,
         announce_count: p.announce_count,
       });
     }
@@ -3255,7 +3255,7 @@ function renderNetworkList() {
     for (const r of _allRelays) {
       entries.push({
         kind: 'relay', hash: r.hash, name: null,
-        last_seen: r.last_seen, hops: r.hops,
+        last_seen: r.last_seen, first_seen: r.first_seen, hops: r.hops,
         announce_count: r.announce_count, picked: r.picked,
       });
     }
@@ -3388,44 +3388,147 @@ function makeNetworkItem(entry) {
       `</div>` +
     `</div>`);
 
-  if (entry.kind === 'site') {
-    li.addEventListener('click', e => {
-      if (e.target.closest('.node-fav-btn')) return;
-      navigateTo(`hash://${entry.hash}/page/index.mu`);
-    });
-  } else if (entry.kind === 'peer') {
-    li.addEventListener('click', async () => {
-      // Peers are guest-viewable now (see /api/lxmf-peers's own doc
-      // comment), but messaging still genuinely needs a real identity
-      // — give guests a real reason instead of the click doing
-      // nothing with no explanation.
-      if (!_authState.logged_in) {
-        setStatus('Sign in to start a conversation.', 'error');
-        return;
-      }
-      const contact = _contacts.find(c => c.hash === entry.hash);
-      if (!contact) {
-        try {
-          const d = await apiFetch('/api/contacts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hash: entry.hash, name: entry.name || '' }),
-          });
-          if (d.ok) _contacts = [..._contacts.filter(c => c.hash !== entry.hash), d.contact];
-        } catch (_) {}
-      }
-      showSidebarPanel('messages');
-      switchMsgTab('chats');
-      openConversation(entry.hash);
-    });
-  } else {
-    // Relays are mesh infrastructure, not an addressable destination
-    // for messaging or NomadNet browsing — no click action, matches
-    // the node list's own .node-locked "inert row" cursor treatment.
-    li.style.cursor = 'default';
-  }
+  // Per explicit direction (matching the NomadPortal-Android sister
+  // project's own Network tab: "the network tab is for in depth
+  // analyses, stats and info for each announce... clicking a site
+  // brings up its technical info with the option of going to the
+  // site... clicking a user in network brings their technical info"),
+  // every row click here opens the technical-info dialog rather than
+  // navigating/opening chat directly — that action moved into the
+  // dialog's own confirm button (_openAnnounceInfo).
+  li.addEventListener('click', e => {
+    if (e.target.closest('.node-fav-btn')) return;
+    _openAnnounceInfo(entry);
+  });
   return li;
 }
+
+// Reused by the announce-info dialog's "Open Chat" button — was
+// previously inline in makeNetworkItem's own peer click handler,
+// factored out so both call sites share the same contact-creation +
+// panel-switch behavior.
+async function _openPeerChatFromAnnounce(entry) {
+  if (!_authState.logged_in) {
+    setStatus('Sign in to start a conversation.', 'error');
+    return;
+  }
+  const contact = _contacts.find(c => c.hash === entry.hash);
+  if (!contact) {
+    try {
+      const d = await apiFetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash: entry.hash, name: entry.name || '' }),
+      });
+      if (d.ok) _contacts = [..._contacts.filter(c => c.hash !== entry.hash), d.contact];
+    } catch (_) {}
+  }
+  showSidebarPanel('messages');
+  switchMsgTab('chats');
+  openConversation(entry.hash);
+}
+
+// ---------------------------------------------------------------------------
+// Announce technical info dialog (Network tab row click)
+// ---------------------------------------------------------------------------
+
+function _infoRowsHTML(rows) {
+  return rows.map(([label, value, copyable]) =>
+    `<div class="info-row" data-label="${esc(label)}">` +
+      `<span class="info-label">${esc(label)}</span>` +
+      `<span class="info-value${copyable ? ' info-copyable' : ''}">${esc(value)}</span>` +
+    `</div>`
+  ).join('');
+}
+
+function _setInfoRowValue(label, value) {
+  const row = document.querySelector(`#announce-info-rows .info-row[data-label="${CSS.escape(label)}"] .info-value`);
+  if (row) row.textContent = value;
+}
+
+async function _openAnnounceInfo(entry) {
+  const typeLabel = entry.kind === 'site' ? 'NomadNet site'
+    : entry.kind === 'peer' ? 'LXMF peer' : 'Propagation node (relay)';
+  const hopsLabel = (entry.hops === null || entry.hops === undefined)
+    ? 'Unknown'
+    : entry.hops === 0 ? 'local' : entry.hops === 1 ? '1 hop' : `${entry.hops} hops`;
+
+  const rows = [
+    ['Type', typeLabel],
+    ['Address', entry.hash, true],
+    ['Interface', '…'],   // filled in async below — best-effort, decorative
+    ['Hops', hopsLabel],
+  ];
+  if (entry.kind === 'relay') {
+    rows.push(['First seen', entry.first_seen ? formatAge(entry.first_seen) : 'Unknown']);
+    rows.push(['Last seen', entry.last_seen ? formatAge(entry.last_seen) : 'Unknown']);
+  } else {
+    rows.push(['Last announce', entry.last_seen ? formatAge(entry.last_seen) : 'Unknown']);
+  }
+  rows.push(['Announces heard', String(entry.announce_count ?? '?')]);
+
+  if (entry.kind === 'peer') {
+    const contact = _contacts.find(c => c.hash === entry.hash);
+    rows.push(['Blocked', contact?.blocked ? 'Yes' : 'No']);
+  } else if (entry.kind === 'site') {
+    let fetchLabel = 'Never fetched';
+    if (entry.last_load_ok === true) fetchLabel = 'OK';
+    else if (entry.last_load_ok === false) {
+      fetchLabel = entry.ever_load_ok ? 'Failed (worked before)' : 'Failed (never worked)';
+    }
+    rows.push(['Last fetch', fetchLabel]);
+    rows.push(['Favorite', entry.favorited ? 'Yes' : 'No']);
+  } else if (entry.kind === 'relay') {
+    rows.push(['Currently syncing', entry.picked ? 'Yes' : 'No']);
+  }
+
+  $('announce-info-title').textContent = entry.name || (entry.hash.slice(0, 16) + '…');
+  $('announce-info-rows').innerHTML = _infoRowsHTML(rows);
+  $('announce-info-rows').querySelector('.info-copyable')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(entry.hash).catch(() => {});
+    _setInfoRowValue('Address', 'Copied!');
+    setTimeout(() => _setInfoRowValue('Address', entry.hash), 1200);
+  });
+
+  const actionBtn = $('btn-announce-info-action');
+  if (entry.kind === 'site') {
+    actionBtn.hidden = false;
+    actionBtn.textContent = 'Go to Site';
+    actionBtn.onclick = () => {
+      _closeAnnounceInfo();
+      navigateTo(`hash://${entry.hash}/page/index.mu`);
+    };
+  } else if (entry.kind === 'peer') {
+    actionBtn.hidden = false;
+    actionBtn.textContent = 'Open Chat';
+    actionBtn.onclick = () => {
+      _closeAnnounceInfo();
+      _openPeerChatFromAnnounce(entry);
+    };
+  } else {
+    // A relay has nowhere to navigate to — mesh infrastructure, not an
+    // addressable destination for messaging or NomadNet browsing —
+    // dialog gets only the Close button, same as the Android sister
+    // project's own AnnounceTechnicalInfoDialog for this item type.
+    actionBtn.hidden = true;
+    actionBtn.onclick = null;
+  }
+
+  $('announce-info-modal').hidden = false;
+
+  try {
+    const diag = await apiFetch(`/api/nodes/${entry.hash}/diagnostics`);
+    _setInfoRowValue('Interface', diag.next_hop_iface || 'Unknown');
+  } catch (_) {
+    _setInfoRowValue('Interface', 'Unknown');
+  }
+}
+
+function _closeAnnounceInfo() {
+  $('announce-info-modal').hidden = true;
+}
+
+$('btn-announce-info-close')?.addEventListener('click', _closeAnnounceInfo);
 
 $('network-filter').addEventListener('input', renderNetworkList);
 $('network-sort')?.addEventListener('change', renderNetworkList);
