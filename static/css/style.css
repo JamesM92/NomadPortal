@@ -766,12 +766,12 @@ body {
   font-weight: bold;
   /* `margin: 0` matches MeshChat's Tailwind preflight reset — its headings
    * have no vertical spacing of their own; the only gap comes from the
-   * surrounding blank lines in the source.
-   *
-   * `margin-bottom: -1.08em` matches `.mu-line` so the next element doesn't
-   * sit on top of an extra empty row from Roboto Mono Nerd Font's inflated
-   * line metrics. */
-  margin: 0 0 -1.08em 0;
+   * surrounding blank lines in the source. Also matches `.mu-line`'s own
+   * `margin: 0` — see that rule's own doc comment for why a negative
+   * bottom margin here was a real, measured bug (compounding row-overlap
+   * on long tables), not the "inflated font metrics" fix it was written
+   * as; removed rather than just shrunk. */
+  margin: 0;
   white-space: pre;
 }
 .mu-h1 { background: #bbbbbb; color: #222222; }
@@ -782,22 +782,40 @@ body {
  *      preserve whitespace inside a line but wrap at viewport width, and
  *      give blank lines a full line-height so they read like real blank rows
  *      (MeshChat emits `<br>` for blanks; we use a div so we size manually). */
-/* Each Micron line is its own `<div>`. Roboto Mono Nerd Font has inflated
- * vertical metrics (extra leading for the Nerd Font icon glyphs), so even
- * at `line-height: 1` rows leave a small gap that breaks the box-drawing
- * characters (║, │, ─). Forcing a small negative top margin pulls each line
- * up enough to overlap and visually connect the box-drawing rows. */
+/* Each Micron line is its own `<div>`.
+ *
+ * Real, measured bug this used to have: this rule (and every other
+ * `.mu-*` block below sharing the same pattern) used to carry
+ * `margin-bottom: -1.08em`, on the theory that Roboto Mono Nerd Font's
+ * vertical metrics are "inflated" even at `line-height: 1`, leaving a
+ * gap that broke box-drawing characters (║, │, ─) unless pulled
+ * together. Measured directly (Playwright + Chromium, real font, real
+ * stylesheet) against a long Micron table (`` `t ``): at `line-height: 1`
+ * with this font, a `.mu-line`'s own rendered box height already
+ * matches its font-size to a fraction of a pixel — there never was a
+ * gap to compensate for here, at least not in Chromium. The -1.08em
+ * margin was instead ~0.08em *too negative*, pulling every row up
+ * 0.08em (~1.3px at this app's 16.64px content font-size) relative to
+ * where normal block flow would put it — invisible for a page with a
+ * handful of lines, but this error compounds with every additional
+ * sibling `.mu-line`: an 87-row table (a real page — a malformed
+ * upstream Micron table whose long cells got line-wrapped into many
+ * spurious extra rows) drifted rows up by well over 100px total,
+ * dragging later rows on top of earlier ones — exactly the "text
+ * rendering on top of itself" a plain-text NomadNet client could never
+ * produce, since there's no such thing as a fractional negative margin
+ * in a terminal grid. `margin: 0` (the plain block-flow default, and
+ * what this rule now leaves in place) measured as the exactly correct
+ * value: rows stack flush, touching, zero gap, zero drift, at any row
+ * count. */
 .mu-line  {
   display: block;
-  /* `-1.08em` scales with the font-size (was tuned at 13px → -14px = ~1.08em).
-   * Keeps box-drawing rows touching at any font-size. */
-  margin: 0 0 -1.08em 0;
   line-height: 1;
   /* `white-space: pre` — never wrap; long lines scroll horizontally via the
    * container (NomadPortal viewer choice, not Micron parity). */
   white-space: pre;
 }
-.mu-blank { display: block; line-height: 1; height: 1em; margin-bottom: -1.08em; }
+.mu-blank { display: block; line-height: 1; height: 1em; }
 .mu-h1, .mu-h2, .mu-h3 { line-height: 1.2; padding: 2px 0; }
 pre.mu-literal { line-height: 1; }
 
@@ -818,15 +836,17 @@ pre.mu-literal { line-height: 1; }
   display: block;
   border: 0;
   border-top: 1px solid currentColor;
-  /* `-1.08em` matches `.mu-line` to remove the empty row that the inflated
-   * Nerd Font metrics would otherwise leave below this divider. */
-  margin: 0 0 -1.08em 0;
+  /* No negative margin here — see `.mu-line`'s own doc comment for why
+   * that used to be `-1.08em` and measured as actively wrong (this
+   * divider would have pulled the *following* line up by more than a
+   * full row, not just closed a font-metrics gap that doesn't exist). */
+  margin: 0;
   height: 0;
 }
 .mu-hr-double {
   display: block;
   border: 0;
-  margin: 0 0 -1.08em 0;
+  margin: 0;
   height: 1em;
   overflow: hidden;
   white-space: nowrap;
@@ -838,7 +858,7 @@ pre.mu-literal { line-height: 1; }
 }
 .mu-divider {
   display: block;
-  margin: 0 0 -1.08em 0;
+  margin: 0;
   overflow: hidden;
   white-space: nowrap;
   color: inherit;

@@ -276,6 +276,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Long Micron tables (and, more subtly, every page) could render
+  rows of text on top of each other, illegible.** Real, measured
+  layout bug: `.mu-line` (and five other `.mu-*` rules sharing the
+  same pattern — headings, blank lines, dividers) carried a
+  `margin-bottom: -1.08em`, written years ago on the theory that Roboto
+  Mono Nerd Font has "inflated" line metrics that leave a gap between
+  rows even at `line-height: 1`. Measured directly against the real
+  stylesheet and font in a real Chromium render (Playwright, pixel
+  `getBoundingClientRect()` checks — not guessed): there is no such
+  gap, and the margin was instead ~0.08em *too negative*, pulling every
+  row up about 1.3px relative to correct block flow at this app's
+  content font-size. Invisible on an ordinary page with a handful of
+  lines, but the error compounds with every sibling `.mu-line` — an
+  87-row table (a real page whose long cells got line-wrapped into many
+  extra rows by an upstream Micron generator) drifted over 100px,
+  dragging later rows on top of earlier ones. A plain-text NomadNet
+  client could never produce this — there's no such thing as a
+  fractional negative margin in a terminal grid — confirming it was
+  NomadPortal's own CSS, not a Micron-parity issue. Removed the
+  negative margin from all six rules; measured flush, zero-gap,
+  zero-drift row stacking at any row count with the plain `margin: 0`
+  block-flow default that's left in its place.
+
 - **The admin Identities page didn't say which account an identity
   belonged to.** Its "User" column actually showed the identity's own
   display name, not the owning account — harmless when every account
