@@ -1317,6 +1317,103 @@ async function pollFetchJob(jobId) {
   throw new Error('Fetch timed out waiting for response');
 }
 
+// ---------------------------------------------------------------------------
+// Wide-glyph normalization — some Unicode symbol/dingbat/geometric-shape
+// characters used as inline icon prefixes on Micron pages aren't in
+// Roboto Mono Nerd Font's own glyph set, so the browser silently
+// substitutes a system fallback font for just that one character — and
+// that fallback is very often NOT monospace, breaking the column
+// alignment Micron pages assume when they pad/align text by character
+// count (real example: a games-list page whose "Game" column drifted
+// out of alignment because ▦▣◉▽◖◗▢▮◐▤⚄⚓♚♛✊✋✌✕ each measured 12-23px
+// wide against a 10px cell in a real render — confirmed with Playwright
+// + per-character Range.getBoundingClientRect(), not guessed). Same
+// underlying problem class Braille characters (U+2800-28FF) already
+// had — see .mu-braille's own CSS doc comment — but Braille gets a
+// hand-drawn CSS fix (no font glyph involved at all) because it's one
+// specific, common, high-value character block; arbitrary future icon
+// choices on arbitrary future pages can't all get bespoke treatment
+// like that, so this instead self-calibrates at render time: measure
+// every "risky" character's *actual* rendered width against a real
+// monospace cell (probed from an ASCII glyph in the same font
+// context), and for anything more than ~15% off, wraps it in an
+// inline-block box pinned to the correct cell width — fixing where
+// *every character after it* lands, which is the actual bug. The
+// glyph itself is left at natural size (not shrunk to fit) — tried
+// that first via a scale() transform and it measurably fixed
+// alignment, but a glyph a fallback font draws 2x-plus a real cell's
+// width shrinks to a near-invisible dot at that ratio, defeating the
+// point of it being a recognisable icon; see .mu-wide-glyph's own CSS
+// doc comment for the "let it overflow instead" tradeoff this settled
+// on. Runs once per rendered page — cheap in practice since the
+// codepoint pre-filter below skips the vast majority of any page's
+// content (plain ASCII/Latin text) without ever touching layout.
+function _normalizeWideGlyphs(container) {
+  if (!container) return;
+  const probe = document.createElement('span');
+  probe.textContent = '0';
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;';
+  container.appendChild(probe);
+  const cellWidth = probe.getBoundingClientRect().width;
+  probe.remove();
+  if (!cellWidth) return;
+
+  // Measurement pass (read-only) — collected up front so applying fixes
+  // afterward never has to re-measure mid-mutation.
+  const range  = document.createRange();
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const targets = []; // {node, index, width}
+  let node;
+  while ((node = walker.nextNode())) {
+    const text = node.data;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.codePointAt(i);
+      // Fast-skip plain ASCII/Latin/Greek/Cyrillic and most accented
+      // text (below U+2190 "Arrows") plus combining diacritics
+      // (U+0300-036F) — the vast bulk of any page's real content, and
+      // never the problem this function exists for.
+      if (code < 0x2190 && !(code >= 0x0300 && code <= 0x036F)) continue;
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const w = range.getBoundingClientRect().width;
+      if (w > 0 && Math.abs(w - cellWidth) > cellWidth * 0.15) {
+        targets.push({ node, index: i, width: w });
+      }
+    }
+  }
+  if (!targets.length) return;
+
+  // Fix-up pass (write-only) — back-to-front *within each text node* so
+  // splitting text at an earlier index never invalidates a later one
+  // still pending against the same original node.
+  targets.sort((a, b) => b.index - a.index);
+  for (const t of targets) {
+    const ch = t.node.data[t.index];
+    const after = t.node.splitText(t.index);
+    after.data = after.data.slice(1); // drop the character being replaced below
+    const span = document.createElement('span');
+    span.className = 'mu-wide-glyph';
+    span.textContent = ch;
+    // Layout width is forced to the real cell size — that's what makes
+    // *everything after* this glyph land back on the correct column,
+    // which is the actual bug being fixed. Deliberately NOT shrinking
+    // the glyph itself to match (e.g. via transform: scale()) — tried
+    // that first and measured it working for alignment, but a glyph
+    // whose fallback font draws it 2x-plus a real cell's width shrinks
+    // to a near-invisible dot at that ratio, which defeats the point of
+    // having a recognisable icon there at all (💣 became indistinguishable
+    // from a comma). Left at natural size with overflow visible instead:
+    // an oversized glyph bleeds a few px into its own immediate
+    // neighbour — a small, localized, single-character artifact, not
+    // the multi-row text-on-text illegibility this same class of bug
+    // caused in a Micron table (see .mu-line's own doc comment) — while
+    // every character after it, and every other row's own icon column,
+    // lands exactly on-grid.
+    span.style.width = `${cellWidth}px`;
+    t.node.parentNode.insertBefore(span, after);
+  }
+}
+
 // Render whichever cached view (raw micron source or rendered HTML) the
 // Raw toggle is currently set to. Called after a fresh fetch and on every
 // toggle — never re-fetches from the node.
@@ -1327,6 +1424,7 @@ function renderPageContent() {
   }
 
   pageContent.innerHTML = _lastPage.html || '';
+  _normalizeWideGlyphs(pageContent);
   // Post-render form-state restoration for auto-refresh cycles. Cleared
   // immediately so a regular click-navigation that lands on the same
   // page doesn't pick up stale form values from a long-ago reload.
@@ -1514,6 +1612,7 @@ async function handleFormSubmit(form, nodeHash, currentPath) {
     const data = await pollFetchJob(startResp.job_id, false);
     showLoading(false);
     pageContent.innerHTML = data.html || '';
+    _normalizeWideGlyphs(pageContent);
     setStatus(`Submitted: ${action}`, 'ok');
   } catch (e) {
     showLoading(false);

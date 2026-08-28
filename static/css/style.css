@@ -641,10 +641,12 @@ body {
   text-shadow: 0.5px 0 0 currentColor;
 }
 
-/* Braille rendering — fully CSS-drawn, font-independent. After Micron2HTML
- * renders the page, app.js's `_braillify()` walks the DOM and replaces
- * each Braille character (U+2800-28FF) with one of these spans, with the
- * raised dots encoded as a radial-gradient list in `--mu-braille-dots`.
+/* Braille rendering — fully CSS-drawn, font-independent. The
+ * Micron2HTML *converter itself* (Python, server-side, v1.0.5+ —
+ * not app.js, despite what an earlier version of this comment said)
+ * replaces each Braille character (U+2800-28FF) with one of these
+ * spans directly in the HTML it emits, with the raised dots encoded
+ * as a radial-gradient list in `--mu-braille-dots`.
  *
  * `width: 1ch` makes the cell match the surrounding monospace cell width
  * exactly (1ch = advance width of '0' in the inherited font), so a row
@@ -666,6 +668,32 @@ body {
   inset: 0;
   background: var(--mu-braille-dots, transparent);
   background-repeat: no-repeat;
+}
+
+/* Wide-glyph normalization — the *client-side* counterpart to Braille
+ * above, for everything else: after Micron2HTML renders the page,
+ * app.js's `_normalizeWideGlyphs()` walks the DOM, measures every
+ * "risky" Unicode symbol/dingbat character's real rendered width, and
+ * for anything that isn't a real monospace cell (this font is missing
+ * the glyph, so the browser silently substituted a non-monospace
+ * system fallback font for just that one character) wraps it in one
+ * of these — width pinned to the real cell size, which is what makes
+ * every character *after* it land back on the correct column (the
+ * actual bug). The glyph itself stays at natural size and is allowed
+ * to visually overflow its 1-cell box (`overflow: visible`, the
+ * default, stated here for clarity) rather than being shrunk to fit —
+ * shrinking a glyph a fallback font draws 2x-plus a real cell's width
+ * down to that ratio makes it a near-invisible dot, defeating the
+ * point of it being a recognisable icon at all. `text-align: center`
+ * spreads an oversized glyph's overflow evenly on both sides instead
+ * of piling it all onto the next character. See
+ * _normalizeWideGlyphs()'s own doc comment for why this is a measure-
+ * and-fix approach rather than a maintained character allowlist,
+ * unlike Braille's own hand-drawn treatment. */
+#page-content .mu-wide-glyph {
+  display: inline-block;
+  text-align: center;
+  vertical-align: baseline;
 }
 
 #page-content {

@@ -276,6 +276,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Icon-prefixed columns on Micron pages could drift out of
+  alignment — a games-list page's "Game" column, one real example,
+  measured 12-23px per character against a 10px cell.** Some Unicode
+  symbol/dingbat/geometric-shape characters used as inline icons
+  (▦▣◉▽◖◗▢▮◐▤⚄⚓♚♛✊✋✌✕, confirmed with Playwright + per-character
+  `Range.getBoundingClientRect()`, not guessed) aren't in the bundled
+  Roboto Mono Nerd Font's own glyph set, so the browser silently
+  substitutes a system fallback font for just that one character — and
+  that fallback is very often not monospace. Same underlying problem
+  class Braille characters (U+2800-28FF) already had (see
+  `.mu-braille`), but Braille's fix is a hand-drawn, font-independent
+  CSS pattern specific to that one character block; arbitrary icon
+  choices on arbitrary future pages need something that doesn't
+  require a maintained allowlist. New `_normalizeWideGlyphs()`
+  (app.js) runs once per rendered page: measures every "risky"
+  character's actual rendered width against a real monospace cell and,
+  for anything off by more than ~15%, wraps it in an inline-block box
+  pinned to the correct cell width — fixing where every character
+  *after* it lands, which is the actual bug. Deliberately does not
+  shrink the oversized glyph itself to fit (tried a `transform:
+  scale()` version first — it measurably fixed alignment, but shrinking
+  a glyph a fallback font draws 2x-plus a real cell's width down to
+  that ratio makes it a near-invisible dot, defeating the point of it
+  being a recognisable icon — 💣 became indistinguishable from a
+  comma). Left at natural size with the overflow allowed instead, so
+  every icon stays fully recognisable at the cost of a small, localised
+  visual bleed into its own immediate neighbour on the rare oversized
+  glyph — not the multi-row illegibility the entry below describes.
+
 - **Long Micron tables (and, more subtly, every page) could render
   rows of text on top of each other, illegible.** Real, measured
   layout bug: `.mu-line` (and five other `.mu-*` rules sharing the
