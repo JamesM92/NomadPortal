@@ -35,7 +35,7 @@ flask-login==0.6.3
 authlib==1.7.2
 requests==2.34.2
 pyyaml==6.0.3
-gunicorn==26.0.0
+gunicorn==26.2.0
 pytest==9.1.1
 
 # Renderer — published to PyPI from v1.0.7 onwards.
