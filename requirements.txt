@@ -56,4 +56,4 @@ Micron2HTML==1.1.1
 # Dockerfile `pip install --upgrade` keeps it under the same
 # version-bump discipline as every other dependency here instead of
 # floating unpinned.
-setuptools==83.0.0
+setuptools==84.0.0
