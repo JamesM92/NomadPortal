@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk page cache, step 2a — server wiring.** ``POST /api/page/fetch``
+  now returns a ``cached`` payload (html, micron, age in seconds) when a
+  last-good copy exists, alongside the usual ``job_id``; a finished
+  ``/api/page/poll`` refreshes the copy. Only anonymous plain GETs read
+  or write the cache — form submissions and fetches that present an
+  identity never do, so one visitor's rendered page cannot reach
+  another. A failed fetch leaves the old copy in place. Front-end
+  indicator (spinner / green dot / red X) is step 2b. 13 new tests.
+
 - **Kiosk page cache, step 1 (module only, not wired in yet).** New
   ``nomadnet_web/kiosk_cache.py``: a disk-backed last-good cache for the
   public kiosk. No TTL — any cached copy is served and reports its age;

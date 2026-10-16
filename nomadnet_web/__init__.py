@@ -63,6 +63,14 @@ def create_app(
     config_dir = cfg.get("CONFIG_DIR", "/config")
     rns_dir    = cfg.get("RNS_CONFIG_DIR", "/config/reticulum")
 
+    # Disk-backed last-good page cache for the public kiosk. Must be on
+    # local disk (config/), never a network filesystem.
+    from .kiosk_cache import KioskCache, DEFAULT_MAX_BYTES
+    app.config["KIOSK_CACHE"] = KioskCache(
+        config_dir,
+        max_bytes=int(cfg.get("KIOSK_CACHE_MAX_BYTES", DEFAULT_MAX_BYTES)),
+    )
+
     # RNS-dependent setup steps get queued here and run in a background
     # thread AFTER the browser's own RNS init has finished (see the
     # trailing block in create_app that launches that thread). Keeping

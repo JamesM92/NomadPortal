@@ -44,6 +44,23 @@ PRIORITY_REQUESTED = "requested"
 PRIORITY_PREWARM = "prewarm"
 
 
+def kiosk_key(node_hash: str, path: str) -> str:
+    """Cache key for a page. Node hash is case-folded so the fetch-start
+    and poll routes (which differ in how they carry it) always agree."""
+    return f"{(node_hash or '').lower()}:{path or '/'}"
+
+
+def kiosk_cacheable(field_data, identify_with) -> bool:
+    """Whether a page fetch may read or write the shared kiosk cache.
+
+    The cache is served to every visitor, so only fetches whose result
+    cannot depend on who asked qualify: no form data (a submission is a
+    one-off outcome, not a page) and no identity presented to the node
+    (identified fetches can render per-user content).
+    """
+    return not field_data and identify_with is None
+
+
 @dataclass(frozen=True)
 class CacheEntry:
     content: bytes

@@ -16,6 +16,7 @@ from flask import Blueprint, jsonify, request, abort, current_app
 from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
+from .kiosk_cache import kiosk_cacheable, kiosk_key
 
 log = logging.getLogger(__name__)
 bp = Blueprint("nomadnet", __name__)
@@ -111,6 +112,9 @@ def _browser():
 
 def _cache():
     return current_app.config["CACHE"]
+
+def _kiosk_cache():
+    return current_app.config.get("KIOSK_CACHE")
 
 def _id_store():
     return current_app.config["IDENTITY_STORE"]
@@ -827,12 +831,36 @@ def api_page_fetch_start():
             }
         return jsonify({"job_id": job_id, "raw": raw})
 
-    # Remote — normal async fetch
+    # Remote — normal async fetch. Anonymous plain GETs also consult the
+    # kiosk cache: if a last-good copy exists it rides along in the
+    # response so the browser can show it immediately while the fetch
+    # below refreshes it in the background.
+    identify_with = _identity_for_fetch(node_hash)
     job_id = _browser().fetch_page_async(
         node_hash, path, field_data=field_data,
-        identify_with=_identity_for_fetch(node_hash),
+        identify_with=identify_with,
     )
-    return jsonify({"job_id": job_id, "raw": raw})
+    resp = {"job_id": job_id, "raw": raw}
+    kiosk = _kiosk_cache()
+    if kiosk is not None and kiosk_cacheable(field_data, identify_with):
+        with _browser()._jobs_lock:
+            job = _browser()._jobs.get(job_id)
+            if job is not None:
+                job["kiosk_cacheable"] = True
+        entry = kiosk.get(kiosk_key(node_hash, path))
+        if entry is not None:
+            micron_text = entry.content.decode("utf-8", errors="replace")
+            resp["cached"] = {
+                "hash":   node_hash.lower(),
+                "path":   path,
+                "age_s":  int(entry.age_s),
+                "micron": micron_text,
+                "html":   _converter.convert(
+                    micron_text, node_hash=node_hash, base_path=path,
+                    authenticated=_can_interact(node_hash),
+                ),
+            }
+    return jsonify(resp)
 
 
 @bp.get("/api/page/poll")
@@ -871,6 +899,9 @@ def api_page_poll():
     is_local = site_server and site_server.node_hash() == node_hash
     if not is_local:
         _cache().set(f"{node_hash}:{path}", content)
+        kiosk = _kiosk_cache()
+        if kiosk is not None and job.get("kiosk_cacheable") and content:
+            kiosk.set(kiosk_key(node_hash, path), content)
 
     micron_text = content.decode("utf-8", errors="replace")
     _browser().drop_job(job_id)

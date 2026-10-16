@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from nomadnet_web.kiosk_cache import KioskCache, SIX_MONTHS_S
+from nomadnet_web.kiosk_cache import KioskCache, SIX_MONTHS_S, kiosk_cacheable, kiosk_key
 
 
 class Clock:
@@ -182,3 +182,24 @@ class TestMaintenance:
             assert root.startswith(str(tmp_path))
         assert c.get("../../etc/passwd").content == b"nope"
         assert not os.path.exists(os.path.join(os.path.dirname(str(tmp_path)), "etc"))
+
+
+class TestCacheEligibility:
+    """The cache is shared across all visitors, so a fetch qualifies only
+    if its result cannot depend on who made it."""
+
+    def test_plain_anonymous_get_qualifies(self):
+        assert kiosk_cacheable(None, None) is True
+        assert kiosk_cacheable({}, None) is True
+
+    def test_form_submission_never_qualifies(self):
+        assert kiosk_cacheable({"name": "x"}, None) is False
+
+    def test_identified_fetch_never_qualifies(self):
+        assert kiosk_cacheable(None, object()) is False
+
+    def test_key_is_case_insensitive_on_node_hash(self):
+        assert kiosk_key("ABCDEF", "/page/a.mu") == kiosk_key("abcdef", "/page/a.mu")
+
+    def test_key_separates_paths(self):
+        assert kiosk_key("ab", "/a.mu") != kiosk_key("ab", "/b.mu")
