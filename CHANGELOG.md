@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk: background pre-warming.** New ``nomadnet_web/prewarm.py``: once
+  Reticulum is up, and then every hour, the portal fetches each
+  prescribed node's landing page and follows same-node links two hops,
+  storing the pages in the saved-copy cache so a first-time visitor
+  rarely waits on the mesh. It is gentle by design: one page at a time
+  with a pause between fetches, at most 25 pages per node, it skips
+  blocked nodes and the hosted site (which is already local), it stops
+  the pass if the mesh isn't up, and links that are form actions,
+  queries, files or other nodes are not followed. Pre-warmed pages are
+  the first evicted when the cache is full, and a refresh never
+  demotes a page a visitor asked for. Tunable with
+  ``KIOSK_PREWARM_INTERVAL`` (0 turns it off), ``KIOSK_PREWARM_DEPTH``
+  and ``KIOSK_PREWARM_MAX_PAGES``. ``KIOSK_CACHE_MAX_BYTES`` now works
+  as an environment variable (it was only read from an app-config key
+  nothing set); bad values fall back to the default with a warning.
 - **Kiosk: friendly page when a first load can't complete.** A page with
   no saved copy that fails for a transient reason (mesh busy or down,
   server hiccup) is now retried quietly for about 30 seconds, with the

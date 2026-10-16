@@ -124,6 +124,11 @@ class KioskCache:
             return
         with self._lock:
             now = self._clock()
+            # A speculative refresh must not demote a page a visitor
+            # actually asked for.
+            existing = self._index.get(key)
+            if existing and existing["priority"] == PRIORITY_REQUESTED:
+                priority = PRIORITY_REQUESTED
             self._write_blob(key, content)
             self._index[key] = {
                 "size": len(content),

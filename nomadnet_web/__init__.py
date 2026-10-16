@@ -26,11 +26,25 @@ from .call_tracker import CallPeerTracker
 from .call_manager import CallManagerRegistry
 from .call_settings import CallSettingsManager
 from .ui_settings import UISettings
+from .access import PolicyConfig
+from .prewarm import PreWarmer
 from .log_buffer import buffer as log_buffer
 from .rnsh_client import RnshManager
 from . import csrf as csrf_mod
 
 log = logging.getLogger(__name__)
+
+
+def _env_int(cfg: dict, name: str, default: int) -> int:
+    """An integer setting from the app config or, failing that, the
+    environment. A bad value falls back to the default instead of
+    stopping the portal from starting."""
+    raw = cfg.get(name, os.environ.get(name, default))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning("Ignoring invalid %s=%r", name, raw)
+        return default
 
 
 def create_app(
@@ -68,7 +82,7 @@ def create_app(
     from .kiosk_cache import KioskCache, DEFAULT_MAX_BYTES
     app.config["KIOSK_CACHE"] = KioskCache(
         config_dir,
-        max_bytes=int(cfg.get("KIOSK_CACHE_MAX_BYTES", DEFAULT_MAX_BYTES)),
+        max_bytes=_env_int(cfg, "KIOSK_CACHE_MAX_BYTES", DEFAULT_MAX_BYTES),
     )
 
     # RNS-dependent setup steps get queued here and run in a background
@@ -196,6 +210,28 @@ def create_app(
     users_yml = cfg.get("USERS_YML", "/config/users.yml")
     app.config["USER_STORE"]  = UserStore(users_yml)
     app.config["UI_SETTINGS"] = UISettings(config_dir)   # must be before site server
+
+    # Kiosk pre-warm: keeps the prescribed nodes' landing pages (and their
+    # same-node links) fresh in the kiosk cache so a first-time visitor
+    # rarely waits on the mesh. Reads the prescribed list live, so an
+    # admin change takes effect on the next pass. Interval 0 disables it.
+    def _prewarm_nodes():
+        site = app.config.get("SITE_SERVER")
+        hosted = (site.node_hash() or "").lower() if site else ""
+        policy = PolicyConfig.from_settings(app.config["UI_SETTINGS"].get_all(), hosted)
+        return [h for h in policy.prescribed
+                if h != hosted and not browser.is_blocked(h)]
+
+    prewarmer = PreWarmer(
+        lambda node, path: browser.fetch_page(node, path),
+        app.config["KIOSK_CACHE"],
+        _prewarm_nodes,
+        depth=_env_int(cfg, "KIOSK_PREWARM_DEPTH", 2),
+        max_pages=_env_int(cfg, "KIOSK_PREWARM_MAX_PAGES", 25),
+        interval_s=_env_int(cfg, "KIOSK_PREWARM_INTERVAL", 3600),
+    )
+    app.config["KIOSK_PREWARMER"] = prewarmer
+    _defer_after_rns("Kiosk pre-warm", prewarmer.start)
 
     # Site hosting — start node server unless explicitly disabled. The
     # operator can configure this at two layers:

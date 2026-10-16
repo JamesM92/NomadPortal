@@ -125,6 +125,10 @@ All options are set through environment variables in `docker-compose.yml`.
 | `WEB_PORT` | `8080` | HTTP redirect port |
 | `WEB_PORT_HTTPS` | `8443` | HTTPS port (main app) |
 | `CACHE_TTL` | `300` | Page cache TTL in seconds |
+| `KIOSK_CACHE_MAX_BYTES` | `31457280` | Size cap (bytes) of the saved-copy cache that keeps pages available when the mesh is down. Oldest-used copies go first |
+| `KIOSK_PREWARM_INTERVAL` | `3600` | Seconds between background refreshes of the prescribed nodes' landing pages and their links. `0` turns pre-warming off |
+| `KIOSK_PREWARM_DEPTH` | `2` | How many link hops from the landing page the pre-warmer follows |
+| `KIOSK_PREWARM_MAX_PAGES` | `25` | Most pages the pre-warmer fetches per node, per pass |
 | `LOG_LEVEL` | `INFO` | Python logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ### Paths
