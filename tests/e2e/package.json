@@ -1,0 +1,12 @@
+{
+  "name": "nomadportal-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Browser tests for the NomadPortal front end, run against a mock backend.",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

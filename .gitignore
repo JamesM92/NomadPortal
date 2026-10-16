@@ -127,3 +127,6 @@ Thumbs.db
 # Logs
 # ---------------------------------------------------------------------------
 *.log
+
+# Browser-test tooling (tests/e2e) — installed with npm ci
+tests/e2e/node_modules/

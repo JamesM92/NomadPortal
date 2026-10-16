@@ -27,6 +27,27 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## Tests
+
+Run these before you push. CI runs the same three checks.
+
+```bash
+# 1. Lint. CI uses exactly this rule set, so run it exactly as written.
+ruff check --select F,E9 .
+
+# 2. Python tests (unit and route tests).
+pytest tests/
+
+# 3. Browser tests (the real front end in headless Chromium, against a mock backend).
+cd tests/e2e
+npm ci
+npx playwright install chromium
+node run.js              # all suites
+node run.js cold-miss    # only the suites whose file name contains "cold-miss"
+```
+
+The browser tests need Node 20 or newer and `pip install flask`. Set `E2E_CHROMIUM=/path/to/chrome` to use an existing Chromium, or `E2E_PYTHON=/path/to/python3` to choose the Python that runs the mock backend. See [docs/design/validation-suite.md](docs/design/validation-suite.md) for what the tests cover and the checks that need a real Reticulum network.
+
 ## Pull requests
 
 1. Fork the repo and create a branch off `main`.

@@ -71,6 +71,36 @@ jobs:
       - name: Run pytest
         run: pytest tests/ -v
 
+  # Real-browser tests of the front end (tests/e2e). The real index.html and
+  # app.js run in headless Chromium against a small mock backend, so these
+  # cover what pytest cannot: the saved-copy indicator, the cold-miss page,
+  # lockdown behaviour, off-limits links, and server-rendered pages with
+  # JavaScript off. No Reticulum stack is involved.
+  e2e:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The mock backend needs only Flask (same pin as requirements.txt).
+      - name: Install Flask for the mock backend
+        run: pip install flask==3.1.3
+
+      - name: Install browser test dependencies
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: tests/e2e
+        run: node run.js
+
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest

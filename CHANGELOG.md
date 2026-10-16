@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
+  runs the real ``index.html`` and ``app.js`` in headless Chromium
+  against a small mock backend: 39 checks across five suites (saved-copy
+  refresh indicator, lockdown, off-limits links, the cold-miss page, and
+  server-rendered pages with JavaScript off). It runs as a new CI job,
+  **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
+  run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
+  lists every layer of checking, the manual checks that need a real
+  Reticulum network (MeshChat attachments, voice calls, saved copies on
+  the live mesh, the public site), and the release gate.
 - **The public site is now visible to search engines and link previews.**
   A page URL for one of your own pages (the hosted site, or a
   prescribed node you have a saved copy of) now returns the page's
