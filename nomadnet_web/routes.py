@@ -266,10 +266,9 @@ def api_status():
     })
 
 
-@bp.get("/healthz")
-def healthz():
-    """Operational healthcheck — verifies RNS routing is functional, not
-    just that gunicorn is listening.
+def _mesh_health():
+    """Mesh-side health as ``(payload, http_status)``: verifies RNS routing
+    is functional, not just that gunicorn is listening.
 
     A container with broken RNS would otherwise report `healthy` (because
     `/api/status` returns 200) while being unable to actually serve any
@@ -279,8 +278,8 @@ def healthz():
     """
     browser = current_app.config.get("BROWSER")
     if browser is None:
-        return jsonify({"status": "starting",
-                        "reason": "browser not initialised"}), 503
+        return ({"status": "starting",
+                        "reason": "browser not initialised"}, 503)
 
     # RNS.Reticulum() blocks 60-300 s at container start while it replays
     # destination_table and brings up TCP interfaces. Report "starting"
@@ -293,9 +292,9 @@ def healthz():
         # estimate is based on (0 = first boot on this volume, no ETA).
         progress = (browser.rns_init_progress()
                     if hasattr(browser, "rns_init_progress") else {})
-        return jsonify({"status": "starting",
+        return ({"status": "starting",
                         "reason": "RNS transport is still coming up",
-                        **progress}), 503
+                        **progress}, 503)
 
     try:
         status = browser.get_status()
@@ -304,20 +303,20 @@ def healthz():
         # status string to the client so an unauthenticated /healthz
         # probe can't lift exception text out of the JSON body.
         log.exception("healthz: browser.get_status() raised")
-        return jsonify({"status": "error",
-                        "reason": "interface status unavailable"}), 503
+        return ({"status": "error",
+                        "reason": "interface status unavailable"}, 503)
 
     interfaces = status.get("interfaces") or []
     if not interfaces:
-        return jsonify({"status": "degraded",
+        return ({"status": "degraded",
                         "reason": "no interfaces configured",
-                        "interfaces": []}), 503
+                        "interfaces": []}, 503)
 
     online = [i for i in interfaces if i.get("online")]
     if not online:
-        return jsonify({"status": "degraded",
+        return ({"status": "degraded",
                         "reason": "no interfaces online",
-                        "interfaces": interfaces}), 503
+                        "interfaces": interfaces}, 503)
 
     # Hosting-side staleness check. Catches the specific failure mode
     # where RNS + interfaces are green but the site server's background
@@ -345,18 +344,50 @@ def healthz():
             log.exception("healthz: site announce staleness check raised")
 
     if announce_stale is not None:
-        return jsonify({"status":     "degraded",
+        return ({"status":     "degraded",
                         "reason":     "site announce loop appears stalled",
                         "interfaces": interfaces,
-                        **announce_stale}), 503
+                        **announce_stale}, 503)
 
-    return jsonify({
+    return ({
         "status": "ok",
         "interfaces_online": len(online),
         "interfaces_total":  len(interfaces),
         "nodes_discovered":  status.get("nodes_discovered", 0),
         "uptime":            time.time() - current_app.config["START_TIME"],
-    })
+    }, 200)
+
+
+@bp.get("/healthz")
+@bp.get("/healthz/mesh")
+def healthz():
+    """Container health: 200 only while the mesh side is functional, 503
+    otherwise. This is what the Docker HEALTHCHECK uses, so a hung-RNS
+    container reports ``unhealthy``. ``/healthz/mesh`` is the same check
+    under an explicit name."""
+    payload, code = _mesh_health()
+    return jsonify(payload), code
+
+
+@bp.get("/healthz/web")
+def healthz_web():
+    """Website health: 200 as long as this process is serving pages.
+
+    Built for an uptime monitor watching the public site. A mesh outage
+    does not fail it, because the site keeps answering from its saved
+    copies; the mesh state is reported as information only. Like the
+    other health endpoints it is unauthenticated, so it exposes counts
+    and state names, never content or identities."""
+    mesh, _code = _mesh_health()
+    out = {
+        "status": "ok",
+        "mesh":   mesh.get("status", "unknown"),
+        "uptime": int(time.time() - current_app.config["START_TIME"]),
+    }
+    kiosk = _kiosk_cache()
+    if kiosk is not None:
+        out["saved_copies"] = kiosk.stats()
+    return jsonify(out)
 
 
 # ---------------------------------------------------------------------------

@@ -446,6 +446,7 @@ CI runs a Docker image build on every push and pull request. See [.github/workfl
 ### Operational endpoints
 
 - **`/healthz`** — returns 200 when at least one RNS interface is online, 503 otherwise. The Docker `HEALTHCHECK` uses this, so a hung-RNS container reports `unhealthy` instead of a false-positive `healthy`.
+- **`/healthz/web`** — returns 200 while the website is serving, even if the mesh is down (it reports the mesh state as information). Point your public uptime monitor here. `/healthz/mesh` is the same check as `/healthz`.
 - **`/api/status`** — a service-level snapshot (uptime, node count, cache stats). Always returns 200 if gunicorn is up.
 
 ### Diagnostics admin actions

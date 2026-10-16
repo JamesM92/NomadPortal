@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Health endpoints: website health is now separate from mesh health.**
+  ``/healthz/web`` returns 200 for as long as the website is serving,
+  and reports the mesh state (``ok`` / ``degraded`` / ``starting``) and
+  the saved-copy counts as information, so an uptime monitor on the
+  public site no longer flags it down when only the mesh is. ``/healthz``
+  is unchanged (still 503 when the mesh side is unhealthy; the Docker
+  healthcheck and CI rely on that), and ``/healthz/mesh`` is the same
+  check under an explicit name. 13 tests, seven of which also pass
+  against the previous code.
 - **Kiosk: background pre-warming.** New ``nomadnet_web/prewarm.py``: once
   Reticulum is up, and then every hour, the portal fetches each
   prescribed node's landing page and follows same-node links two hops,
