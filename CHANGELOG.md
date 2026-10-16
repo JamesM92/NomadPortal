@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk page cache, step 2b — saved-copy display and refresh indicator.**
+  When the server offers a last-good copy, the page renders from it
+  immediately and the live fetch finishes in the background, so a slow
+  or unreachable mesh no longer blocks the visitor (who can navigate
+  away at any time). A small indicator next to the path shows the
+  state: spinner while refreshing, green dot when up to date, red X if
+  the refresh failed (the saved copy stays on screen). The tooltip
+  shows how old the copy is; the technical failure reason is added for
+  admins only. Changed content is swapped in place when the refresh
+  differs. Not yet browser-tested end to end; the cold-miss friendly
+  error page is the next step.
+
 - **Kiosk page cache, step 2a — server wiring.** ``POST /api/page/fetch``
   now returns a ``cached`` payload (html, micron, age in seconds) when a
   last-good copy exists, alongside the usual ``job_id``; a finished

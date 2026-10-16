@@ -1298,7 +1298,7 @@ async function startFileDownload(fileUrl) {
 
 // Poll a fetch job until it completes (or errors), updating the loading
 // overlay with the % progress as the underlying RNS Resource transfers.
-async function pollFetchJob(jobId) {
+async function pollFetchJob(jobId, quiet = false) {
   // Tunables: poll interval (ms) and a soft cap on total wait time. The
   // server has its own timeout (PAGE_TIMEOUT) so we just need to outlast it.
   const interval = 500;
@@ -1310,8 +1310,10 @@ async function pollFetchJob(jobId) {
     if (data.status === 'done')  return data;
     if (data.status === 'error') throw new Error(data.error || 'Page fetch failed');
     // status === 'fetching' — update progress display
-    const pct = Math.round((data.progress || 0) * 100);
-    showLoading(true, pct);
+    if (!quiet) {
+      const pct = Math.round((data.progress || 0) * 100);
+      showLoading(true, pct);
+    }
     await new Promise(r => setTimeout(r, interval));
   }
   throw new Error('Fetch timed out waiting for response');
@@ -1538,12 +1540,79 @@ function renderPageContent() {
   });
 }
 
+// Bumped on every fetchPage so a background refresh can tell whether the
+// visitor has since moved on (it then finishes quietly, still refreshing
+// the server-side cache, but no longer touches the screen).
+let _fetchSeq = 0;
+
+function _fmtAge(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  if (s < 90)        return 'just now';
+  if (s < 3600)      return `${Math.round(s / 60)} min ago`;
+  if (s < 129600)    return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+// Page-refresh indicator: null hides it; 'refreshing' = spinner,
+// 'ok' = green dot, 'failed' = red X. The tooltip carries the copy's age.
+function _setRefreshState(kind, tip) {
+  const el = $('page-refresh');
+  if (!el) return;
+  el.className = 'bc-refresh' + (kind ? ` bc-refresh-${kind}` : '');
+  el.hidden = !kind;
+  el.title = tip || '';
+  el.setAttribute('aria-label', tip || '');
+}
+
+function _showPage(url, data) {
+  if (pageNodeName) pageNodeName.textContent = getNodeName(data.hash);
+  if (pagePath)     pagePath.textContent = data.path || '/';
+  _updateBreadcrumb(data.hash);
+  addrBar.value = _displayAddress(url);
+
+  _lastPage = {
+    url,
+    hash:   data.hash || '',
+    path:   data.path || '/',
+    html:   data.html   || '',
+    micron: data.micron || '',
+  };
+  renderPageContent();
+}
+
+// The page is already on screen from the last-good cache; wait for the
+// live fetch and swap it in if it differs. Failure keeps the saved copy.
+async function _refreshInBackground(url, jobId, cached, seq) {
+  try {
+    const data = await pollFetchJob(jobId, true);
+    _updateNodeLoadStatus(data.hash, true);
+    if (seq !== _fetchSeq) return;
+    if ((data.micron || '') !== (cached.micron || '')) {
+      const top = pageContent.scrollTop;
+      _showPage(url, data);
+      pageContent.scrollTop = top;
+    }
+    _setRefreshState('ok', 'Up to date');
+    setStatus(`Loaded: ${data.path}`, 'ok');
+  } catch (e) {
+    _updateNodeLoadStatus(_extractNodeHash(url), false);
+    if (seq !== _fetchSeq) return;
+    // Visitors get the age only; the technical reason is for admins.
+    let tip = `Couldn’t refresh. Showing a saved copy from ${_fmtAge(cached.age_s)}.`;
+    if (_authState.is_admin) tip += ` (${humanizeError(e.message)})`;
+    _setRefreshState('failed', tip);
+    setStatus('Showing a saved copy', 'idle');
+  }
+}
+
 async function fetchPage(url, extraFields = null) {
   if (state.loading) return false;
   state.loading = true;
+  const seq = ++_fetchSeq;
   showLoading(true, 0);
   setStatus('Fetching page…', 'busy');
   pageError.hidden = true;
+  _setRefreshState(null);
 
   try {
     // Only attach field data when the caller passed `extraFields` — i.e.
@@ -1562,22 +1631,24 @@ async function fetchPage(url, extraFields = null) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(startBody),
     });
+
+    // A last-good copy exists: show it now, refresh behind it. The
+    // visitor can navigate away without waiting for the mesh.
+    if (startResp.cached && !hasFields) {
+      showLoading(false);
+      _showPage(url, startResp.cached);
+      setStatus(`Loaded (saved copy): ${startResp.cached.path}`, 'ok');
+      _setRefreshState(
+        'refreshing',
+        `Showing a saved copy from ${_fmtAge(startResp.cached.age_s)}. Checking for updates…`,
+      );
+      _refreshInBackground(url, startResp.job_id, startResp.cached, seq);
+      return true;
+    }
+
     const data = await pollFetchJob(startResp.job_id);
     showLoading(false);
-
-    if (pageNodeName) pageNodeName.textContent = getNodeName(data.hash);
-    if (pagePath)     pagePath.textContent = data.path || '/';
-    _updateBreadcrumb(data.hash);
-    addrBar.value = _displayAddress(url);
-
-    _lastPage = {
-      url,
-      hash:   data.hash || '',
-      path:   data.path || '/',
-      html:   data.html   || '',
-      micron: data.micron || '',
-    };
-    renderPageContent();
+    _showPage(url, data);
 
     setStatus(`Loaded: ${data.path}`, 'ok');
     _updateNodeLoadStatus(data.hash, true);
