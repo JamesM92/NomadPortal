@@ -162,6 +162,11 @@ class KioskCache:
                 self._flush()
             return len(stale)
 
+    def keys(self) -> list:
+        """Every cached key (for building a sitemap). A snapshot."""
+        with self._lock:
+            return list(self._index)
+
     def stats(self) -> dict:
         with self._lock:
             return {

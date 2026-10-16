@@ -4,7 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>NomadPortal</title>
+  <title>{{ seo.title if seo and seo.title else 'NomadPortal' }}</title>
+  {%- if seo %}
+  {%- if seo.noindex %}
+  <meta name="robots" content="noindex">
+  {%- endif %}
+  {%- if seo.description %}
+  <meta name="description" content="{{ seo.description }}">
+  {%- endif %}
+  {%- if seo.canonical %}
+  <link rel="canonical" href="{{ seo.canonical }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ seo.canonical }}">
+  <meta property="og:title" content="{{ seo.title }}">
+  {%- if seo.description %}
+  <meta property="og:description" content="{{ seo.description }}">
+  {%- endif %}
+  {%- endif %}
+  {%- endif %}
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
@@ -679,7 +696,10 @@
     </div>
 
     <div id="page-content">
-      <div id="welcome">
+      {#- Server-rendered copy of the page for crawlers and link previews;
+          app.js replaces #page-content wholesale once it takes over. -#}
+      {% if seo and seo.html %}<div id="ssr-page">{{ seo.html | safe }}</div>{% endif %}
+      <div id="welcome"{% if seo and seo.html %} style="display:none"{% endif %}>
         <pre class="welcome-art">
   ┌─────────────────────────────────────┐
   │         NomadNet Browser            │

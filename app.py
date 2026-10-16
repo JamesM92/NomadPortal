@@ -46,12 +46,11 @@ import re
 import secrets
 import sys
 
-from flask import abort, render_template
-
 from nomadnet_web import create_app
 from nomadnet_web.browser import NodeBrowser
 from nomadnet_web.cache import PageCache
 from nomadnet_web.config_gen import generate
+from nomadnet_web.spa import register_spa_routes
 
 _log = logging.getLogger(__name__)
 
@@ -192,6 +191,10 @@ def create_wsgi():
         "USERS_YML":              os.environ.get("USERS_YML", "/config/users.yml"),
         "CACHE_TTL":              cache_ttl,
         "TRUSTED_PROXIES":        int(os.environ.get("TRUSTED_PROXIES", "0")),
+        # Public address of the site (e.g. https://nomad.example.org). Used
+        # for canonical links, sitemap.xml and robots.txt. Unset = derive
+        # it from the request.
+        "PUBLIC_URL":             os.environ.get("PUBLIC_URL", "").strip(),
         "HTTPS_REDIRECT":         os.environ.get("HTTPS_REDIRECT", "").lower()
                                   in ("1", "true", "yes"),
         # Comma-separated host allow-list applied to the HTTPS_REDIRECT
@@ -248,42 +251,9 @@ def create_wsgi():
 
     app = create_app(browser, cache, config=flask_config)
 
-    @app.get("/")
-    def index():
-        return render_template("index.html")
-
-    @app.get("/page")
-    def page_view():
-        return render_template("index.html")
-
-    @app.get("/robots.txt")
-    def robots():
-        return (
-            "User-agent: *\nDisallow: /\n",
-            200,
-            {"Content-Type": "text/plain"},
-        )
-
-    # Catch-all so the SPA can own the URL bar — /page/foo.mu,
-    # /file/x.pdf, and /n/<hash>/... all serve index.html and let
-    # the JS in static/js/app.js parse ``window.location.pathname``
-    # into a target and navigate to it. Path-based URLs give browser
-    # refresh + browser bookmarks + share-links "for free" without
-    # the query-string ugliness of ``/page?url=…``.
-    #
-    # Reserved-prefix check: a request to a path we don't have a
-    # specific route for (say ``/api/typo``) shouldn't get the SPA
-    # HTML — API clients expect a real 404 there. Anything under a
-    # known backend prefix that reached this fallback missed all
-    # its specific rules and is genuinely a 404. Static assets are
-    # served from ``/static`` by Flask itself, ahead of this.
-    _spa_reserved = ("api/", "admin/", "auth/", "static/")
-
-    @app.get("/<path:_path>")
-    def spa_fallback(_path):
-        if _path.startswith(_spa_reserved):
-            abort(404)
-        return render_template("index.html")
+    # The single-page shell, robots.txt, sitemap.xml and the catch-all that
+    # lets the SPA own the URL bar. See nomadnet_web/spa.py.
+    register_spa_routes(app)
 
     if not flask_config["ADMIN_PASSWORD"]:
         _log.warning("ADMIN_PASSWORD is not set — local login is disabled.")

@@ -3,7 +3,7 @@ import os
 import threading
 import time
 import datetime
-from flask import Flask, abort, has_request_context, redirect, render_template, request, send_from_directory
+from flask import Flask, abort, has_request_context, redirect, render_template, request
 from flask.sessions import SecureCookieSessionInterface
 
 # Bumped per release. Logged at startup so the running image's version is
@@ -482,10 +482,7 @@ def create_app(
             "ADMIN_PASSWORD to grant admin access."
         )
 
-    # robots.txt
-    @app.route("/robots.txt")
-    def _robots():
-        return send_from_directory(app.static_folder, "robots.txt")
+    # robots.txt and sitemap.xml are served by spa.register_spa_routes().
 
     # Custom error pages
     @app.errorhandler(404)

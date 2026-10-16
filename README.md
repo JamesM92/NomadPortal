@@ -125,6 +125,7 @@ All options are set through environment variables in `docker-compose.yml`.
 | `WEB_PORT` | `8080` | HTTP redirect port |
 | `WEB_PORT_HTTPS` | `8443` | HTTPS port (main app) |
 | `CACHE_TTL` | `300` | Page cache TTL in seconds |
+| `PUBLIC_URL` | *(unset)* | The site's public address, e.g. `https://nomad.example.org`. Pins the canonical links, `sitemap.xml` and `robots.txt`. Set it for a public site. Unset, the address comes from the request, which behind a reverse proxy is only right if `TRUSTED_PROXIES` is set |
 | `KIOSK_CACHE_MAX_BYTES` | `31457280` | Size cap (bytes) of the saved-copy cache that keeps pages available when the mesh is down. Oldest-used copies go first |
 | `KIOSK_PREWARM_INTERVAL` | `3600` | Seconds between background refreshes of the prescribed nodes' landing pages and their links. `0` turns pre-warming off |
 | `KIOSK_PREWARM_DEPTH` | `2` | How many link hops from the landing page the pre-warmer follows |

@@ -166,6 +166,12 @@ class SiteServer:
     def files_dir(self) -> str:
         return self._files_dir
 
+    def static_page_paths(self) -> list:
+        return static_page_paths(self._pages_dir)
+
+    def read_static_page(self, path: str):
+        return read_static_page(self._pages_dir, path)
+
     def fetch_page(
         self,
         path: str,
@@ -431,6 +437,62 @@ class SiteServer:
 def _is_windows() -> bool:
     import sys
     return sys.platform == "win32"
+
+
+def _is_static_file(full: str) -> bool:
+    """A plain, non-executable page file. Executable pages are scripts;
+    anything that merely wants to *read* a page (search-engine rendering,
+    the sitemap) must never run them."""
+    return os.path.isfile(full) and (_is_windows() or not os.access(full, os.X_OK))
+
+
+def static_page_paths(pages_dir: str) -> list:
+    """Request paths (``/page/x.mu``) of every static page under
+    ``pages_dir``, sorted. Skips executable pages, ``.allowed`` access
+    files, access-restricted pages (those with a ``.allowed`` sibling) and
+    anything hidden."""
+    out = []
+    root = os.path.realpath(pages_dir)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for name in sorted(filenames):
+            if name.startswith(".") or name.endswith(".allowed"):
+                continue
+            full = os.path.join(dirpath, name)
+            if os.path.exists(full + ".allowed"):
+                continue                      # access-restricted page
+            if _is_static_file(full):
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                out.append("/page/" + rel)
+    return out
+
+
+def read_static_page(pages_dir: str, path: str):
+    """Bytes of a static page, or None if it is missing, executable,
+    hidden, access-restricted (has a ``.allowed`` sibling) or outside
+    ``pages_dir``."""
+    p = path.strip("/")
+    if p == "page":
+        p = ""
+    elif p.startswith("page/"):
+        p = p[len("page/"):]
+    if not p:
+        p = "index.mu"
+    root = os.path.realpath(pages_dir)
+    full = os.path.realpath(os.path.join(root, p))
+    if not full.startswith(root + os.sep):
+        return None
+    if any(part.startswith(".") for part in os.path.relpath(full, root).split(os.sep)):
+        return None
+    if full.endswith(".allowed") or os.path.exists(full + ".allowed"):
+        return None
+    if not _is_static_file(full):
+        return None
+    try:
+        with open(full, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
 
 
 def _build_env(link_id, remote_identity, data, node_destination=None) -> dict:

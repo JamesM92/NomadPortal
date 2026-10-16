@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The public site is now visible to search engines and link previews.**
+  A page URL for one of your own pages (the hosted site, or a
+  prescribed node you have a saved copy of) now returns the page's
+  content in the HTML itself, with its own ``<title>`` (first heading +
+  site name), description, canonical link and Open Graph tags, so a
+  crawler or link preview that doesn't run JavaScript sees the page.
+  The browser's JavaScript replaces it as before. Narrow by design:
+  only your own nodes and only for viewers allowed to browse them;
+  executable hosted pages are never run for this (that would double
+  their side effects), only static ones are used; remote pages come
+  from the saved copy and never wait on the mesh; other nodes' URLs are
+  marked ``noindex``. New ``/sitemap.xml`` (your pages only, built from
+  the hosted site and saved copies) and a ``robots.txt`` that points at
+  it and keeps API/admin/auth blocked and pages crawlable. New
+  ``PUBLIC_URL`` setting pins the site's address for these (recommended
+  for a public site). The SPA routes moved from ``app.py`` into
+  ``nomadnet_web/spa.py`` so they can be tested; a dead duplicate
+  ``robots.txt`` route and ``static/robots.txt`` were removed. Checked
+  in headless Chromium with JavaScript off and on.
 - **Traffic counters (Admin → Traffic).** Aggregate page views of your own
   nodes, per day and per page, split into live fetches and views that
   showed a saved copy first. Counts only: no addresses, cookies, user
