@@ -38,6 +38,7 @@ DEFAULTS = {
     "delay": 0.0,          # seconds each poll takes
     "fetches": 0,          # /api/page/fetch calls since the last scenario
     "fetch_status": 0,     # force /api/page/fetch to fail with this status
+    # "cached" may carry "fresh": true -> served with no job (#!c=N window)
 }
 S = dict(DEFAULTS)
 
@@ -67,7 +68,7 @@ def scenario():
 
 @app.get("/__stats")
 def stats():
-    return jsonify(fetches=S["fetches"])
+    return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"))
 
 
 @app.get("/api/auth/status")
@@ -88,11 +89,17 @@ def ui():
 @app.post("/api/page/fetch")
 def fetch():
     S["fetches"] += 1
+    body = request.get_json(silent=True) or {}
+    S["last_refresh_flag"] = bool(body.get("refresh"))
     if S["fetch_status"]:
         return jsonify(error="Login required to browse external nodes"), S["fetch_status"]
+    # A saved copy marked fresh is served with no job, unless the browser
+    # asked for a live fetch (Refresh button, auto-reload).
+    if S["cached"] and S["cached"].get("fresh") and not body.get("refresh"):
+        return jsonify({"job_id": None, "raw": False, "cached": S["cached"]})
     r = {"job_id": f"j{S['fetches']}", "raw": False}
     if S["cached"]:
-        r["cached"] = S["cached"]
+        r["cached"] = {k: v for k, v in S["cached"].items() if k != "fresh"}
     return jsonify(r)
 
 

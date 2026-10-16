@@ -26,6 +26,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `03-offnode-links` | A link the server marked off-limits becomes plain text with a tooltip. |
 | `04-cold-miss` | With no saved copy, a failed load retries quietly, then shows a plain error page with a Retry button. A real answer (such as 401) is not retried. |
 | `05-server-rendered` | With JavaScript off, a page URL returns the content, title and canonical link. With JavaScript on, start-up has no errors. |
+| `06-cache-directive` | A saved copy inside its page's `#!c=N` window shows as up to date with no network request. A plain revisit does not force a fetch. The Refresh button does. A copy past its window refreshes behind itself. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 

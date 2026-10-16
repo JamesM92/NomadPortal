@@ -183,6 +183,24 @@ NomadPortal caches the output of executable pages, keyed by `(node_hash, path, r
 
 If you need to bust the cache during development: `CACHE_TTL: 1` in `docker-compose.yml`, restart.
 
+### Telling readers how long a page stays current: `#!c=N`
+
+Start a page with `#!c=<seconds>` to say how long a copy stays fresh. This is the same directive NomadNet reads.
+
+```
+#!c=3600
+>Opening hours
+...
+```
+
+- **`#!c=3600`**: for one hour after a copy is saved, NomadPortal shows it as it is and does not ask the network. The reader sees a green dot.
+- **No directive**: every visit shows the saved copy at once and checks for a newer one in the background.
+- **`#!c=0`**: every visit checks for a newer copy. A saved copy is still kept, so the page can show if the network is down.
+- The Refresh button and the auto-refresh timer always fetch a new copy.
+- The in-memory page cache above uses the same number as its lifetime for that page. The longest value used is 30 days.
+
+Put the line at the top of the page, in the first 20 lines, with nothing else on it.
+
 ## Security boundary
 
 Anything in `site/pages/` runs as the NomadPortal process. There's no sandboxing — your scripts can read every file the process can, open any port, install anything. **The model is "the operator writes the scripts."** Don't accept user-uploaded `.mu` pages.

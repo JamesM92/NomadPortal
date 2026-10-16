@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NomadNet's ``#!c=N`` page cache directive is now honoured.** A page
+  that starts with ``#!c=3600`` stays fresh for an hour: a saved copy
+  inside that window is shown at once with a green dot and the network
+  is not asked. Pages with no directive, or ``#!c=0``, are refreshed
+  behind the saved copy on every visit, as before (a ``#!c=0`` page is
+  still saved for outages). The Refresh button, Alt+R and the
+  auto-refresh timer always fetch live. The in-memory page cache uses the
+  same value as that page's lifetime. Values are capped at 30 days. See
+  docs/AUTHORING.md. Page tests cover the parser and the window edges;
+  nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 39 checks across five suites (saved-copy
-  refresh indicator, lockdown, off-limits links, the cold-miss page, and
-  server-rendered pages with JavaScript off). It runs as a new CI job,
+  against a small mock backend: 48 checks across six suites (saved-copy
+  refresh indicator, lockdown, off-limits links, the cold-miss page,
+  server-rendered pages with JavaScript off, and the cache directive). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

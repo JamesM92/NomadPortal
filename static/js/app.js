@@ -889,6 +889,7 @@ function _autoReloadTick() {
     _stopAutoReload();
     return;
   }
+  _forceRefresh = true;
   Promise.resolve(navigateTo(current, false)).then(() => {
     _autoReload.remainingSec = _autoReload.intervalSec;
     if (chip && _autoReload.intervalSec) {
@@ -1564,6 +1565,11 @@ function renderPageContent() {
 // the server-side cache, but no longer touches the screen).
 let _fetchSeq = 0;
 
+// Set by the Refresh button, Alt+R and auto-reload: the next page load must
+// go to the network even if a saved copy is still inside the freshness
+// window its page declared with #!c=N. Back / forward leave it unset.
+let _forceRefresh = false;
+
 function _fmtAge(sec) {
   const s = Math.max(0, Math.round(sec || 0));
   if (s < 90)        return 'just now';
@@ -1669,6 +1675,8 @@ function showUnavailable(url, err) {
 }
 
 async function fetchPage(url, extraFields = null) {
+  const forceRefresh = _forceRefresh;
+  _forceRefresh = false;
   if (state.loading) return false;
   state.loading = true;
   const seq = ++_fetchSeq;
@@ -1690,6 +1698,7 @@ async function fetchPage(url, extraFields = null) {
     // Start the fetch — server returns a job_id immediately.
     const startBody = { url };
     if (hasFields) startBody.fields = fields;
+    if (forceRefresh) startBody.refresh = true;
     const startFetch = () => apiFetch('/api/page/fetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1702,6 +1711,16 @@ async function fetchPage(url, extraFields = null) {
     if (startResp.cached && !hasFields) {
       showLoading(false);
       _showPage(url, startResp.cached);
+      if (startResp.cached.fresh) {
+        // Inside the page's own #!c=N window: nothing was asked of the
+        // mesh and nothing is pending.
+        setStatus(`Loaded (saved copy): ${startResp.cached.path}`, 'ok');
+        _setRefreshState(
+          'ok',
+          `Up to date. Saved ${_fmtAge(startResp.cached.age_s)}; this page stays current for a while.`,
+        );
+        return true;
+      }
       setStatus(`Loaded (saved copy): ${startResp.cached.path}`, 'ok');
       _setRefreshState(
         'refreshing',
@@ -1813,7 +1832,7 @@ btnFwd.addEventListener('click', () => {
 });
 btnRefresh.addEventListener('click', () => {
   const current = state.history[state.historyIndex];
-  if (current) navigateTo(current, false);
+  if (current) { _forceRefresh = true; navigateTo(current, false); }
 });
 const _btnPagePing = $('btn-page-ping');
 if (_btnPagePing) _btnPagePing.addEventListener('click', _pingCurrentPage);
@@ -1875,7 +1894,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'r' || e.key === 'R') {
       e.preventDefault();
       const current = state.history[state.historyIndex];
-      if (current) navigateTo(current, false);
+      if (current) { _forceRefresh = true; navigateTo(current, false); }
       return;
     }
     if (e.key === 'b' || e.key === 'B') {

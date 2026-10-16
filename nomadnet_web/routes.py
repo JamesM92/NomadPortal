@@ -17,6 +17,7 @@ from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
 from .access import BROWSE, DOWNLOAD, INTERACT, policy_for
+from .cache_directive import parse_cache_seconds
 from .kiosk_cache import kiosk_cacheable, kiosk_key
 
 log = logging.getLogger(__name__)
@@ -650,7 +651,7 @@ def api_page_get():
         if error:
             return jsonify({"error": error}), 503
         if not is_local:
-            _cache().set(cache_key, content)
+            _cache().set(cache_key, content, ttl=parse_cache_seconds(content))
         micron_text = content.decode("utf-8", errors="replace")
 
     if raw:
@@ -735,6 +736,28 @@ def api_page_post():
 # Async page fetch — returns a job_id immediately; client polls progress.
 # Drives the "Loading X%…" UI in the browser.
 # ---------------------------------------------------------------------------
+
+def _entry_is_fresh(entry) -> bool:
+    """Is this saved copy still inside the freshness window its own page
+    declared with ``#!c=N``? No directive, or ``#!c=0``, is never fresh."""
+    ttl = parse_cache_seconds(entry.content)
+    return ttl is not None and ttl > 0 and entry.age_s < ttl
+
+
+def _cached_payload(entry, node_hash: str, path: str) -> dict:
+    """A saved copy as the browser receives it, rendered for this viewer."""
+    micron_text = entry.content.decode("utf-8", errors="replace")
+    return {
+        "hash":   node_hash.lower(),
+        "path":   path,
+        "age_s":  int(entry.age_s),
+        "micron": micron_text,
+        "html":   _converter.convert(
+            micron_text, node_hash=node_hash, base_path=path,
+            authenticated=_can_interact(node_hash),
+        ),
+    }
+
 
 @bp.post("/api/page/fetch")
 def api_page_fetch_start():
@@ -846,32 +869,33 @@ def api_page_fetch_start():
     # response so the browser can show it immediately while the fetch
     # below refreshes it in the background.
     identify_with = _identity_for_fetch(node_hash)
+    kiosk = _kiosk_cache()
+    cacheable = kiosk is not None and kiosk_cacheable(field_data, identify_with)
+    entry = kiosk.get(kiosk_key(node_hash, path)) if cacheable else None
+    cached = _cached_payload(entry, node_hash, path) if entry is not None else None
+
+    # A copy still inside its page's own ``#!c=N`` window is shown as it
+    # is, without asking the mesh. The Refresh button and auto-reload send
+    # ``refresh`` to skip this and fetch live.
+    if cached is not None and not data.get("refresh") and _entry_is_fresh(entry):
+        cached["fresh"] = True
+        _count_view(node_hash, path, "saved")
+        return jsonify({"job_id": None, "raw": raw, "cached": cached})
+
     job_id = _browser().fetch_page_async(
         node_hash, path, field_data=field_data,
         identify_with=identify_with,
     )
     resp = {"job_id": job_id, "raw": raw}
-    kiosk = _kiosk_cache()
-    if kiosk is not None and kiosk_cacheable(field_data, identify_with):
+    if cacheable:
         with _browser()._jobs_lock:
             job = _browser()._jobs.get(job_id)
             if job is not None:
                 job["kiosk_cacheable"] = True
-        entry = kiosk.get(kiosk_key(node_hash, path))
-        if entry is not None:
-            micron_text = entry.content.decode("utf-8", errors="replace")
-            resp["cached"] = {
-                "hash":   node_hash.lower(),
-                "path":   path,
-                "age_s":  int(entry.age_s),
-                "micron": micron_text,
-                "html":   _converter.convert(
-                    micron_text, node_hash=node_hash, base_path=path,
-                    authenticated=_can_interact(node_hash),
-                ),
-            }
+    if cached is not None:
+        resp["cached"] = cached
     if not field_data:
-        _count_view(node_hash, path, "saved" if "cached" in resp else "live")
+        _count_view(node_hash, path, "saved" if cached is not None else "live")
     return jsonify(resp)
 
 
@@ -910,7 +934,7 @@ def api_page_poll():
     site_server = current_app.config.get("SITE_SERVER")
     is_local = site_server and site_server.node_hash() == node_hash
     if not is_local:
-        _cache().set(f"{node_hash}:{path}", content)
+        _cache().set(f"{node_hash}:{path}", content, ttl=parse_cache_seconds(content))
         kiosk = _kiosk_cache()
         if kiosk is not None and job.get("kiosk_cacheable") and content:
             kiosk.set(kiosk_key(node_hash, path), content)

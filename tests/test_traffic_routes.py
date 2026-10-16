@@ -102,3 +102,11 @@ def test_nothing_about_the_visitor_reaches_the_stored_file(env):
     for needle in ("SecretAgent", "203.0.113.77", "198.51.100.9"):
         assert needle not in raw
     assert set(json.loads(raw).values().__iter__().__next__()) == {f"{HOSTED}:/page/index.mu"}
+
+
+def test_a_fresh_copy_served_without_the_mesh_counts_as_saved(env):
+    c, traffic, kiosk, _ = env
+    kiosk.set(kiosk_key(PRESCRIBED, "/page/index.mu"), b"#!c=3600\n>cached\n")
+    body = start(c, PRESCRIBED).get_json()
+    assert body["job_id"] is None and body["cached"]["fresh"] is True
+    assert totals(traffic) == {f"{PRESCRIBED}:/page/index.mu": (0, 1)}
