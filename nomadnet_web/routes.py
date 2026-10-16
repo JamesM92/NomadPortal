@@ -133,6 +133,15 @@ def _cache():
 def _kiosk_cache():
     return current_app.config.get("KIOSK_CACHE")
 
+
+def _count_view(node_hash: str, path: str, source: str) -> None:
+    """Add one page view to the operator's aggregate counters. Only the
+    operator's own nodes are counted (so the numbers stay bounded and
+    mean "visits to my site"); nothing about the visitor is recorded."""
+    traffic = current_app.config.get("TRAFFIC")
+    if traffic is not None and _policy().is_trusted(node_hash):
+        traffic.record(node_hash, path, source)
+
 def _id_store():
     return current_app.config["IDENTITY_STORE"]
 
@@ -814,6 +823,8 @@ def api_page_fetch_start():
             # post-save view.
             if not field_data:
                 _cache().set(cache_key, content_b)
+        if not field_data:
+            _count_view(node_hash, path, "live")
         # synthesize a "done" job entry so the polling flow is uniform
         import secrets
         job_id = secrets.token_hex(8)
@@ -859,6 +870,8 @@ def api_page_fetch_start():
                     authenticated=_can_interact(node_hash),
                 ),
             }
+    if not field_data:
+        _count_view(node_hash, path, "saved" if "cached" in resp else "live")
     return jsonify(resp)
 
 

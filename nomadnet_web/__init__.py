@@ -28,6 +28,7 @@ from .call_settings import CallSettingsManager
 from .ui_settings import UISettings
 from .access import PolicyConfig
 from .prewarm import PreWarmer
+from .traffic import TrafficCounters
 from .log_buffer import buffer as log_buffer
 from .rnsh_client import RnshManager
 from . import csrf as csrf_mod
@@ -80,6 +81,10 @@ def create_app(
     # Disk-backed last-good page cache for the public kiosk. Must be on
     # local disk (config/), never a network filesystem.
     from .kiosk_cache import KioskCache, DEFAULT_MAX_BYTES
+    app.config["TRAFFIC"] = TrafficCounters(
+        config_dir,
+        retention_days=_env_int(cfg, "TRAFFIC_RETENTION_DAYS", 90),
+    )
     app.config["KIOSK_CACHE"] = KioskCache(
         config_dir,
         max_bytes=_env_int(cfg, "KIOSK_CACHE_MAX_BYTES", DEFAULT_MAX_BYTES),

@@ -1,0 +1,49 @@
+{% extends "admin/base.html" %}
+{% block title %}Traffic{% endblock %}
+
+{% block content %}
+<div class="section-title">Traffic</div>
+
+<p class="dim" style="max-width:640px;margin-bottom:16px;">
+  Page views of your own nodes, counted per day. <strong>Live</strong> means the
+  page was fetched fresh; <strong>saved</strong> means a saved copy was shown
+  first. Only counts are kept: no addresses, cookies or visitor details.
+  Showing the last {{ days }} days
+  (<a href="?days=7">7</a> · <a href="?days=30">30</a> · <a href="?days=90">90</a>).
+</p>
+
+<div class="card" style="max-width:560px;">
+  <div class="card-title">By day</div>
+  {% if summary.days %}
+  <table>
+    <thead><tr><th>Day (UTC)</th><th>Views</th><th>Live</th><th>Saved</th></tr></thead>
+    <tbody>
+      {% for d in summary.days %}
+      <tr><td>{{ d.day }}</td><td>{{ d.total }}</td><td>{{ d.live }}</td><td>{{ d.saved }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="dim">No views recorded yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">Top pages</div>
+  {% if summary.top %}
+  <table>
+    <thead><tr><th>Page</th><th>Views</th><th>Live</th><th>Saved</th></tr></thead>
+    <tbody>
+      {% for p in summary.top %}
+      <tr>
+        <td style="font-size:12px;word-break:break-all;">{{ p.page }}</td>
+        <td>{{ p.total }}</td><td>{{ p.live }}</td><td>{{ p.saved }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="dim">No views recorded yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -124,6 +124,21 @@ def dashboard():
     )
 
 
+@admin_bp.get("/traffic")
+@admin_required
+def traffic():
+    """Aggregate page views for the operator's own nodes. Counts only;
+    nothing about visitors is recorded (see traffic.py)."""
+    counters = current_app.config.get("TRAFFIC")
+    try:
+        days = max(1, min(90, int(request.args.get("days", 30))))
+    except ValueError:
+        days = 30
+    summary = counters.summary(days=days) if counters else {"days": [], "top": []}
+    return render_template("admin/traffic.html", user=current_user,
+                           summary=summary, days=days)
+
+
 # ---------------------------------------------------------------------------
 # Interface configuration
 # GET  — login_required, read-only shown to non-admins

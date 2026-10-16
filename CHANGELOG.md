@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Traffic counters (Admin → Traffic).** Aggregate page views of your own
+  nodes, per day and per page, split into live fetches and views that
+  showed a saved copy first. Counts only: no addresses, cookies, user
+  agents or login identities are recorded, and a test checks that none
+  reach the stored file. Bounded: at most 500 distinct pages a day
+  (the rest go under "other") and 90 days of history
+  (``TRAFFIC_RETENTION_DAYS``). Form submissions and visits to other
+  people's nodes are not counted. Admin only. Assumes the single
+  gunicorn worker the container already uses.
 - **Health endpoints: website health is now separate from mesh health.**
   ``/healthz/web`` returns 200 for as long as the website is serving,
   and reports the mesh state (``ok`` / ``degraded`` / ``starting``) and

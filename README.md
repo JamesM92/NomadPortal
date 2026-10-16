@@ -129,6 +129,7 @@ All options are set through environment variables in `docker-compose.yml`.
 | `KIOSK_PREWARM_INTERVAL` | `3600` | Seconds between background refreshes of the prescribed nodes' landing pages and their links. `0` turns pre-warming off |
 | `KIOSK_PREWARM_DEPTH` | `2` | How many link hops from the landing page the pre-warmer follows |
 | `KIOSK_PREWARM_MAX_PAGES` | `25` | Most pages the pre-warmer fetches per node, per pass |
+| `TRAFFIC_RETENTION_DAYS` | `90` | Days of aggregate page-view counts kept for Admin → Traffic (counts only, no visitor details) |
 | `LOG_LEVEL` | `INFO` | Python logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ### Paths

@@ -183,6 +183,11 @@ class AccessPolicy:
             return Denial(403, BLOCKED_MESSAGE)
         return None
 
+    def is_trusted(self, node_hash) -> bool:
+        """Is this one of the operator's own nodes (hosted site or a
+        prescribed node)? Independent of who is asking."""
+        return _norm(node_hash) in self._cfg.allowed
+
     def link_filter(self) -> Callable[[str], bool]:
         """Predicate for the page renderer: may this viewer follow a link
         to this node? Used to turn off-limits links into plain text."""

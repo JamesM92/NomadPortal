@@ -189,3 +189,14 @@ class TestRoleOf:
                        hosted=HOSTED, is_blocked=lambda h: h == DEFAULT)
         assert p.check(OTHER).status == 401
         assert p.check(DEFAULT).error == BLOCKED_MESSAGE
+
+
+class TestIsTrusted:
+    def test_hosted_and_prescribed_nodes_are_trusted_for_every_role(self):
+        for role in ROLES:
+            p = make(role, prescribed=(DEFAULT,))
+            assert p.is_trusted(HOSTED) and p.is_trusted(DEFAULT.upper())
+
+    def test_other_nodes_and_empty_are_not_trusted(self):
+        p = make("super_admin")
+        assert not p.is_trusted(OTHER) and not p.is_trusted("")
