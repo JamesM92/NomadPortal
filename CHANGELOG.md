@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk page cache, step 1 (module only, not wired in yet).** New
+  ``nomadnet_web/kiosk_cache.py``: a disk-backed last-good cache for the
+  public kiosk. No TTL — any cached copy is served and reports its age;
+  total size capped at 30 MB with least-recently-accessed eviction
+  (pre-warmed entries first); entries unaccessed for six months are
+  dropped; survives restarts; blob names are hashed so keys cannot
+  escape the cache directory. 19 pytest cases.
+
 - **Identicon "kind" ring colors, and a new Network tab.** Ported from
   the NomadPortal-Android sister project. Every identicon now draws a
   thin colored ring around it — purple for sites/nodes, teal for
