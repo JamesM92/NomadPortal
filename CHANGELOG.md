@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Access policy extracted into its own module (step 2 of 5; not wired
-  in yet).** New ``nomadnet_web/access.py`` holds the who-may-browse /
+- **Route handlers now use the access policy (step 3 of 5).** The five
+  browse / form-submit / file-download handlers call one helper instead
+  of repeating a 401/403/blocklist ladder, so ``routes.py`` is 56 lines
+  shorter. Status codes and message text are unchanged, verified by
+  route-level tests that also pass against the previous code.
+- **Access policy extracted into its own module (step 2 of 5).** New ``nomadnet_web/access.py`` holds the who-may-browse /
   submit-forms / download rules that lived in ``routes.py``, with no
   Flask dependency. It owns the 401-vs-403 choice, the exact denial
   messages, and the blocklist check; builds a list of prescribed nodes

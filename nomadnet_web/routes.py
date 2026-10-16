@@ -16,6 +16,7 @@ from flask import Blueprint, jsonify, request, abort, current_app
 from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
+from .access import BROWSE, DOWNLOAD, INTERACT, policy_for
 from .kiosk_cache import kiosk_cacheable, kiosk_key
 
 log = logging.getLogger(__name__)
@@ -163,76 +164,38 @@ def _local_identity_hex(node_hash: str = "") -> str:
     return entry["id"]
 
 
-def _allowed_local_hashes() -> tuple[set[str], dict]:
-    """Return the set of locally-served / default node hashes and current UI settings."""
-    site_server  = current_app.config.get("SITE_SERVER")
-    ui           = current_app.config.get("UI_SETTINGS")
-    settings     = ui.get_all() if ui else {}
-    hosted_hash  = site_server.node_hash().lower() if (site_server and site_server.node_hash()) else ""
-    default_hash = (settings.get("default_node", "") or "").lower()
-    return {h for h in (hosted_hash, default_hash) if h}, settings
+def _policy():
+    """The access policy for the current viewer. Rules live in
+    ``access.py``; this is the only place that gathers its inputs from
+    the request (the user, the stored UI settings, the hosted site hash
+    and the node blocklist)."""
+    ui = current_app.config.get("UI_SETTINGS")
+    site_server = current_app.config.get("SITE_SERVER")
+    hosted = site_server.node_hash() if (site_server and site_server.node_hash()) else ""
+    return policy_for(
+        current_user,
+        ui.get_all() if ui else {},
+        hosted=hosted,
+        # Looked up on use, so the role rule alone never needs the browser.
+        is_blocked=lambda node_hash: _browser().is_blocked(node_hash),
+    )
 
 
 def _can_browse(node_hash: str) -> bool:
-    """Whether the current user is allowed to fetch pages from this node.
-
-    Super admins:  always.
-    Admins:        blocked if admins_default_lock.
-    Users:         blocked if users_default_lock.
-    Guests:        blocked if guests_default_lock.
-    """
-    nh = (node_hash or "").lower()
-    if not nh:
-        return False
-
-    if getattr(current_user, "super_admin", False):
-        return True
-
-    allowed, settings = _allowed_local_hashes()
-
-    if getattr(current_user, "is_admin", False):
-        if settings.get("admins_default_lock"):
-            return nh in allowed
-        return True
-
-    if current_user.is_authenticated:
-        if settings.get("users_default_lock"):
-            return nh in allowed
-        return True
-
-    if settings.get("guests_default_lock"):
-        return nh in allowed
-    return True
+    """Whether the current user may fetch pages from this node."""
+    return _policy().allows(node_hash, BROWSE)
 
 
 def _can_interact(node_hash: str) -> bool:
-    """Whether the current user is allowed to submit forms on this node.
+    """Whether the current user may submit forms on this node."""
+    return _policy().allows(node_hash, INTERACT)
 
-    Super admins:  always.
-    Admins:        any node unless admins_default_lock.
-    Users:         any node unless users_default_lock.
-    Guests:        always restricted to hosted/default.
-    """
-    nh = (node_hash or "").lower()
-    if not nh:
-        return False
 
-    if getattr(current_user, "super_admin", False):
-        return True
-
-    allowed, settings = _allowed_local_hashes()
-
-    if getattr(current_user, "is_admin", False):
-        if settings.get("admins_default_lock"):
-            return nh in allowed
-        return True
-
-    if current_user.is_authenticated:
-        if settings.get("users_default_lock"):
-            return nh in allowed
-        return True
-
-    return nh in allowed
+def _denied(node_hash: str, action: str):
+    """The JSON response for a denied request, or None when allowed.
+    Covers the role rule and the node blocklist, in that order."""
+    d = _policy().check(node_hash, action)
+    return None if d is None else (jsonify({"error": d.error}), d.status)
 
 
 def _parse_nomadnet_url(url: str) -> tuple[str, str]:
@@ -591,13 +554,9 @@ def api_page_get():
     if not node_hash:
         abort(400, description="node hash required")
 
-    if not _can_browse(node_hash):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Login required to browse external nodes"}), 401
-        return jsonify({"error": "Browsing external nodes is restricted by the administrator"}), 403
-
-    if _browser().is_blocked(node_hash):
-        return jsonify({"error": "This node has been blocked by the administrator."}), 403
+    denied = _denied(node_hash, BROWSE)
+    if denied:
+        return denied
 
     _norm = (path or "/").rstrip("/") or "/"
     is_index = _norm in ("/", "/index.mu", "/page/index.mu")
@@ -667,13 +626,9 @@ def api_page_post():
     if not node_hash:
         abort(400, description="node hash required")
 
-    if not _can_interact(node_hash):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Login required to submit forms on external nodes"}), 401
-        return jsonify({"error": "Form submissions to external nodes are restricted by the administrator"}), 403
-
-    if _browser().is_blocked(node_hash):
-        return jsonify({"error": "This node has been blocked by the administrator."}), 403
+    denied = _denied(node_hash, INTERACT)
+    if denied:
+        return denied
 
     _norm = (path or "/").rstrip("/") or "/"
     is_index = _norm in ("/", "/index.mu", "/page/index.mu")
@@ -755,18 +710,11 @@ def api_page_fetch_start():
     if not node_hash:
         abort(400, description="node hash required")
 
-    # Forms-on-external-nodes need login; plain page browse uses _can_browse
-    if field_data and not _can_interact(node_hash):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Login required to submit forms on external nodes"}), 401
-        return jsonify({"error": "Form submissions to external nodes are restricted by the administrator"}), 403
-    if not field_data and not _can_browse(node_hash):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Login required to browse external nodes"}), 401
-        return jsonify({"error": "Browsing external nodes is restricted by the administrator"}), 403
-
-    if _browser().is_blocked(node_hash):
-        return jsonify({"error": "This node has been blocked by the administrator."}), 403
+    # Submitting form fields needs the stronger "interact" permission;
+    # a plain page fetch only needs "browse".
+    denied = _denied(node_hash, INTERACT if field_data else BROWSE)
+    if denied:
+        return denied
 
     site_server = current_app.config.get("SITE_SERVER")
     is_local = site_server and site_server.node_hash() == node_hash.lower()
@@ -962,13 +910,9 @@ def api_file_fetch_start():
     if "/file/" not in path:
         abort(400, description="path must contain /file/")
 
-    if not _can_browse(node_hash):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Login required to fetch files from external nodes"}), 401
-        return jsonify({"error": "Fetching from external nodes is restricted by the administrator"}), 403
-
-    if _browser().is_blocked(node_hash):
-        return jsonify({"error": "This node has been blocked by the administrator."}), 403
+    denied = _denied(node_hash, DOWNLOAD)
+    if denied:
+        return denied
 
     # Derive filename and MIME type from the URL for the confirm dialog.
     # NomadNet doesn't transmit Content-Type — extension is the only signal
