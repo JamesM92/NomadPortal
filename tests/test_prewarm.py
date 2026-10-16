@@ -210,3 +210,17 @@ class TestEnvInt:
         from nomadnet_web import _env_int
         monkeypatch.setenv("X_KNOB", "lots")
         assert _env_int({}, "X_KNOB", 3) == 3
+
+
+class TestPartialsAndRefreshLinks:
+    def test_partial_sources_are_followed(self):
+        text = "`{/page/news.mu`30`pid=news}\n`{ticker.mu}\n"
+        assert extract_page_links(text, H, "/page/index.mu") == ["/page/news.mu", "/page/ticker.mu"]
+
+    def test_a_partial_with_request_fields_is_not_a_page(self):
+        text = "`{/page/search.mu`0`pid=s|q=cats}\n"
+        assert extract_page_links(text, H, "/page/index.mu") == []
+
+    def test_partial_refresh_links_are_not_pages(self):
+        text = link("Reload", "p:news") + link("Both", "p:news|ticker") + link("ok", "ok.mu")
+        assert extract_page_links(text, H, "/page/index.mu") == ["/page/ok.mu"]

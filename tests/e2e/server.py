@@ -39,6 +39,10 @@ DEFAULTS = {
     "fetches": 0,          # /api/page/fetch calls since the last scenario
     "fetch_status": 0,     # force /api/page/fetch to fail with this status
     # "cached" may carry "fresh": true -> served with no job (#!c=N window)
+    "pages": {},           # per-path poll steps, e.g. {"/page/news.mu": [step, ...]};
+                           # a path not listed here falls back to "poll"
+    "job_paths": {},       # job id -> path (filled by /api/page/fetch)
+    "path_fetches": {},    # path -> number of /api/page/fetch calls
 }
 S = dict(DEFAULTS)
 
@@ -63,12 +67,16 @@ def scenario():
     S.update(DEFAULTS)
     S.update(request.get_json())
     S["poll"] = list(S["poll"])
+    S["pages"] = {k: list(v) for k, v in S["pages"].items()}
+    S["job_paths"] = {}
+    S["path_fetches"] = {}
     return jsonify(ok=True)
 
 
 @app.get("/__stats")
 def stats():
-    return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"))
+    return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
+                   path_fetches=S["path_fetches"])
 
 
 @app.get("/api/auth/status")
@@ -91,6 +99,12 @@ def fetch():
     S["fetches"] += 1
     body = request.get_json(silent=True) or {}
     S["last_refresh_flag"] = bool(body.get("refresh"))
+    path = body.get("path") or ""
+    if body.get("url"):                       # hash://<hash>/<path>
+        parts = body["url"].split("/", 3)
+        path = "/" + parts[3] if len(parts) > 3 else "/page/index.mu"
+    S["job_paths"][f"j{S['fetches']}"] = path
+    S["path_fetches"][path] = S["path_fetches"].get(path, 0) + 1
     if S["fetch_status"]:
         return jsonify(error="Login required to browse external nodes"), S["fetch_status"]
     # A saved copy marked fresh is served with no job, unless the browser
@@ -106,7 +120,8 @@ def fetch():
 @app.get("/api/page/poll")
 def poll():
     time.sleep(S["delay"])
-    step = S["poll"][0] if len(S["poll"]) == 1 else S["poll"].pop(0)
+    steps = S["pages"].get(S["job_paths"].get(request.args.get("id", ""), ""), S["poll"])
+    step = steps[0] if len(steps) == 1 else steps.pop(0)
     if step.get("error"):
         return jsonify(status="error", error=step["error"]), 503
     return jsonify(status="done", progress=1, hash=NODE, path="/page/index.mu",

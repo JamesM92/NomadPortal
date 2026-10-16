@@ -201,6 +201,23 @@ Start a page with `#!c=<seconds>` to say how long a copy stays fresh. This is th
 
 Put the line at the top of the page, in the first 20 lines, with nothing else on it.
 
+## Partials
+
+A partial shows part of another page inside your page, without leaving it. Use it for a news box, a status line or a counter.
+
+```
+`{/page/news.mu`30`pid=news}
+```
+
+The three parts, separated by backticks, are: the page to show, how often to reload it in seconds (leave it out or use `0` for never), and a list of settings separated by `|`.
+
+- `pid=news` gives the partial a name. A link can then reload it: `` `[Reload`p:news] `` reloads every partial named `news`. Several names can be listed: `p:news|status`.
+- Other `key=value` settings are sent to the target page as fields, the same as a form button. Use them only for the same node as your page.
+- The shortest reload time is 10 seconds, and reloading stops while the browser tab is hidden or the reader leaves the page.
+- A page can show at most 10 partials. A partial can contain partials, but only two levels deep. Anything beyond that shows as plain text.
+- If a partial cannot load, the reader sees a short note. If a reload fails, the last good content stays on screen.
+- Search engines and link previews see the plain `[live]` text, not the loaded content.
+
 ## Security boundary
 
 Anything in `site/pages/` runs as the NomadPortal process. There's no sandboxing — your scripts can read every file the process can, open any port, install anything. **The model is "the operator writes the scripts."** Don't accept user-uploaded `.mu` pages.

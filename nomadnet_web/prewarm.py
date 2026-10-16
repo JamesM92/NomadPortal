@@ -30,6 +30,11 @@ LANDING_PATH = "/page/index.mu"
 # `[label`destination]  or  `[label`destination`field spec]
 _LINK_RE = re.compile(r"`\[([^`\]]*)`([^`\]]*)(`[^\]]*)?\]")
 
+# `{destination}  or  `{destination`refresh`fields}  -- a partial: a
+# fragment of another page shown in place. Its source is worth keeping
+# warm too, since the page is incomplete without it.
+_PARTIAL_RE = re.compile(r"`\{([^`}]*)(?:`[^`}]*)?(?:`([^}]*))?\}")
+
 _NOT_READY_PREFIX = "Reticulum transport is still coming up"
 
 
@@ -39,8 +44,16 @@ def extract_page_links(micron_text: str, node_hash: str, base_path: str) -> list
     (they are actions, not pages), as are file, web and other-node links."""
     prefix = f"hash://{node_hash.lower()}"
     seen, out = set(), []
-    for _label, dest, fields in _LINK_RE.findall(micron_text or ""):
-        if fields or not dest:
+    candidates = [
+        (dest, fields) for _label, dest, fields in _LINK_RE.findall(micron_text or "")
+    ]
+    for dest, fields in _PARTIAL_RE.findall(micron_text or ""):
+        # Only the page-identifying field (`pid=`) is allowed: any other
+        # field makes the fragment a request, not a page.
+        extra = [f for f in fields.split("|") if f and not f.startswith("pid=")]
+        candidates.append((dest, "`" + "|".join(extra) if extra else ""))
+    for dest, fields in candidates:
+        if fields or not dest or dest.startswith("p:"):
             continue
         canonical = default_url_resolver(dest, node_hash, base_path)
         if not canonical.startswith(prefix + "/page/") or "?" in canonical:

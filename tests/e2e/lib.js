@@ -35,6 +35,7 @@ async function start() {
 
   const failures = [];
   const results = [];
+  const opened = [];
   const ctx = {
     base, browser,
     check(ok, msg) {
@@ -49,7 +50,12 @@ async function start() {
     // A fresh page with the scenario applied, loaded and ready to navigate.
     // Dialogs (the external-site warning) are accepted unless acceptDialogs:false.
     async open(scn, opts = {}) {
-      const page = await (await browser.newContext()).newPage();
+      // One test page at a time: a page left open keeps running its timers
+      // against the shared mock backend and would skew later counts.
+      for (const old of opened.splice(0)) await old.close().catch(() => {});
+      const context = await browser.newContext();
+      opened.push(context);
+      const page = await context.newPage();
       page.dialogs = [];
       page.on('dialog', d => { page.dialogs.push(d.type()); opts.acceptDialogs === false ? d.dismiss() : d.accept(); });
       page.on('pageerror', e => ctx.check(false, `uncaught page error: ${e.message}`));

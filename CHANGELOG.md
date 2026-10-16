@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Micron partials now work.** ``\`{page`refresh`pid=id}`` used to render as
+  a "[live]" link that navigated away when clicked. It now loads that
+  fragment in place, optionally reloads it on a timer, and
+  ``\`[label`p:id]`` links reload the named partial without leaving the
+  page (they used to turn into a bogus page path). Limits, because the
+  page author controls the rate: reloads no faster than every 10 s,
+  paused while the tab is hidden and stopped when the reader leaves, at
+  most 10 partials per page, nesting two levels deep (beyond that they
+  show as plain text). A failed partial shows a short note; a failed
+  reload keeps the last good content. Links inside partial content work
+  like any other (click handling moved to one delegated listener).
+  Pre-warming follows partial sources too. 11 new browser checks, plus
+  tests for the resolver and link extraction. The test harness now closes
+  the previous page between scenarios; a page left open had been running
+  timers against the shared mock backend. See docs/AUTHORING.md.
 - **NomadNet's ``#!c=N`` page cache directive is now honoured.** A page
   that starts with ``#!c=3600`` stays fresh for an hour: a saved copy
   inside that window is shown at once with a green dot and the network
@@ -21,9 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 48 checks across six suites (saved-copy
+  against a small mock backend: 60 checks across seven suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
-  server-rendered pages with JavaScript off, and the cache directive). It runs as a new CI job,
+  server-rendered pages with JavaScript off, the cache directive,
+  and partials). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

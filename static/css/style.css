@@ -1345,3 +1345,9 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
                 border-top: 1px solid var(--border); width: 100%; padding-top: 6px; }
   #admin-content { padding: 16px; }
 }
+
+/* A partial: part of another page, shown in place. */
+.mu-partial { display: block; }
+.mu-partial-failed { color: var(--text-dim); font-style: italic; }
+.mu-partial-stale { opacity: 0.85; }
+.mu-partial-skipped { color: var(--text-dim); }

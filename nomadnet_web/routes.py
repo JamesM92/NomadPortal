@@ -66,6 +66,11 @@ def _validate_field_data(field_data):
 # these into plain text with a tooltip.
 OFFNODE_HREF = "#offnode"
 
+# Placeholder href for a partial-refresh link; app.js reloads the named
+# partials in place when it is clicked.
+PARTIAL_REFRESH_PREFIX = "#partial-refresh:"
+_PARTIAL_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
 
 def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
     """Wrap canonical NomadNet URLs in this app's /page?url= route.
@@ -78,6 +83,11 @@ def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
     to bypass the block, then swapping back. Avoids re-implementing the
     URL canonicalisation logic locally.
     """
+    if url.startswith("p:"):
+        # A partial-refresh link (`[label`p:pid1|pid2]): reloads those
+        # partials in place instead of navigating. Only plain ids survive.
+        pids = [p for p in url[2:].split("|") if _PARTIAL_ID_RE.fullmatch(p)]
+        return PARTIAL_REFRESH_PREFIX + "|".join(pids)
     canonical = default_url_resolver(url, node_hash, base_path)
     if has_request_context() and canonical.startswith("hash://"):
         # A link this viewer isn't allowed to follow (e.g. a guest

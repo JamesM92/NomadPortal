@@ -1428,6 +1428,117 @@ function _normalizeWideGlyphs(container) {
 // Render whichever cached view (raw micron source or rendered HTML) the
 // Raw toggle is currently set to. Called after a fresh fetch and on every
 // toggle — never re-fetches from the node.
+// ---------------------------------------------------------------------------
+// Partials — `{url`refresh`fields}: a fragment of another page shown in
+// place, optionally re-fetched on a timer, and reloadable by id with a
+// `[label`p:id] link. The author controls the refresh rate, so it is held
+// to a floor, paused while the tab is hidden, and the nesting is capped.
+// ---------------------------------------------------------------------------
+const _PARTIAL = { maxPerPage: 10, maxDepth: 2, minRefreshSec: 10 };
+let _partialTimers = [];
+
+function _stopPartials() {
+  _partialTimers.forEach(clearInterval);
+  _partialTimers = [];
+}
+
+function _partialTarget(a) {
+  const href = a.getAttribute('href') || '';
+  if (!href.startsWith('/page?url=')) return null;
+  const inner = decodeURIComponent(href.slice('/page?url='.length));
+  const m = inner.match(/^hash:\/\/([0-9a-f]+)(\/.*)?$/i);
+  return m ? { hash: m[1].toLowerCase(), path: m[2] || '/page/index.mu' } : null;
+}
+
+// "pid=news|k=v|input" -> {k: 'v', input: <that input's value>}. The pid
+// only names the partial and is not sent.
+function _partialFields(spec) {
+  const fields = {};
+  (spec || '').split('|').forEach(tok => {
+    const t = tok.trim();
+    if (!t || t.startsWith('pid=')) return;
+    const eq = t.indexOf('=');
+    if (eq > 0) { fields[t.slice(0, eq).trim()] = t.slice(eq + 1); return; }
+    const el = pageContent.querySelector(`input[name="${CSS.escape(t)}"]`);
+    if (el && el.type !== 'checkbox' && el.type !== 'radio') fields[t] = el.value;
+  });
+  return fields;
+}
+
+async function _loadPartial(box, force) {
+  const target = box._target;
+  const fields = _partialFields(box._spec);
+  const hasFields = Object.keys(fields).length > 0;
+  const body = { hash: target.hash, path: target.path };
+  if (hasFields) body.fields = fields;
+  if (force) body.refresh = true;
+  const render = d => {
+    if (!box.isConnected) return;
+    if (box._loaded && box._micron === (d.micron || '')) return;     // unchanged
+    box.innerHTML = d.html || '';
+    box._micron = d.micron || '';
+    box._loaded = true;
+    box.classList.remove('mu-partial-failed', 'mu-partial-stale');
+    _normalizeWideGlyphs(box);
+    _initPartials(box, Number(box.dataset.depth || 1));
+  };
+  try {
+    const start = await apiFetch('/api/page/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (start.cached && !hasFields) render(start.cached);
+    if (!start.job_id) return;
+    render(await pollFetchJob(start.job_id, true));
+  } catch (_) {
+    if (!box.isConnected) return;
+    if (!box._loaded) {
+      box.textContent = 'This part of the page couldn’t be loaded.';
+      box.classList.add('mu-partial-failed');
+    } else {
+      box.classList.add('mu-partial-stale');       // keep what is already shown
+    }
+  }
+}
+
+function _initPartials(root, depth) {
+  Array.from(root.querySelectorAll('a.mu-dynamic')).forEach((a, idx) => {
+    const target = _partialTarget(a);
+    if (!target || depth >= _PARTIAL.maxDepth || idx >= _PARTIAL.maxPerPage) {
+      // Can't or won't load it here: show it as text, not as a dead link.
+      const span = document.createElement('span');
+      span.className = 'mu-partial-skipped';
+      span.textContent = a.textContent;
+      a.replaceWith(span);
+      return;
+    }
+    const box = document.createElement('div');
+    box.className = 'mu-partial';
+    box.dataset.depth = String(depth + 1);
+    if (a.dataset.pid) box.dataset.pid = a.dataset.pid;
+    box._target = target;
+    box._spec = a.getAttribute('data-fields') || '';
+    const sec = parseFloat(a.getAttribute('data-refresh'));
+    a.replaceWith(box);
+    _loadPartial(box, false);
+    if (sec >= 1) {
+      const id = setInterval(() => {
+        if (!box.isConnected) { clearInterval(id); return; }
+        if (!document.hidden) _loadPartial(box, true);
+      }, Math.max(sec, _PARTIAL.minRefreshSec) * 1000);
+      _partialTimers.push(id);
+    }
+  });
+}
+
+function _refreshPartials(pids) {
+  const want = new Set(pids);
+  pageContent.querySelectorAll('.mu-partial').forEach(box => {
+    if (box.dataset.pid && want.has(box.dataset.pid)) _loadPartial(box, true);
+  });
+}
+
 function renderPageContent() {
   if (toggleRaw.checked) {
     pageContent.innerHTML = `<pre>${esc(_lastPage.micron || '')}</pre>`;
@@ -1454,110 +1565,122 @@ function renderPageContent() {
     while (a.firstChild) span.appendChild(a.firstChild);
     a.replaceWith(span);
   });
-  pageContent.querySelectorAll('a.mu-link, a.mu-dynamic').forEach(a => {
-    a.addEventListener('click', e => {
-      e.preventDefault();
-      const href = a.getAttribute('href');
-      if (!href || href === '#') return;
-      if (href === '#blocked-download') {
-        setStatus('Downloads are not supported.', 'error');
-        return;
-      }
-      if (href.startsWith('/page?url=')) {
-        const inner = decodeURIComponent(href.slice('/page?url='.length));
-        // Micron links carry optional field data via data-field-spec, with
-        // NomadNet's pipe syntax for input refs:
-        //   `[label`:url`key=literal_value|input1|input2`key2=…]`
-        //   → submit key=literal_value AND each input_name=<current value>.
-        // Each backtick-separated spec is parsed independently. Inputs not
-        // referenced by any spec are NOT submitted (matches NomadNet —
-        // unrelated form values on the page must not leak with this click).
-        const fieldSpec = a.getAttribute('data-field-spec') || '';
-        const fields = {};
-        if (fieldSpec) {
-          // Each backtick-separated spec is a pipe-separated list of tokens.
-          // Each token is one of:
-          //   `*`           — wildcard: merge in every input on the current
-          //                   page via collectPageFields(). Used by forum
-          //                   actions like *|action=preview|board_id=1.
-          //   `key=literal` — literal pair: fields[key] = literal.
-          //   `inputname`   — input-name reference: look up an <input> with
-          //                   that name on the page and submit its current
-          //                   value as fields[inputname].
-          // Tokens are independent, order-agnostic, and all contribute to
-          // the outgoing submission. This handles the original NomadNet
-          // syntax `key=val|input1|input2` (one literal + N input refs) and
-          // the mixed wildcard form `*|key=lit|inputname` equivalently.
-          fieldSpec.split('`').forEach(spec => {
-            spec.split('|').forEach(token => {
-              const t = token.trim();
-              if (!t) return;
-              if (t === '*') {
-                Object.assign(fields, collectPageFields());
-                return;
-              }
-              const eq = t.indexOf('=');
-              if (eq > 0) {
-                const key = t.slice(0, eq).trim();
-                if (key) fields[key] = t.slice(eq + 1);
-                return;
-              }
-              // No `=` — treat as input-name reference.
-              const inputs = pageContent.querySelectorAll(
-                `input[name="${CSS.escape(t)}"]`,
-              );
-              if (!inputs.length) return;
-              const first = inputs[0];
-              if (first.type === 'radio') {
-                // For radio groups (multiple inputs sharing a name), pick
-                // the *checked* one — querySelector returns only the first,
-                // which would silently drop the actual selection.
-                const checked = Array.from(inputs).find(i => i.checked);
-                if (checked) fields[t] = checked.value || 'on';
-              } else if (first.type === 'checkbox') {
-                if (first.checked) fields[t] = first.value || 'on';
-              } else {
-                fields[t] = first.value;
-              }
-            });
-          });
-        }
-        navigateTo(inner, true, Object.keys(fields).length ? fields : null);
-        return;
-      }
-      if (href.startsWith('/file?url=')) {
-        const fileUrl = decodeURIComponent(href.slice('/file?url='.length));
-        startFileDownload(fileUrl);
-        return;
-      }
-      if (href.startsWith('http://') || href.startsWith('https://')) {
-        // NomadNet page content is untrusted (HTML-escaped, no JS
-        // execution path — see the trust model in README.md), but a
-        // plain-text link label can still claim to be anything while
-        // pointing at an arbitrary clearnet URL: a classic phishing
-        // pattern, and worse here since it's also the one way a mesh
-        // page can walk a visitor off the mesh entirely without them
-        // necessarily noticing. Always confirm — regardless of login/
-        // admin state, unlike the once-per-session external-*node*
-        // warning in navigateTo() — and show the real destination, not
-        // just whatever the link text says.
-        const go = window.confirm(
-          'This link leaves NomadPortal and opens an external website ' +
-          '(outside the Reticulum mesh) in a new tab:\n\n' + href +
-          '\n\nOnly continue if you trust this destination.'
-        );
-        if (!go) return;
-        window.open(href, '_blank', 'noopener,noreferrer');
-        return;
-      }
-    });
-  });
-  pageContent.querySelectorAll('form.mu-form').forEach(f => {
-    f.addEventListener('submit', e => {
-      e.preventDefault();
-      handleFormSubmit(f, _lastPage.hash, _lastPage.path);
-    });
-  });
+  _stopPartials();
+  _initPartials(pageContent, 0);
+}
+
+// Clicks on links and form submits are handled once, on the page area, so
+// content that arrives later (partials) behaves exactly like the page.
+pageContent.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a.mu-link');
+  if (a && pageContent.contains(a)) _onPageLinkClick(a, e);
+});
+pageContent.addEventListener('submit', e => {
+  const f = e.target.closest && e.target.closest('form.mu-form');
+  if (!f || !pageContent.contains(f)) return;
+  e.preventDefault();
+  handleFormSubmit(f, _lastPage.hash, _lastPage.path);
+});
+
+function _onPageLinkClick(a, e) {
+  e.preventDefault();
+  const href = a.getAttribute('href');
+  if (!href || href === '#') return;
+  if (href.startsWith('#partial-refresh:')) {
+    _refreshPartials(href.slice('#partial-refresh:'.length).split('|').filter(Boolean));
+    return;
+  }
+  if (href === '#blocked-download') {
+    setStatus('Downloads are not supported.', 'error');
+    return;
+  }
+  if (href.startsWith('/page?url=')) {
+    const inner = decodeURIComponent(href.slice('/page?url='.length));
+    // Micron links carry optional field data via data-field-spec, with
+    // NomadNet's pipe syntax for input refs:
+    //   `[label`:url`key=literal_value|input1|input2`key2=…]`
+    //   → submit key=literal_value AND each input_name=<current value>.
+    // Each backtick-separated spec is parsed independently. Inputs not
+    // referenced by any spec are NOT submitted (matches NomadNet —
+    // unrelated form values on the page must not leak with this click).
+    const fieldSpec = a.getAttribute('data-field-spec') || '';
+    const fields = {};
+    if (fieldSpec) {
+      // Each backtick-separated spec is a pipe-separated list of tokens.
+      // Each token is one of:
+      //   `*`           — wildcard: merge in every input on the current
+      //                   page via collectPageFields(). Used by forum
+      //                   actions like *|action=preview|board_id=1.
+      //   `key=literal` — literal pair: fields[key] = literal.
+      //   `inputname`   — input-name reference: look up an <input> with
+      //                   that name on the page and submit its current
+      //                   value as fields[inputname].
+      // Tokens are independent, order-agnostic, and all contribute to
+      // the outgoing submission. This handles the original NomadNet
+      // syntax `key=val|input1|input2` (one literal + N input refs) and
+      // the mixed wildcard form `*|key=lit|inputname` equivalently.
+      fieldSpec.split('`').forEach(spec => {
+        spec.split('|').forEach(token => {
+          const t = token.trim();
+          if (!t) return;
+          if (t === '*') {
+            Object.assign(fields, collectPageFields());
+            return;
+          }
+          const eq = t.indexOf('=');
+          if (eq > 0) {
+            const key = t.slice(0, eq).trim();
+            if (key) fields[key] = t.slice(eq + 1);
+            return;
+          }
+          // No `=` — treat as input-name reference.
+          const inputs = pageContent.querySelectorAll(
+            `input[name="${CSS.escape(t)}"]`,
+          );
+          if (!inputs.length) return;
+          const first = inputs[0];
+          if (first.type === 'radio') {
+            // For radio groups (multiple inputs sharing a name), pick
+            // the *checked* one — querySelector returns only the first,
+            // which would silently drop the actual selection.
+            const checked = Array.from(inputs).find(i => i.checked);
+            if (checked) fields[t] = checked.value || 'on';
+          } else if (first.type === 'checkbox') {
+            if (first.checked) fields[t] = first.value || 'on';
+          } else {
+            fields[t] = first.value;
+          }
+        });
+      });
+    }
+    navigateTo(inner, true, Object.keys(fields).length ? fields : null);
+    return;
+  }
+  if (href.startsWith('/file?url=')) {
+    const fileUrl = decodeURIComponent(href.slice('/file?url='.length));
+    startFileDownload(fileUrl);
+    return;
+  }
+  if (href.startsWith('http://') || href.startsWith('https://')) {
+    // NomadNet page content is untrusted (HTML-escaped, no JS
+    // execution path — see the trust model in README.md), but a
+    // plain-text link label can still claim to be anything while
+    // pointing at an arbitrary clearnet URL: a classic phishing
+    // pattern, and worse here since it's also the one way a mesh
+    // page can walk a visitor off the mesh entirely without them
+    // necessarily noticing. Always confirm — regardless of login/
+    // admin state, unlike the once-per-session external-*node*
+    // warning in navigateTo() — and show the real destination, not
+    // just whatever the link text says.
+    const go = window.confirm(
+      'This link leaves NomadPortal and opens an external website ' +
+      '(outside the Reticulum mesh) in a new tab:\n\n' + href +
+      '\n\nOnly continue if you trust this destination.'
+    );
+    if (!go) return;
+    window.open(href, '_blank', 'noopener,noreferrer');
+    return;
+  }
 }
 
 // Bumped on every fetchPage so a background refresh can tell whether the
