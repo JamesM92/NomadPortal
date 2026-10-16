@@ -206,6 +206,10 @@ class SiteServer:
         if not os.path.isfile(file_path):
             return None, f"Page not found: {p}"
 
+        # Access list: checked before anything is run or read.
+        if not is_request_allowed(file_path, identity_hash_from_hex(local_identity_hex)):
+            return NOT_ALLOWED_PAGE.encode("utf-8"), None
+
         try:
             if not _is_windows() and os.access(file_path, os.X_OK):
                 import subprocess
@@ -347,6 +351,11 @@ class SiteServer:
             if not os.path.isfile(file_path):
                 return b">Page Not Found\n\nThe requested page does not exist."
 
+            # Access list: checked before anything is run or read.
+            if not is_request_allowed(file_path, getattr(remote_identity, "hash", None)):
+                log.debug("Denying page request: requester not on the access list")
+                return NOT_ALLOWED_PAGE.encode("utf-8")
+
             # Executable pages: run as a script and return stdout
             if not _is_windows() and os.access(file_path, os.X_OK):
                 env = _build_env(link_id, remote_identity, data,
@@ -369,6 +378,9 @@ class SiteServer:
         file_name = path.replace("/file/", "", 1)
         log.debug("File request: %s → %s", path, file_path)
         try:
+            if not is_request_allowed(file_path, getattr(remote_identity, "hash", None)):
+                log.debug("Denying file request: requester not on the access list")
+                return NOT_ALLOWED_PAGE.encode("utf-8")
             return [open(file_path, "rb"), {"name": file_name.encode("utf-8")}]
         except Exception as exc:
             log.error("Error serving file %s: %s", path, exc)
@@ -437,6 +449,83 @@ class SiteServer:
 def _is_windows() -> bool:
     import sys
     return sys.platform == "win32"
+
+
+# ---------------------------------------------------------------------------
+# Access lists  (<page>.allowed, NomadNet-compatible)
+# ---------------------------------------------------------------------------
+
+# What a refused requester is shown instead of the page.
+NOT_ALLOWED_PAGE = (
+    ">Request Not Allowed\n\n"
+    "You are not authorised to carry out the request.\n"
+)
+
+_ALLOWED_HASH_HEX_LEN = 32          # a 128-bit identity hash, in hex
+_ALLOWED_MAX_BYTES = 1024 * 1024
+_ALLOWED_SCRIPT_TIMEOUT_S = 10.0
+
+
+def load_allowed_hashes(allowed_path: str, timeout: float = _ALLOWED_SCRIPT_TIMEOUT_S):
+    """Identity hashes listed in an ``.allowed`` file.
+
+    Returns None when there is no such file (the page is unrestricted).
+    Otherwise returns the set of listed hashes, which may be empty. The
+    file holds one 32-hex-character identity hash per line; if it is
+    executable it is run and its output is the list, as in NomadNet.
+
+    Anything that goes wrong (unreadable file, failing or hanging script,
+    no valid hashes) yields an empty set: a restricted page whose list
+    cannot be read lets nobody in.
+    """
+    if not os.path.lexists(allowed_path):
+        return None
+    try:
+        if not os.path.isfile(allowed_path):
+            return set()
+        if not _is_windows() and os.access(allowed_path, os.X_OK):
+            import subprocess
+            result = subprocess.run(
+                [allowed_path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            if result.returncode != 0:
+                log.warning("Access list script exited non-zero; denying all")
+                return set()
+            raw = result.stdout
+        else:
+            with open(allowed_path, "rb") as fh:
+                raw = fh.read(_ALLOWED_MAX_BYTES)
+    except Exception:
+        log.exception("Could not read an access list; denying all")
+        return set()
+
+    allowed = set()
+    for line in raw.splitlines():
+        text = line.strip().decode("utf-8", errors="ignore")
+        if len(text) != _ALLOWED_HASH_HEX_LEN:
+            continue
+        try:
+            allowed.add(bytes.fromhex(text))
+        except ValueError:
+            continue
+    return allowed
+
+
+def is_request_allowed(file_path: str, identity_hash) -> bool:
+    """May this requester have the file at ``file_path``? ``identity_hash``
+    is the requester's identity hash (bytes), or None if not identified."""
+    allowed = load_allowed_hashes(file_path + ".allowed")
+    if allowed is None:
+        return True
+    return identity_hash is not None and identity_hash in allowed
+
+
+def identity_hash_from_hex(hexstr):
+    try:
+        return bytes.fromhex(hexstr) if hexstr else None
+    except ValueError:
+        return None
 
 
 def _is_static_file(full: str) -> bool:

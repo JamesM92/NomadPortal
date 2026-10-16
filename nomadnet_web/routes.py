@@ -1046,8 +1046,13 @@ def api_file_fetch_start():
         candidate = safe_join(files_root, rel)
         if candidate is None:
             abort(400, description="invalid file path")
-        if not os.path.isfile(candidate):
+        if not os.path.isfile(candidate) or candidate.endswith(".allowed"):
+            # (An access list is never itself downloadable.)
             return jsonify({"error": "file not found on local site"}), 404
+        # Same access list a Reticulum requester is held to (<file>.allowed).
+        from .site_server import identity_hash_from_hex, is_request_allowed
+        if not is_request_allowed(candidate, identity_hash_from_hex(_local_identity_hex(node_hash))):
+            return jsonify({"error": "You are not authorised to download this file."}), 403
         try:
             with open(candidate, "rb") as fh:
                 content = fh.read()

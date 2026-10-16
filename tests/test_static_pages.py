@@ -78,7 +78,7 @@ class TestReading:
     def test_an_executable_page_is_never_run_or_read(self, pages):
         script = os.path.join(pages, "counter.mu")
         with open(script, "w") as fh:
-            fh.write("#!/bin/sh\ntouch RAN\n")
+            fh.write(f"#!/bin/sh\ntouch {os.path.join(pages, 'RAN')}\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IXUSR)
         assert read_static_page(pages, "/page/counter.mu") is None
         assert not os.path.exists(os.path.join(pages, "RAN"))

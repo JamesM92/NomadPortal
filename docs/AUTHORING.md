@@ -201,6 +201,30 @@ Start a page with `#!c=<seconds>` to say how long a copy stays fresh. This is th
 
 Put the line at the top of the page, in the first 20 lines, with nothing else on it.
 
+## Restricting a page: `.allowed` files
+
+To limit a page to certain people, put a file with the same name plus `.allowed` next to it. This is the NomadNet format.
+
+```
+site/pages/members.mu
+site/pages/members.mu.allowed
+```
+
+`members.mu.allowed` lists one identity hash per line. An identity hash is 32 hexadecimal characters.
+
+```
+a1b2c3d4e5f60718293a4b5c6d7e8f90
+0f1e2d3c4b5a69788796a5b4c3d2e1f0
+```
+
+- Only a requester who has **identified** and whose hash is in the list gets the page. Everyone else sees "Request Not Allowed". The page is not run or read for them.
+- The same works for a file in `site/files/`: `report.pdf.allowed` restricts `report.pdf`.
+- If the `.allowed` file is executable, it is run and its output is the list. Use this to build the list from your own data. The script has 10 seconds to finish.
+- **If the list cannot be read, nobody gets in.** This covers a missing read permission, a script that fails or hangs, and a list with no valid hash.
+- The access list itself is never served, and restricted pages are left out of the sitemap and out of the text shown to search engines.
+- On the web interface, a signed-in reader counts as identified only when they have turned on **Identify** (the fingerprint button) for this site. Readers who are not signed in are always refused a restricted page.
+- Lines that are not a valid hash are ignored. Hashes may be upper or lower case.
+
 ## Partials
 
 A partial shows part of another page inside your page, without leaving it. Use it for a news box, a status line or a counter.

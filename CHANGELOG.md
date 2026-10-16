@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Security: `<page>.allowed` access lists are now enforced.** A
+  ``members.mu.allowed`` file next to a hosted page used to hide that file from
+  the page listing but restrict nothing: anyone on the mesh, or on the
+  web interface, could fetch the page. Now, as in NomadNet, only an
+  identified requester whose identity hash is listed (one 32-character
+  hash per line) gets the page; everyone else gets "Request Not
+  Allowed" and the page is not read or run. An executable list is run
+  and its output used (10 s limit). Files in ``site/files/`` can be
+  restricted the same way. Any failure to read the list refuses everyone.
+  Both ways in are covered: Reticulum requests, and the web interface
+  (including its direct local file download, which read files from disk
+  and would have bypassed a list; route tests fail against the old code).
+  A signed-in web reader counts as identified when Identify is on for the
+  site. Access lists are never downloadable. **If you rely on a
+  `.allowed` file, upgrade.** See docs/AUTHORING.md.
 - **Micron partials now work.** ``\`{page`refresh`pid=id}`` used to render as
   a "[live]" link that navigated away when clicked. It now loads that
   fragment in place, optionally reloads it on a timer, and
