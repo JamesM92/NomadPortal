@@ -191,14 +191,22 @@ class AccessPolicy:
     def view(self) -> dict:
         """JSON-safe snapshot for the browser, so it renders what the
         server decided instead of keeping its own copy of the rules.
-        ``nodes`` is the allowed list when this viewer is confined for
-        browsing, or None when unrestricted. The server still enforces."""
-        confined = self._confined(BROWSE)
+
+        - ``confined``: this viewer may only browse the trusted nodes.
+        - ``trusted``: the operator's own nodes (hosted site plus the
+          prescribed list). Always present: even an unconfined viewer
+          is not warned when moving between these.
+        - ``landing``: the node a visitor starts on.
+        - ``read_only``: guests cannot submit forms off the trusted set.
+
+        The server still enforces every request; this only decides what
+        the page shows."""
         return {
             "role": self._role,
             "read_only": self._role == "guest",
             "landing": self.landing,
-            "nodes": sorted(self._cfg.allowed) if confined else None,
+            "confined": self._confined(BROWSE),
+            "trusted": sorted(self._cfg.allowed),
         }
 
 

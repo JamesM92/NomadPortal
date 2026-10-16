@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The browser no longer keeps its own copy of the lock rules (step 4
+  of 5).** ``/api/ui/settings`` now includes an ``access`` snapshot from
+  the server (role, whether the viewer is confined, the trusted nodes,
+  the landing node), and ``app.js`` uses it in place of re-deriving the
+  lock from the per-role setting. The server still enforces every
+  request. Checked in headless Chromium: confined guests are blocked
+  from off-node links, trusted nodes load without a warning, unconfined
+  guests still get the external-site warning, and several prescribed
+  nodes are all reachable.
 - **Route handlers now use the access policy (step 3 of 5).** The five
   browse / form-submit / file-download handlers call one helper instead
   of repeating a 401/403/blocklist ladder, so ``routes.py`` is 56 lines

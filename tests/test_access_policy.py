@@ -146,18 +146,26 @@ class TestKioskGuest:
 
 
 class TestViewSnapshot:
-    def test_confined_guest_gets_the_allowed_list_and_landing(self):
+    def test_confined_guest_gets_trusted_list_and_landing(self):
         v = make("guest", lock=True).view()
         assert v == {"role": "guest", "read_only": True, "landing": DEFAULT,
-                     "nodes": sorted([HOSTED, DEFAULT])}
+                     "confined": True, "trusted": sorted([HOSTED, DEFAULT])}
 
-    def test_unrestricted_viewer_gets_nodes_none(self):
-        assert make("user", lock=False).view()["nodes"] is None
-        assert make("super_admin", lock=True).view()["nodes"] is None
+    def test_unconfined_viewer_is_not_confined_but_still_gets_trusted(self):
+        v = make("user", lock=False).view()
+        assert v["confined"] is False
+        assert v["trusted"] == sorted([HOSTED, DEFAULT])
 
-    def test_unlocked_guest_is_read_only_but_browses_anywhere(self):
+    def test_super_admin_is_never_confined(self):
+        assert make("super_admin", lock=True).view()["confined"] is False
+
+    def test_unlocked_guest_is_read_only_but_not_confined(self):
         v = make("guest", lock=False).view()
-        assert v["read_only"] is True and v["nodes"] is None
+        assert v["read_only"] is True and v["confined"] is False
+
+    def test_trusted_list_includes_every_prescribed_node(self):
+        v = make("guest", lock=True, prescribed=(DEFAULT, OTHER)).view()
+        assert set(v["trusted"]) == {HOSTED, DEFAULT, OTHER}
 
 
 class TestRoleOf:

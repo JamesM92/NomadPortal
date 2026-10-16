@@ -2010,6 +2010,9 @@ def api_ui_settings():
     data["allow_guest_external_browse"] = bool(
         current_app.config.get("ALLOW_GUEST_EXTERNAL_BROWSE", False)
     )
+    # What this viewer may do, decided by the server (see access.py), so
+    # the browser doesn't keep its own copy of the lock rules.
+    data["access"] = _policy().view()
     return jsonify(data)
 
 

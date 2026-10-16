@@ -656,6 +656,7 @@ function formatAge(ts) {
 // Lockdown state  (set during init, read-only after that)
 // ---------------------------------------------------------------------------
 let _lockedHash  = null;   // truthy when access_mode restricts this user (value is the effective default for back-compat)
+let _access      = null;   // server's access snapshot from /api/ui/settings: {role, read_only, landing, confined, trusted[]}
 let _hostedHash  = null;   // node hash of this server's hosted site (if any)
 let _defaultHash = null;   // operator-configured default node (may differ from _hostedHash)
 let _externalWarningAccepted = false; // logged-in users accept once per session for all external nodes
@@ -667,6 +668,9 @@ let _allowGuestExternalBrowse = false; // set by ALLOW_GUEST_EXTERNAL_BROWSE env
 function _isTrustedHash(hash) {
   if (!hash) return false;
   const h = hash.toLowerCase();
+  // The server's snapshot is authoritative (hosted site + prescribed
+  // nodes); the hosted/default pair is the fallback when it's missing.
+  if (_access && Array.isArray(_access.trusted)) return _access.trusted.includes(h);
   return (_hostedHash && _hostedHash.toLowerCase() === h) ||
          (_defaultHash && _defaultHash.toLowerCase() === h);
 }
@@ -4060,30 +4064,21 @@ document.querySelectorAll('.brand').forEach(el => {
   const effectiveDefault = (uiSettings && uiSettings.default_node) ||
                            (_siteInfo && _siteInfo.node_hash) || null;
 
-  // Surface the configured default to the trusted-set check in navigateTo
-  // so navigation to / between default + built-in never triggers the
-  // external-node warning. Stored separately from _hostedHash because the
-  // two may differ (operator can point default_node at a third-party node).
-  if (uiSettings && uiSettings.default_node) {
-    _defaultHash = uiSettings.default_node;
-  }
-
-  // Activate lockdown BEFORE any navigation (and before the node list is
-  // ever rendered — see refreshNodes() below) so navigateTo() and the node
-  // list can both enforce it from their very first render.
-  // Super admin: never locked. Otherwise pick the per-audience field.
-  // Fail CLOSED: if /api/ui/settings couldn't be loaded at all (network
-  // hiccup — more common on mobile), uiSettings is null and the field
-  // lookup below is `undefined`, not `false` — treated as "locked" rather
-  // than silently granting unrestricted browsing.
-  const _lockField =
-    _authState.super_admin ? null :
-    _authState.is_admin    ? 'admins_default_lock' :
-    _authState.logged_in   ? 'users_default_lock' :
-                             'guests_default_lock';
-  const _shouldLock = !!_lockField && (uiSettings ? uiSettings[_lockField] : true) !== false;
-  if (_shouldLock && effectiveDefault) {
-    _lockedHash = effectiveDefault;
+  // The server decides who is confined to the operator's nodes and which
+  // nodes those are (access.py); we only render that. Activated BEFORE
+  // any navigation and before the node list is ever rendered (see
+  // refreshNodes() below), so navigateTo() and the list enforce it from
+  // their first render. Fail CLOSED: if /api/ui/settings couldn't be
+  // loaded at all (network hiccup, more common on mobile) there is no
+  // snapshot, and we fall back to treating the viewer as locked to the
+  // default/hosted node rather than silently granting open browsing.
+  _access = (uiSettings && uiSettings.access) || null;
+  if (_access) {
+    if (_access.landing) _defaultHash = _access.landing;
+    if (_access.confined) _lockedHash = _access.landing || effectiveDefault || 'locked';
+  } else {
+    if (uiSettings && uiSettings.default_node) _defaultHash = uiSettings.default_node;
+    if (!_authState.super_admin && effectiveDefault) _lockedHash = effectiveDefault;
   }
 
   try { applyUISettings(uiSettings || {}); } catch (_) {}
