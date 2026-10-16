@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Access policy extracted into its own module (step 2 of 5; not wired
+  in yet).** New ``nomadnet_web/access.py`` holds the who-may-browse /
+  submit-forms / download rules that lived in ``routes.py``, with no
+  Flask dependency. It owns the 401-vs-403 choice, the exact denial
+  messages, and the blocklist check; builds a list of prescribed nodes
+  (a legacy ``default_node`` becomes a one-entry list); and offers a
+  link filter for the page renderer and a snapshot for the browser.
+  Behaviour is pinned by an 87-case characterisation sweep written
+  from the documented rules; the new module passes the same table.
+
 - **Kiosk page cache, step 2b — saved-copy display and refresh indicator.**
   When the server offers a last-good copy, the page renders from it
   immediately and the live fetch finishes in the background, so a slow
