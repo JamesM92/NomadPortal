@@ -8,7 +8,6 @@ stack is started.
 """
 
 import threading
-from unittest import mock
 
 import pytest
 from flask import Flask
