@@ -11,6 +11,11 @@ import yaml
 
 log = logging.getLogger(__name__)
 
+# How much a user trusts a peer (NomadNet 1.2.0's conversation tabs). A peer
+# nobody has classified is "unknown" and is listed with the untrusted ones.
+TRUST_LEVELS = ("unknown", "trusted", "untrusted")
+MAX_NOTE_LEN = 1024
+
 
 class ContactStore:
     def __init__(self, base_dir: str, filename: str = "contacts.yml"):
@@ -131,6 +136,62 @@ class ContactStore:
         self._persist(snapshot)
         log.info("%s %s", "Blocked" if blocked else "Unblocked", hash_hex[:16])
         return entry
+
+    def set_peer_settings(self, hash_hex: str, trust=None, pinned=None, note=None) -> dict:
+        """Change how this user treats a peer: ``trust`` (one of TRUST_LEVELS),
+        ``pinned`` (conversation sorts first) and ``note`` (free text).
+        Fields left as None are not touched. Like blocking, this works for a
+        peer with no contact record yet (one is created), because classifying
+        someone you only know from an incoming message is the normal case.
+        Raises ValueError for a value that is not allowed.
+        """
+        if trust is not None and trust not in TRUST_LEVELS:
+            raise ValueError(f"trust must be one of {TRUST_LEVELS}")
+        if pinned is not None and not isinstance(pinned, bool):
+            raise ValueError("pinned must be true or false")
+        if note is not None:
+            if not isinstance(note, str):
+                raise ValueError("note must be text")
+            note = note.strip()
+            if len(note) > MAX_NOTE_LEN:
+                raise ValueError(f"note exceeds {MAX_NOTE_LEN} characters")
+        with self._lock:
+            entry = self._data.get(hash_hex)
+            if entry is None:
+                entry = {
+                    "hash":      hash_hex,
+                    "name":      hash_hex[:16],
+                    "note":      "",
+                    "favorited": False,
+                    "created":   time.time(),
+                    "updated":   time.time(),
+                }
+                self._data[hash_hex] = entry
+                log.info("Added contact (settings) %s", hash_hex[:16])
+            entry.setdefault("trust", "unknown")
+            entry.setdefault("pinned", False)
+            if trust is not None:
+                entry["trust"] = trust
+            if pinned is not None:
+                entry["pinned"] = pinned
+            if note is not None:
+                entry["note"] = note
+            entry["updated"] = time.time()
+            snapshot = dict(self._data)
+            result = dict(entry)
+        self._persist(snapshot)
+        return result
+
+    def peer_view(self, hash_hex: str) -> dict:
+        """The three peer settings with defaults filled in, for records
+        written before they existed."""
+        with self._lock:
+            entry = self._data.get(hash_hex) or {}
+            return {
+                "trust":  entry.get("trust", "unknown"),
+                "pinned": bool(entry.get("pinned", False)),
+                "note":   entry.get("note", "") or "",
+            }
 
     def is_blocked(self, hash_hex: str) -> bool:
         with self._lock:

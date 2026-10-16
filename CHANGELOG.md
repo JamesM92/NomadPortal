@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Conversation extras from NomadNet 1.2.0: trusted/untrusted tabs, pinned
+  conversations, and peer notes.** The Chats list has All / Trusted /
+  Untrusted tabs, each with a count and an unread badge. A peer you have
+  not classified is "unknown" and is listed with the untrusted ones.
+  Unlike NomadNet, the default tab is **All** (and your choice is
+  remembered), so after upgrading no existing conversation disappears
+  into a tab. A new ⓘ button in the chat header opens a peer dialog to
+  set trust (Trusted / Unknown / Untrusted), pin the conversation to the
+  top, and keep private notes (up to 1024 characters; the contact `note`
+  field, which the interface never showed before). Pinned conversations
+  show 📌 and a peer with a note shows 📝 with the note as its tooltip.
+  Stored per user on the contact record via the new
+  ``POST /api/contacts/<hash>/settings``; older records read as unknown
+  and unpinned. 23 Python tests and 21 browser checks.
 - **NomadNet inline images.** A line like ``\`(alt\`w=40\`a=c\`:/media/logo.webp)``
   now shows an image (it used to render as garbled text). Width, height
   and alignment are honoured; the alt text stands in while the image
@@ -69,10 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 70 checks across eight suites (saved-copy
+  against a small mock backend: 91 checks across nine suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, and inline images). It runs as a new CI job,
+  partials, inline images, and conversation extras). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

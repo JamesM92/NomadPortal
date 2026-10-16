@@ -2040,6 +2040,33 @@ def api_contact_block(hash_hex: str):
     return jsonify({"ok": True, "contact": entry})
 
 
+@bp.post("/api/contacts/<path:hash_hex>/settings")
+@login_required
+def api_contact_settings(hash_hex: str):
+    """Trust level, pin and note for a peer (see ContactStore.set_peer_settings).
+    Any subset may be sent; what is omitted is left alone."""
+    from .contact_store import TRUST_LEVELS
+    hash_hex = hash_hex.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{2,128}", hash_hex):
+        abort(400, description="invalid peer hash")
+    data  = request.get_json(silent=True) or {}
+    store = _contact_store()
+    if not store:
+        abort(503)
+    trust, pinned, note = data.get("trust"), data.get("pinned"), data.get("note")
+    if trust is not None and trust not in TRUST_LEVELS:
+        abort(400, description=f"trust must be one of {', '.join(TRUST_LEVELS)}")
+    if pinned is not None and not isinstance(pinned, bool):
+        abort(400, description="pinned must be true or false")
+    if note is not None and not isinstance(note, str):
+        abort(400, description="note must be text")
+    try:
+        entry = store.set_peer_settings(hash_hex, trust=trust, pinned=pinned, note=note)
+    except ValueError as exc:
+        abort(400, description=str(exc))
+    return jsonify({"ok": True, "contact": entry})
+
+
 @bp.delete("/api/contacts/<path:hash_hex>")
 @login_required
 def api_contact_delete(hash_hex: str):

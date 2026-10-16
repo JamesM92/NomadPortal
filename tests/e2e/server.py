@@ -50,6 +50,10 @@ DEFAULTS = {
     "media_calls": {},     # path -> calls
     "media_inflight": 0,   # calls running right now
     "media_max_inflight": 0,
+    "received": [],        # /api/messages/received (each: source, content, received_at, read)
+    "contacts": [],        # /api/contacts (each: hash, name, trust?, pinned?, note?)
+    "settings_posts": [],  # bodies POSTed to /api/contacts/<hash>/settings
+    "ui_extra": {},        # extra keys merged into /api/ui/settings (e.g. panel visibility)
 }
 S = dict(DEFAULTS)
 
@@ -81,6 +85,8 @@ def scenario():
     S["media_calls"] = {}
     S["media_inflight"] = 0
     S["media_max_inflight"] = 0
+    S["contacts"] = [dict(c) for c in S["contacts"]]
+    S["settings_posts"] = []
     return jsonify(ok=True)
 
 
@@ -88,7 +94,8 @@ def scenario():
 def stats():
     return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
                    path_fetches=S["path_fetches"], media_calls=S["media_calls"],
-                   media_max_inflight=S["media_max_inflight"])
+                   media_max_inflight=S["media_max_inflight"],
+                   settings_posts=S["settings_posts"])
 
 
 @app.get("/api/auth/status")
@@ -100,7 +107,7 @@ def auth():
 def ui():
     if S["ui_fail"]:
         return jsonify(error="down"), 503
-    d = {}
+    d = dict(S["ui_extra"])
     if S["access"] is not None:
         d["access"] = S["access"]
     return jsonify(d)
@@ -164,6 +171,34 @@ def media():
     finally:
         with _media_lock:
             S["media_inflight"] -= 1
+
+
+@app.get("/api/messages/received")
+def messages_received():
+    return jsonify(messages=S["received"])
+
+
+@app.get("/api/messages/sent")
+def messages_sent():
+    return jsonify(messages=[])
+
+
+@app.get("/api/contacts")
+def contacts():
+    return jsonify(contacts=S["contacts"])
+
+
+@app.post("/api/contacts/<h>/settings")
+def contact_settings(h):
+    body = request.get_json(silent=True) or {}
+    S["settings_posts"].append({"hash": h, **body})
+    for c in S["contacts"]:
+        if c["hash"] == h:
+            c.update(body)
+            return jsonify(ok=True, contact=c)
+    c = {"hash": h, "name": h[:16], **body}
+    S["contacts"].append(c)
+    return jsonify(ok=True, contact=c)
 
 
 @app.route("/api/<path:rest>", methods=["GET", "POST", "PUT", "DELETE"])

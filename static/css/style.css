@@ -1363,3 +1363,21 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
 .mu-image-loaded .mu-image-alt { display: none; }
 .mu-image-failed .mu-image-alt::before,
 .mu-image-unavailable .mu-image-alt::before { content: "\1F5BC\FE0E  "; }
+
+/* Conversation list filter: All / Trusted / Untrusted, each with its count
+ * and unread badge. A class, not [hidden], drives the active state. */
+#chat-filter-tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--border); }
+.chat-filter {
+  flex: 1; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); padding: 5px 4px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px; white-space: nowrap;
+}
+.chat-filter:hover { color: var(--text); }
+.chat-filter.active { color: var(--accent); border-bottom-color: var(--accent); }
+.chat-filter .chat-filter-unread {
+  display: inline-block; min-width: 14px; padding: 0 4px; margin-left: 3px;
+  background: var(--accent); color: var(--bg); border-radius: 8px; font-size: 9px; text-align: center;
+}
+.conv-pin { font-size: 10px; margin-right: 2px; }
+.conv-note { font-size: 10px; margin-left: 2px; cursor: help; }
+.peer-radio { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; cursor: pointer; }
