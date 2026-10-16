@@ -123,6 +123,26 @@
   </div>
 
   <div class="form-field" style="margin-bottom:18px;">
+    <label for="s-stamp-cost">Stamp cost for incoming messages</label>
+    <input type="number" id="s-stamp-cost" min="0" max="24" step="1"
+           value="{{ settings.lxmf_stamp_cost }}" style="max-width:100px;font-size:12px;">
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:normal;">
+      <input type="checkbox" id="s-stamp-enforce" {% if settings.lxmf_enforce_stamps %}checked{% endif %}>
+      Refuse messages that have no valid stamp
+    </label>
+    <span class="dim" style="margin-top:4px;">
+      A stamp is a small amount of work that the sender's device does before
+      it sends a message to you. It makes bulk spam costly. <strong>0</strong>
+      means no stamp is needed. Each step doubles the work: about 8 is instant,
+      16 takes a moment, and 24 can take a phone a minute.
+      <br><br>
+      Senders learn the cost from your next announce. If you do not tick
+      "Refuse", senders are asked for a stamp, but a message without one is
+      still delivered. The change applies to every account's identity at once.
+    </span>
+  </div>
+
+  <div class="form-field" style="margin-bottom:18px;">
     <label>Default node (loaded on startup)</label>
     <input type="text" id="s-default-node" value="{{ settings.default_node | e }}"
            style="max-width:480px;font-size:12px;" maxlength="128"

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Required stamp cost for incoming messages (Admin → Settings).** An
+  operator can ask senders to attach a proof-of-work stamp (a small
+  amount of work their device does before sending), which makes bulk
+  spam costly. This is NomadNet's ``required_stamp_cost``. Two controls,
+  because LXMF treats them separately: the **cost** (0 = off, up to 24)
+  is advertised in each identity's announces so senders know to compute
+  a stamp, and **Refuse messages that have no valid stamp** makes the
+  router drop the rest (without it a message with a missing or bad stamp
+  is still delivered). Both apply to every account's identity at once,
+  take effect immediately when saved, and are applied at startup. Off by
+  default, so nothing changes until you turn it on. Senders learn a
+  changed cost from the identity's next announce. The cap of 24 keeps the
+  work a phone can do (each step doubles it). Sending to a peer that
+  requires a stamp is handled by LXMF itself; confirming that on a live
+  mesh is check F in docs/design/validation-suite.md. 21 tests; the
+  settings route was exercised end to end with the real app.
 - **Conversation extras from NomadNet 1.2.0: trusted/untrusted tabs, pinned
   conversations, and peer notes.** The Chats list has All / Trusted /
   Untrusted tabs, each with a count and an unread badge. A peer you have

@@ -799,6 +799,7 @@ def api_ui_settings_save():
         "users_can_message",
         # General settings
         "app_title", "site_name", "default_node", "prescribed_nodes",
+        "lxmf_stamp_cost", "lxmf_enforce_stamps",
         "access_mode", "lockdown_node",  # presets / backwards-compat alias
         "abuse_contact",
         # Site-server toggles (None = "fall through to env var")
@@ -887,6 +888,15 @@ def api_ui_settings_save():
                 MIN_ANNOUNCE_INTERVAL,
                 min(MAX_ANNOUNCE_INTERVAL, fallback),
             )
+
+    # Incoming-message proof of work takes effect on every live delivery
+    # identity at once. Senders learn a changed cost from the next announce.
+    if "lxmf_stamp_cost" in patch or "lxmf_enforce_stamps" in patch:
+        messaging = current_app.config.get("MESSAGING")
+        if messaging is not None:
+            current = ui.get_all()
+            messaging.set_stamp_policy(current["lxmf_stamp_cost"],
+                                       current["lxmf_enforce_stamps"])
 
     _audit_warn("ui_settings_save: actor=%s ip=%s patch=%s",
                    getattr(current_user, "name", "?"), request.remote_addr, patch)

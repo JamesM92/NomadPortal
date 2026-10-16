@@ -81,6 +81,18 @@ Set at least one prescribed node and leave the portal running for one hour.
 3. Put a `.allowed` file next to the image. A reader who is not on the list must see only the alt text.
 4. Host an image larger than 2 MB. NomadPortal must show the alt text and no error page.
 
+### F. Stamp cost for incoming messages
+
+Use an account on the portal and a second LXMF client (Sideband, MeshChat or NomadNet).
+
+1. In **Admin > Settings**, set **Stamp cost** to 12 and leave "Refuse" off. Press **Announce** for the identity.
+2. From the second client, send a message. The client must compute a stamp (a short delay) and the message must arrive.
+3. Tick "Refuse messages that have no valid stamp" and save. Send from a client that does not support stamps. The message must not arrive.
+4. Send from a client that does support stamps. The message must arrive.
+5. Set the cost back to 0. Messages must arrive from every client again.
+
+If step 2 never delays, the client has not seen the new cost. Announce again and retry.
+
 ### D. Public site
 
 1. Fetch a page URL with `curl` (no JavaScript). The content, `<title>` and canonical link must be in the response.

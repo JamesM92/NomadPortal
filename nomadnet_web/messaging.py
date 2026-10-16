@@ -16,6 +16,7 @@ import time
 from typing import Optional
 
 from . import mdi_icons
+from .stamps import parse_stamp_cost
 
 log = logging.getLogger(__name__)
 
@@ -238,11 +239,54 @@ class MessagingService:
         # above _init_identity_router() for why an account can now have
         # more than one live entry here at once.
         self._identity_routers: dict = {}
+        # Incoming-message proof of work (see stamps.py). Off until an
+        # operator turns it on; applied to every delivery identity.
+        self._stamp_cost: int = 0
+        self._enforce_stamps: bool = False
         os.makedirs(storage_path, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Setup helpers
     # ------------------------------------------------------------------
+
+    def stamp_policy(self) -> tuple:
+        """``(cost, enforce)`` currently applied to incoming messages."""
+        with self._lock:
+            return self._stamp_cost, self._enforce_stamps
+
+    def set_stamp_policy(self, cost, enforce: bool = False) -> None:
+        """Require senders to attach a proof-of-work stamp of this cost
+        (0 turns it off), and optionally refuse messages whose stamp is
+        missing or invalid. Without enforcement the cost is only
+        advertised in announces and a message with a bad stamp is still
+        delivered. Applied to every live delivery identity at once and to
+        any created later. Senders learn a changed cost from the
+        identity's next announce."""
+        n = parse_stamp_cost(cost) or 0
+        with self._lock:
+            self._stamp_cost = n
+            self._enforce_stamps = bool(enforce)
+            live = list(self._identity_routers.values())
+        for data in live:
+            try:
+                setter = getattr(data["router"], "set_inbound_stamp_cost", None)
+                if setter is not None:
+                    setter(data["dest"].hash, n or None)
+                self._apply_stamp_enforcement(data["router"])
+            except Exception:
+                log.exception("Could not apply the stamp policy to a delivery identity")
+
+    def _apply_stamp_enforcement(self, router) -> None:
+        """Make the router's enforcement match the policy. Enforcement
+        only means something while a cost is required. Tolerates an LXMF
+        version without these switches."""
+        want = bool(self._enforce_stamps and self._stamp_cost)
+        fn = getattr(router, "enforce_stamps" if want else "ignore_stamps", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                log.exception("Could not set stamp enforcement")
 
     def setup_user(self, user_sub: str) -> None:
         """Ensure every one of this account's identities has a live
@@ -348,9 +392,13 @@ class MessagingService:
                 router.PROCESSING_INTERVAL = 1
             except Exception:
                 pass
+            # The cost is passed only when set, so the default call is
+            # exactly what it has always been.
+            reg_kwargs = {"stamp_cost": self._stamp_cost} if self._stamp_cost else {}
             registered = router.register_delivery_identity(
-                identity, display_name=entry.get("name", "")
+                identity, display_name=entry.get("name", ""), **reg_kwargs
             )
+            self._apply_stamp_enforcement(router)
             if registered is None:
                 log.warning(
                     "Could not register delivery for %s "

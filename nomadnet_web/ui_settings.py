@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import re
+
+from .stamps import parse_stamp_cost
 import threading
 
 log = logging.getLogger(__name__)
@@ -127,6 +129,9 @@ class UISettings:
         "site_name":           "",
         "default_node":        "",
         "prescribed_nodes":    [],
+        # Incoming-message proof of work (see stamps.py). 0 = none required.
+        "lxmf_stamp_cost":      0,
+        "lxmf_enforce_stamps":  False,
         "abuse_contact":       "",
         # Site-server toggles (None = "fall through to env var"; True/False
         # = explicit override). Operators can flip these via Admin →
@@ -222,6 +227,12 @@ class UISettings:
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
             if "prescribed_nodes" in patch:
                 self._data["prescribed_nodes"] = clean_node_list(patch["prescribed_nodes"])
+            if "lxmf_stamp_cost" in patch:
+                cost = parse_stamp_cost(patch["lxmf_stamp_cost"])
+                if cost is not None:           # junk keeps the last good value
+                    self._data["lxmf_stamp_cost"] = cost
+            if "lxmf_enforce_stamps" in patch:
+                self._data["lxmf_enforce_stamps"] = bool(patch["lxmf_enforce_stamps"])
             if "abuse_contact" in patch:
                 self._data["abuse_contact"] = str(patch["abuse_contact"]).strip()[:256]
             snapshot = dict(self._data)
@@ -242,6 +253,9 @@ class UISettings:
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
                 if "prescribed_nodes" in data:
                     self._data["prescribed_nodes"] = clean_node_list(data["prescribed_nodes"])
+                cost = parse_stamp_cost(data.get("lxmf_stamp_cost", 0))
+                self._data["lxmf_stamp_cost"] = cost if cost is not None else 0
+                self._data["lxmf_enforce_stamps"] = bool(data.get("lxmf_enforce_stamps", False))
                 if "abuse_contact" in data:
                     self._data["abuse_contact"] = str(data["abuse_contact"]).strip()[:256]
 
