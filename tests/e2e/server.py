@@ -10,9 +10,11 @@ Everything else under /api returns an empty JSON value.
 A test sets the scenario with POST /__scenario (see ``S`` for the keys).
 """
 
+import base64
 import logging
 import os
 import sys
+import threading
 import time
 
 from flask import Flask, jsonify, render_template, request
@@ -43,6 +45,11 @@ DEFAULTS = {
                            # a path not listed here falls back to "poll"
     "job_paths": {},       # job id -> path (filled by /api/page/fetch)
     "path_fetches": {},    # path -> number of /api/page/fetch calls
+    "media": {},           # path -> {"status": 200|404|503, "busy_times": n} for /api/media
+    "media_delay": 0.0,    # seconds each /api/media call takes
+    "media_calls": {},     # path -> calls
+    "media_inflight": 0,   # calls running right now
+    "media_max_inflight": 0,
 }
 S = dict(DEFAULTS)
 
@@ -70,13 +77,18 @@ def scenario():
     S["pages"] = {k: list(v) for k, v in S["pages"].items()}
     S["job_paths"] = {}
     S["path_fetches"] = {}
+    S["media"] = dict(S["media"])
+    S["media_calls"] = {}
+    S["media_inflight"] = 0
+    S["media_max_inflight"] = 0
     return jsonify(ok=True)
 
 
 @app.get("/__stats")
 def stats():
     return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
-                   path_fetches=S["path_fetches"])
+                   path_fetches=S["path_fetches"], media_calls=S["media_calls"],
+                   media_max_inflight=S["media_max_inflight"])
 
 
 @app.get("/api/auth/status")
@@ -126,6 +138,32 @@ def poll():
         return jsonify(status="error", error=step["error"]), 503
     return jsonify(status="done", progress=1, hash=NODE, path="/page/index.mu",
                    html=step["html"], micron=step["micron"])
+
+
+# A real 1x1 lossless WebP, so the browser has something to decode.
+TINY_WEBP = base64.b64decode("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+_media_lock = threading.Lock()
+
+
+@app.get("/api/media")
+def media():
+    path = request.args.get("path", "")
+    with _media_lock:
+        S["media_calls"][path] = S["media_calls"].get(path, 0) + 1
+        S["media_inflight"] += 1
+        S["media_max_inflight"] = max(S["media_max_inflight"], S["media_inflight"])
+        spec = S["media"].get(path, {"status": 200})
+        busy = spec.get("busy_times", 0)
+        if busy and S["media_calls"][path] <= busy:
+            spec = {"status": 503}
+    try:
+        time.sleep(S["media_delay"])
+        if spec["status"] == 200:
+            return app.response_class(TINY_WEBP, mimetype="image/webp")
+        return jsonify(error="x"), spec["status"]
+    finally:
+        with _media_lock:
+            S["media_inflight"] -= 1
 
 
 @app.route("/api/<path:rest>", methods=["GET", "POST", "PUT", "DELETE"])

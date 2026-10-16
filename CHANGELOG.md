@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NomadNet inline images.** A line like ``\`(alt\`w=40\`a=c\`:/media/logo.webp)``
+  now shows an image (it used to render as garbled text). Width, height
+  and alignment are honoured; the alt text stands in while the image
+  loads and if it can't. Both directions work: the portal fetches images
+  from other nodes with NomadNet's own ``/media`` request, and answers
+  that request for NomadNet clients from the pages folder (WebP, the
+  same ``.allowed`` rules, path-traversal and symlink checks). Images
+  reach the page through a new ``/api/media`` endpoint that applies the
+  access policy, rate limit and blocklist, rejects anything that is not
+  really a PNG, JPEG, GIF or WebP (so never SVG or HTML), caps size at
+  2 MB, honours the virus scanner, and keeps remote images in the
+  saved-copy store. The browser loads them two at a time and shows them
+  as ``data:`` URLs, so the content security policy is unchanged; at
+  most 3 mesh image fetches run on the server at once (the rest are told
+  to retry). The fetch engine gained a small ``media_path`` option and a
+  tested ``rns_request_for()``. Done in the portal, not in Micron2HTML,
+  because the library is released separately (worth upstreaming later).
+  Tested: 115 new Python tests, 10 browser checks. See docs/AUTHORING.md.
 - **Security: `<page>.allowed` access lists are now enforced.** A
   ``members.mu.allowed`` file next to a hosted page used to hide that file from
   the page listing but restrict nothing: anyone on the mesh, or on the
@@ -51,10 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 60 checks across seven suites (saved-copy
+  against a small mock backend: 70 checks across eight suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  and partials). It runs as a new CI job,
+  partials, and inline images). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

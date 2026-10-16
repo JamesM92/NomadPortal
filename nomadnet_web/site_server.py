@@ -138,6 +138,7 @@ class SiteServer:
 
         self._register_pages()
         self._register_files()
+        self._register_media()
 
         # node_hash and node_name are public identifiers (broadcast in
         # every announce), so logging them is operationally safe. But
@@ -165,6 +166,9 @@ class SiteServer:
 
     def files_dir(self) -> str:
         return self._files_dir
+
+    def pages_dir(self) -> str:
+        return self._pages_dir
 
     def static_page_paths(self) -> list:
         return static_page_paths(self._pages_dir)
@@ -299,6 +303,17 @@ class SiteServer:
         self._last_rescan = time.time()
         log.debug("Registered %d page(s)", len(pages))
 
+    def _register_media(self) -> None:
+        """NomadNet's inline-image request. One handler for every image;
+        which file may be read is decided per request (resolve_media_file)."""
+        if self._dest is None:
+            return
+        self._dest.register_request_handler(
+            "/media",
+            response_generator=self._serve_media,
+            allow=self._dest.ALLOW_ALL,
+        )
+
     def _register_files(self) -> None:
         if self._dest is None:
             return
@@ -385,6 +400,25 @@ class SiteServer:
         except Exception as exc:
             log.error("Error serving file %s: %s", path, exc)
             return None
+
+    def _serve_media(self, path, data, request_id, link_id, remote_identity, requested_at):
+        """NomadNet's ``/media`` request: ``{"path": "/media/x.webp", ...}``.
+        Answers with the image as a file response, ``False`` when it is
+        absent, not WebP, or the requester is not allowed (as NomadNet
+        does), and ``None`` for a malformed request."""
+        if not isinstance(data, dict) or not isinstance(data.get("path"), str):
+            return None
+        file_path = resolve_media_file(
+            self._pages_dir, data["path"], getattr(remote_identity, "hash", None),
+            MESH_MEDIA_EXTS,
+        )
+        if file_path is None:
+            return False
+        try:
+            return [open(file_path, "rb"), {"name": os.path.basename(file_path).encode("utf-8")}]
+        except OSError:
+            log.exception("Could not open media file")
+            return False
 
     def _serve_default_index(self, path, data, request_id, link_id, remote_identity, requested_at):
         return _DEFAULT_INDEX.encode("utf-8")
@@ -519,6 +553,42 @@ def is_request_allowed(file_path: str, identity_hash) -> bool:
     if allowed is None:
         return True
     return identity_hash is not None and identity_hash in allowed
+
+
+MEDIA_PREFIX = "/media/"
+_MEDIA_MAX_PATH = 512
+# What the web interface will serve: formats every browser draws. Over
+# Reticulum NomadNet clients only accept WebP, so that is all we send.
+WEB_MEDIA_EXTS = (".webp", ".png", ".jpg", ".jpeg", ".gif")
+MESH_MEDIA_EXTS = (".webp",)
+
+
+def resolve_media_file(pages_dir: str, media_path, identity_hash, extensions):
+    """The file a ``/media/..`` request may read, or None.
+
+    As in NomadNet, an image lives in the pages directory: ``/media/a.webp``
+    is ``pages/a.webp``. The request is refused unless the path is a plain
+    relative path under ``/media/`` (no ``..``, no hidden segments), the
+    extension is one of ``extensions``, the real file (symlinks resolved)
+    is inside the pages directory, and the requester passes the file's
+    ``.allowed`` list if it has one.
+    """
+    if (not isinstance(media_path, str) or not media_path.startswith(MEDIA_PREFIX)
+            or len(media_path) > _MEDIA_MAX_PATH or "\x00" in media_path):
+        return None
+    rel = media_path[len(MEDIA_PREFIX):]
+    parts = rel.split("/")
+    if not rel or any(p in ("", ".", "..") or p.startswith(".") for p in parts):
+        return None
+    if os.path.splitext(rel)[1].lower() not in extensions:
+        return None
+    root = os.path.realpath(pages_dir)
+    full = os.path.realpath(os.path.join(root, rel))
+    if not full.startswith(root + os.sep) or not os.path.isfile(full):
+        return None
+    if not is_request_allowed(full, identity_hash):
+        return None
+    return full
 
 
 def identity_hash_from_hex(hexstr):

@@ -8,14 +8,17 @@ Login-required endpoints:
     /api/messages  (send + list sent)
 """
 
+import os
 import re
+import threading
 import time
 import logging
 import urllib.parse
-from flask import Blueprint, jsonify, request, abort, current_app, g, has_request_context
+from flask import Blueprint, Response, jsonify, request, abort, current_app, g, has_request_context
 from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
+from . import media
 from .access import BROWSE, DOWNLOAD, INTERACT, policy_for
 from .cache_directive import parse_cache_seconds
 from .kiosk_cache import kiosk_cacheable, kiosk_key
@@ -114,6 +117,21 @@ def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
 
 
 _converter = MicronConverter(url_resolver=_web_url_resolver)
+
+
+def _render_micron(micron_text: str, node_hash: str, path: str, authenticated: bool) -> str:
+    """Convert a page to HTML for the current viewer: the Micron2HTML
+    conversion plus NomadNet's inline images (see media.py). An image
+    the viewer may not load is shown as its alt text."""
+    if has_request_context():
+        can_load = _policy().link_filter()
+    else:
+        def can_load(_node_hash):
+            return True
+    return media.render_with_images(
+        _converter, micron_text, node_hash=node_hash, base_path=path,
+        authenticated=authenticated, can_load=can_load,
+    )
 
 
 def _render_title_html(text: str) -> str:
@@ -667,10 +685,7 @@ def api_page_get():
     if raw:
         return jsonify({"hash": node_hash, "path": path, "micron": micron_text})
 
-    html_body = _converter.convert(
-        micron_text, node_hash=node_hash, base_path=path,
-        authenticated=_can_interact(node_hash),
-    )
+    html_body = _render_micron(micron_text, node_hash, path, _can_interact(node_hash))
     return jsonify({"hash": node_hash, "path": path, "html": html_body})
 
 
@@ -735,10 +750,7 @@ def api_page_post():
         return jsonify({"error": error}), 503
 
     micron_text = content.decode("utf-8", errors="replace")
-    html_body = _converter.convert(
-        micron_text, node_hash=node_hash, base_path=path,
-        authenticated=True,
-    )
+    html_body = _render_micron(micron_text, node_hash, path, True)
     return jsonify({"hash": node_hash, "path": path, "html": html_body})
 
 
@@ -762,11 +774,120 @@ def _cached_payload(entry, node_hash: str, path: str) -> dict:
         "path":   path,
         "age_s":  int(entry.age_s),
         "micron": micron_text,
-        "html":   _converter.convert(
-            micron_text, node_hash=node_hash, base_path=path,
-            authenticated=_can_interact(node_hash),
-        ),
+        "html":   _render_micron(micron_text, node_hash, path, _can_interact(node_hash)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Inline images (NomadNet `(alt`..`url) tags -- see media.py)
+# ---------------------------------------------------------------------------
+# A mesh fetch holds a server thread until the node answers, and a page can
+# carry many images. Only a few run at once; the rest are told to come back.
+_MEDIA_SLOTS = threading.BoundedSemaphore(3)
+_NODE_HASH_RE = re.compile(r"[0-9a-f]{2,128}")
+
+
+def _media_response(content: bytes, content_type: str):
+    resp = Response(content, mimetype=content_type)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Disposition"] = "inline"
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
+
+
+def _media_error(message: str, status: int, **headers):
+    resp = jsonify({"error": message})
+    resp.status_code = status
+    for k, v in headers.items():
+        resp.headers[k.replace("_", "-")] = v
+    return resp
+
+
+@bp.get("/api/media")
+def api_media():
+    """One inline image, for app.js to show in place of an ``<img>``.
+
+    Query: ``hash`` (node) and ``path`` (``/media/..``). The same access
+    rules as a page apply. The bytes are checked to be a real image of a
+    safe type (never SVG or HTML) and sent with that type and ``nosniff``,
+    whatever the node claimed. A remote image is cached in the saved-copy
+    store; nothing is cached for a fetch made as an identified user.
+    """
+    ip = request.remote_addr or "unknown"
+    if not rate_limit.check(f"media:{ip}", 240, 60):
+        return _media_error("Rate limit exceeded — slow down", 429)
+
+    node_hash = (request.args.get("hash") or "").lower()
+    path = request.args.get("path") or ""
+    if not _NODE_HASH_RE.fullmatch(node_hash):
+        return _media_error("invalid node", 400)
+    if media.media_target(f":{path}", node_hash, "/page/index.mu") != (node_hash, path):
+        return _media_error("invalid media path", 400)
+
+    denied = _denied(node_hash, BROWSE)
+    if denied:
+        return denied
+
+    site_server = current_app.config.get("SITE_SERVER")
+    if site_server and site_server.node_hash() == node_hash:
+        from .site_server import WEB_MEDIA_EXTS, identity_hash_from_hex, resolve_media_file
+        full = resolve_media_file(
+            site_server.pages_dir(), path,
+            identity_hash_from_hex(_local_identity_hex(node_hash)), WEB_MEDIA_EXTS,
+        )
+        if full is None or os.path.getsize(full) > media.MAX_MEDIA_BYTES:
+            return _media_error("image not found", 404)
+        with open(full, "rb") as fh:
+            data = fh.read()
+        kind = media.sniff_image_type(data)
+        if kind is None:
+            return _media_error("image not found", 404)
+        return _media_response(data, kind)
+
+    identify_with = _identity_for_fetch(node_hash)
+    kiosk = _kiosk_cache()
+    cacheable = kiosk is not None and kiosk_cacheable(None, identify_with)
+    key = kiosk_key(node_hash, path)
+    if cacheable:
+        entry = kiosk.get(key)
+        if entry is not None:
+            kind = media.sniff_image_type(entry.content)
+            if kind is not None:
+                return _media_response(entry.content, kind)
+
+    if not _MEDIA_SLOTS.acquire(blocking=False):
+        return _media_error("busy, try again shortly", 503, Retry_After="2")
+    try:
+        content, error = _browser().fetch_page(
+            node_hash, path, identify_with=identify_with, media_path=path,
+        )
+    finally:
+        _MEDIA_SLOTS.release()
+    if error:
+        return _media_error("image could not be fetched", 502)
+    if not content:
+        return _media_error("image not found", 404)
+    if len(content) > media.MAX_MEDIA_BYTES:
+        return _media_error("image too large", 413)
+    kind = media.sniff_image_type(content)
+    if kind is None:
+        return _media_error("not a supported image", 502)
+
+    scanner = getattr(_browser(), "scanner", None)
+    if scanner is not None:
+        try:
+            scan = scanner.scan(content, path.rsplit("/", 1)[-1])
+        except Exception:
+            log.exception("Image scan raised")
+            scan = None
+        if scan is not None and scan.blocked:
+            return _media_error("image blocked by the virus scanner", 404)
+        if (scan is None or scan.verdict == "unavailable") and getattr(_browser(), "scan_required", False):
+            return _media_error("image could not be checked", 503)
+
+    if cacheable:
+        kiosk.set(key, content)
+    return _media_response(content, kind)
 
 
 @bp.post("/api/page/fetch")
@@ -952,10 +1073,7 @@ def api_page_poll():
     micron_text = content.decode("utf-8", errors="replace")
     _browser().drop_job(job_id)
 
-    html_body = _converter.convert(
-        micron_text, node_hash=node_hash, base_path=path,
-        authenticated=_can_interact(node_hash),
-    )
+    html_body = _render_micron(micron_text, node_hash, path, _can_interact(node_hash))
     return jsonify({**base, "html": html_body, "micron": micron_text})
 
 

@@ -141,6 +141,38 @@ class _DestinationAnnounceWaiter:
 _HOPS_UNKNOWN = 128
 
 
+def rns_request_for(path, field_data=None, media_path=None):
+    """What to ask a node: ``(request path, request data)``.
+
+    Pages and files are requested by their own path (``/page/..``,
+    ``/file/..``) with any form fields prefixed the way NomadNet filters
+    them. A media request (an inline image) is different on the wire: the
+    path is always ``/media`` and the wanted file goes in the data, as
+    ``{"path": "/media/x.webp", "key": None}`` -- the shape NomadNet's own
+    browser sends and its ``serve_media`` requires.
+    """
+    if media_path is not None:
+        return "/media", {"path": media_path, "key": None}
+    p = (path or "/").rstrip("/") or "/"
+    if p.startswith("/page/") or p.startswith("/file/"):
+        # Path already includes its resource prefix from the URL --
+        # /page/ for NomadNet pages, /file/ for binary files. Both
+        # use the same Link.request mechanism on the NomadNet side.
+        rns_path = p
+    else:
+        rns_path = "/page/" + (p.lstrip("/") or "index.mu")
+    # Field/var data must be a dict; NomadNet filters keys by prefix.
+    req_data = None
+    if field_data:
+        req_data = {}
+        for k, v in field_data.items():
+            if k.startswith("field_") or k.startswith("var_"):
+                req_data[k] = v
+            else:
+                req_data[f"field_{k}"] = v
+    return rns_path, req_data
+
+
 class NodeBrowser:
 
     def __init__(self, config_dir: Optional[str] = None):
@@ -1028,6 +1060,7 @@ class NodeBrowser:
         progress_cb=None,
         sizes_cb=None,
         identify_with=None,
+        media_path: Optional[str] = None,
     ) -> tuple[Optional[bytes], Optional[str]]:
         """Fetch a page and update per-node stats (views, RX bytes, load time).
 
@@ -1061,7 +1094,7 @@ class NodeBrowser:
         with self._get_fetch_lock(dest_hash):
             return self._fetch_page_locked(
                 destination_hash_hex, dest_hash, path, field_data,
-                timeout, progress_cb, sizes_cb, identify_with,
+                timeout, progress_cb, sizes_cb, identify_with, media_path,
             )
 
     def _fetch_page_locked(
@@ -1074,6 +1107,7 @@ class NodeBrowser:
         progress_cb=None,
         sizes_cb=None,
         identify_with=None,
+        media_path: Optional[str] = None,
     ) -> tuple[Optional[bytes], Optional[str]]:
         """Actual fetch implementation — runs under the
         per-destination fetch mutex acquired by ``fetch_page``.
@@ -1292,24 +1326,7 @@ class NodeBrowser:
                         )
                     except Exception as exc:
                         log.warning("link.identify failed: %s", exc)
-                p = (path or "/").rstrip("/") or "/"
-                if p.startswith("/page/") or p.startswith("/file/"):
-                    # Path already includes its resource prefix from the URL —
-                    # /page/ for NomadNet pages, /file/ for binary files. Both
-                    # use the same Link.request mechanism on the NomadNet side.
-                    rns_path = p
-                else:
-                    rns_path = "/page/" + (p.lstrip("/") or "index.mu")
-
-                # Field/var data must be a dict; NomadNet filters keys by prefix.
-                req_data = None
-                if field_data:
-                    req_data = {}
-                    for k, v in field_data.items():
-                        if k.startswith("field_") or k.startswith("var_"):
-                            req_data[k] = v
-                        else:
-                            req_data[f"field_{k}"] = v
+                rns_path, req_data = rns_request_for(path, field_data, media_path)
 
                 log.debug("Link established, requesting '%s'", rns_path)
                 request_receipt = link.request(

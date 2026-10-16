@@ -1351,3 +1351,15 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
 .mu-partial-failed { color: var(--text-dim); font-style: italic; }
 .mu-partial-stale { opacity: 0.85; }
 .mu-partial-skipped { color: var(--text-dim); }
+
+/* Inline images (NomadNet `(alt`..`url) tags). The alt text stands in until
+ * the image arrives, and stays if it never does. */
+.mu-image { margin: 0.4em 0; }
+.mu-image-center { text-align: center; }
+.mu-image-right { text-align: right; }
+.mu-image-el { display: inline-block; height: auto; vertical-align: top; }
+.mu-image-el:not([src]) { display: none; }
+.mu-image-alt { color: var(--text-dim); font-size: 0.9em; }
+.mu-image-loaded .mu-image-alt { display: none; }
+.mu-image-failed .mu-image-alt::before,
+.mu-image-unavailable .mu-image-alt::before { content: "\1F5BC\FE0E  "; }

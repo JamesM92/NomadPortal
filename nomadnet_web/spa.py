@@ -25,7 +25,7 @@ from flask import Response, abort, current_app, render_template, request
 from . import seo
 from .access import BROWSE
 from .kiosk_cache import kiosk_key
-from .routes import _converter, _kiosk_cache, _policy, _render_title_plain
+from .routes import _kiosk_cache, _policy, _render_micron, _render_title_plain
 
 _RESERVED_PREFIXES = ("api/", "admin/", "auth/", "static/")
 
@@ -86,7 +86,7 @@ def _page_context(pathname: str):
         return ctx
 
     text = content.decode("utf-8", errors="replace")
-    html = _converter.convert(text, node_hash=node, base_path=path, authenticated=False)
+    html = _render_micron(text, node, path, False)
     ctx["html"] = html
     ctx["title"] = seo.page_title(text, _site_name(settings), _render_title_plain)
     ctx["description"] = seo.page_description(html)

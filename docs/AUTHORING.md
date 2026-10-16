@@ -225,6 +225,31 @@ a1b2c3d4e5f60718293a4b5c6d7e8f90
 - On the web interface, a signed-in reader counts as identified only when they have turned on **Identify** (the fingerprint button) for this site. Readers who are not signed in are always refused a restricted page.
 - Lines that are not a valid hash are ignored. Hashes may be upper or lower case.
 
+## Images
+
+Show an image with an image line. The line must start with `` `( `` and have nothing else on it.
+
+```
+`(The site logo`w=40`a=c`:/media/logo.webp)
+```
+
+The parts, separated by backticks: the **alt text** (shown while the image loads, and if it cannot load), optional settings, and the **address** of the image last.
+
+| Setting | Meaning |
+|---------|---------|
+| `w=40` | Width in characters. `w=50%` is a share of the page width. `w=n` is the image's own size. |
+| `h=10` | Height in rows. |
+| `a=l`, `a=c`, `a=r` | Align left, centre or right. |
+
+- Put the image file in the **same folder as your pages** (`site/pages/logo.webp`). The address `:/media/logo.webp` points to it. A folder works too: `:/media/art/logo.webp`.
+- Use **WebP** files. Over the Reticulum network only WebP is sent, and other NomadNet programs ignore everything else. Convert a picture with, for example, `cwebp photo.jpg -o photo.webp`.
+- To use an image from another node, write its address before the colon: `` `(Logo`<node hash>:/media/logo.webp) ``.
+- An image can be restricted like a page: put a `.allowed` file beside it (see *Restricting a page*).
+- Images are limited to 2 MB. Larger images are not shown.
+- Only `/media/` paths work. A web address (`https://...`) is not loaded, and the alt text is shown instead. Visitors who are locked to your site also see only the alt text for images on other nodes.
+- Search engines and link previews see the alt text, not the picture.
+- A line inside a literal block (`` `= ``) or a table is not an image, the same as in NomadNet.
+
 ## Partials
 
 A partial shows part of another page inside your page, without leaving it. Use it for a news box, a status line or a counter.

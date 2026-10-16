@@ -28,6 +28,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `05-server-rendered` | With JavaScript off, a page URL returns the content, title and canonical link. With JavaScript on, start-up has no errors. |
 | `06-cache-directive` | A saved copy inside its page's `#!c=N` window shows as up to date with no network request. A plain revisit does not force a fetch. The Refresh button does. A copy past its window refreshes behind itself. |
 | `07-partials` | A partial loads in place and refreshes on a timer. A `p:` link reloads it by id. Links inside partial content work. Failures are shown plainly. Nesting and count are capped. Leaving the page stops the timers. |
+| `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -71,6 +72,13 @@ Set at least one prescribed node and leave the portal running for one hour.
 4. Open a page that was never visited and has no saved copy. After about 30 seconds the plain error page must appear.
 5. Enable the interface again and press Retry. The page must load.
 6. Watch `/healthz/web` through steps 3 to 5. It must stay 200. `/healthz` is allowed to return 503 while the mesh is down.
+
+### E. Inline images with NomadNet
+
+1. On a NomadNet node, host a page with an image line (`` `(Logo`:/media/logo.webp) ``) and a WebP file. Open that page in NomadPortal. The image must appear.
+2. On NomadPortal, host a page with an image line and a WebP file in `site/pages/`. Open it from a NomadNet terminal client that supports images. The image must appear.
+3. Put a `.allowed` file next to the image. A reader who is not on the list must see only the alt text.
+4. Host an image larger than 2 MB. NomadPortal must show the alt text and no error page.
 
 ### D. Public site
 

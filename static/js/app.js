@@ -1429,6 +1429,83 @@ function _normalizeWideGlyphs(container) {
 // Raw toggle is currently set to. Called after a fresh fetch and on every
 // toggle — never re-fetches from the node.
 // ---------------------------------------------------------------------------
+// Inline images — NomadNet `(alt`w=..`url) tags. The server renders each as
+// a <figure> whose <img> has no src, only the node and /media/ path. They are
+// fetched here through /api/media a couple at a time (each holds a server
+// thread until the node answers), retried when the server says it is busy,
+// and shown as data: URLs, which the content security policy already allows.
+// Until an image arrives, or if it never does, its alt text is what shows.
+// ---------------------------------------------------------------------------
+const _IMG = { concurrency: 2, maxRetries: 4, retryMs: 1500 };
+let _imgQueue = [];
+let _imgActive = 0;
+
+function _stopImages() { _imgQueue = []; }
+
+function _initImages(root) {
+  root.querySelectorAll('img.mu-image-el[data-media-path]').forEach(img => {
+    if (img.dataset.mediaState) return;               // already queued or done
+    const hash = img.dataset.mediaHash || '';
+    const path = img.dataset.mediaPath || '';
+    // Only ever build a request for a well-formed node and /media/ path.
+    if (!/^[0-9a-f]{2,128}$/.test(hash) || !/^\/media\/[A-Za-z0-9._~!$&'()*+,;=:@\/%-]{1,500}$/.test(path)
+        || path.includes('..')) {
+      img.dataset.mediaState = 'failed';
+      return;
+    }
+    img.dataset.mediaState = 'queued';
+    _imgQueue.push({ img, hash, path, tries: 0 });
+  });
+  _pumpImages();
+}
+
+function _pumpImages() {
+  while (_imgActive < _IMG.concurrency && _imgQueue.length) {
+    const job = _imgQueue.shift();
+    if (!job.img.isConnected) continue;               // the page moved on
+    _imgActive++;
+    _loadImage(job).finally(() => { _imgActive--; _pumpImages(); });
+  }
+}
+
+async function _loadImage(job) {
+  const img = job.img;
+  const fig = img.closest('figure');
+  try {
+    const res = await fetch(
+      `/api/media?hash=${encodeURIComponent(job.hash)}&path=${encodeURIComponent(job.path)}`,
+      { headers: { 'Accept': 'image/*' }, credentials: 'same-origin' },
+    );
+    if (res.status === 503 && job.tries < _IMG.maxRetries) {
+      job.tries++;
+      setTimeout(() => {
+        if (!img.isConnected) return;
+        _imgQueue.push(job);
+        _pumpImages();
+      }, _IMG.retryMs);
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!/^image\//.test(blob.type)) throw new Error('not an image');
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    if (!img.isConnected) return;
+    img.src = dataUrl;
+    img.dataset.mediaState = 'loaded';
+    if (fig) fig.classList.add('mu-image-loaded');
+  } catch (_) {
+    if (!img.isConnected) return;
+    img.dataset.mediaState = 'failed';
+    if (fig) fig.classList.add('mu-image-failed');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Partials — `{url`refresh`fields}: a fragment of another page shown in
 // place, optionally re-fetched on a timer, and reloadable by id with a
 // `[label`p:id] link. The author controls the refresh rate, so it is held
@@ -1481,6 +1558,7 @@ async function _loadPartial(box, force) {
     box.classList.remove('mu-partial-failed', 'mu-partial-stale');
     _normalizeWideGlyphs(box);
     _initPartials(box, Number(box.dataset.depth || 1));
+    _initImages(box);
   };
   try {
     const start = await apiFetch('/api/page/fetch', {
@@ -1566,7 +1644,9 @@ function renderPageContent() {
     a.replaceWith(span);
   });
   _stopPartials();
+  _stopImages();
   _initPartials(pageContent, 0);
+  _initImages(pageContent);
 }
 
 // Clicks on links and form submits are handled once, on the page area, so
