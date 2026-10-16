@@ -953,126 +953,147 @@ class MessagingService:
         if self._msg_store:
             self._msg_store.save_sent(entry)
 
-        def _deliver() -> None:
-            import RNS, LXMF
-            try:
-                # Wait until we can recall the recipient's identity.
-                # request_path kicks off path discovery if needed.
-                dest_identity = RNS.Identity.recall(dest_hash)
-                if dest_identity is None:
-                    RNS.Transport.request_path(dest_hash)
-                    deadline = time.time() + PATH_WAIT
-                    while dest_identity is None:
-                        if time.time() > deadline:
-                            log.warning(
-                                "Identity not recalled for %s after %ss — "
-                                "peer may not have announced recently",
-                                dest_hash_hex[:16], PATH_WAIT,
-                            )
-                            if self._msg_store:
-                                self._msg_store.update_sent(msg_id, "failed")
-                            return
-                        time.sleep(0.25)
-                        dest_identity = RNS.Identity.recall(dest_hash)
+        self._launch_delivery(
+            msg_id, dest_hash_hex, dest_hash, title, content, user_sub,
+            att_meta, router, source_dest,
+        )
+        return True, msg_id
 
-                lxmf_dest = RNS.Destination(
-                    dest_identity,
-                    RNS.Destination.OUT,
-                    RNS.Destination.SINGLE,
-                    "lxmf",
-                    "delivery",
-                )
-                # Attach the sender's icon appearance if one is set.
-                fields = {}
-                if self._identity_store and user_sub:
-                    icon = self._identity_store.get_icon_appearance_for_user(user_sub)
-                    if icon:
-                        fields[0x04] = [
-                            icon.get("glyph", "?"),
-                            _hex_to_bytes(icon.get("fg", "#ffffff")),
-                            _hex_to_bytes(icon.get("bg", "#5ba3c9")),
-                        ]
+    def _run_delivery(
+        self,
+        msg_id: str,
+        dest_hash_hex: str,
+        dest_hash: bytes,
+        title: str,
+        content: str,
+        user_sub: str,
+        att_meta: list,
+        router,
+        source_dest,
+    ) -> None:
+        """Build the LXMF message for a stored sent entry and hand it
+        to the router. Runs on its own thread (see _launch_delivery).
+        Used for the first send and for any later retry.
+        """
+        import RNS, LXMF
+        try:
+            # Wait until we can recall the recipient's identity.
+            # request_path kicks off path discovery if needed.
+            dest_identity = RNS.Identity.recall(dest_hash)
+            if dest_identity is None:
+                RNS.Transport.request_path(dest_hash)
+                deadline = time.time() + PATH_WAIT
+                while dest_identity is None:
+                    if time.time() > deadline:
+                        log.warning(
+                            "Identity not recalled for %s after %ss — "
+                            "peer may not have announced recently",
+                            dest_hash_hex[:16], PATH_WAIT,
+                        )
+                        if self._msg_store:
+                            self._msg_store.update_sent(msg_id, "failed")
+                        return
+                    time.sleep(0.25)
+                    dest_identity = RNS.Identity.recall(dest_hash)
 
-                # Attachments: route each persisted blob into the LXMF
-                # field the recipient expects for its kind. Ordering:
-                # image → FIELD_IMAGE (singleton — first one wins;
-                # additional images demoted to FIELD_FILE_ATTACHMENTS),
-                # audio → FIELD_AUDIO (singleton — same rule), rest →
-                # FIELD_FILE_ATTACHMENTS array. Matches MeshChat's own
-                # send-side structure so a two-image message shows
-                # image-one inline and image-two in the file chip list
-                # on both ends.
-                if att_meta and self._attachments:
-                    image_slot = None
-                    audio_slot = None
-                    file_slots = []
-                    for meta in att_meta:
-                        blob = self._attachments.read(msg_id, meta["idx"])
-                        if blob is None:
-                            log.warning(
-                                "Missing blob for outbound msg %s idx %d — "
-                                "skipping this attachment",
-                                msg_id[:8], meta["idx"],
-                            )
-                            continue
-                        kind = meta.get("kind")
-                        mime = meta.get("mime", "")
-                        name = meta.get("filename") or "file"
-                        if kind == "image" and image_slot is None:
-                            ext = _MIME_TO_IMAGE_EXT.get(mime.lower(), "")
-                            image_slot = [ext, blob]
-                        elif kind == "audio" and audio_slot is None:
-                            mode = _MIME_TO_AUDIO_MODE.get(mime.lower(), "")
-                            if mode:
-                                audio_slot = [mode, blob]
-                            else:
-                                # Unknown audio codec — demote to a file
-                                # attachment so at least the recipient
-                                # can download the bytes.
-                                file_slots.append([name, blob])
+            lxmf_dest = RNS.Destination(
+                dest_identity,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                "lxmf",
+                "delivery",
+            )
+            # Attach the sender's icon appearance if one is set.
+            fields = {}
+            if self._identity_store and user_sub:
+                icon = self._identity_store.get_icon_appearance_for_user(user_sub)
+                if icon:
+                    fields[0x04] = [
+                        icon.get("glyph", "?"),
+                        _hex_to_bytes(icon.get("fg", "#ffffff")),
+                        _hex_to_bytes(icon.get("bg", "#5ba3c9")),
+                    ]
+
+            # Attachments: route each persisted blob into the LXMF
+            # field the recipient expects for its kind. Ordering:
+            # image → FIELD_IMAGE (singleton — first one wins;
+            # additional images demoted to FIELD_FILE_ATTACHMENTS),
+            # audio → FIELD_AUDIO (singleton — same rule), rest →
+            # FIELD_FILE_ATTACHMENTS array. Matches MeshChat's own
+            # send-side structure so a two-image message shows
+            # image-one inline and image-two in the file chip list
+            # on both ends.
+            if att_meta and self._attachments:
+                image_slot = None
+                audio_slot = None
+                file_slots = []
+                for meta in att_meta:
+                    blob = self._attachments.read(msg_id, meta["idx"])
+                    if blob is None:
+                        log.warning(
+                            "Missing blob for outbound msg %s idx %d — "
+                            "skipping this attachment",
+                            msg_id[:8], meta["idx"],
+                        )
+                        continue
+                    kind = meta.get("kind")
+                    mime = meta.get("mime", "")
+                    name = meta.get("filename") or "file"
+                    if kind == "image" and image_slot is None:
+                        ext = _MIME_TO_IMAGE_EXT.get(mime.lower(), "")
+                        image_slot = [ext, blob]
+                    elif kind == "audio" and audio_slot is None:
+                        mode = _MIME_TO_AUDIO_MODE.get(mime.lower(), "")
+                        if mode:
+                            audio_slot = [mode, blob]
                         else:
+                            # Unknown audio codec — demote to a file
+                            # attachment so at least the recipient
+                            # can download the bytes.
                             file_slots.append([name, blob])
-                    if image_slot is not None:
-                        fields[0x06] = image_slot
-                    if audio_slot is not None:
-                        fields[0x07] = audio_slot
-                    if file_slots:
-                        fields[0x05] = file_slots
+                    else:
+                        file_slots.append([name, blob])
+                if image_slot is not None:
+                    fields[0x06] = image_slot
+                if audio_slot is not None:
+                    fields[0x07] = audio_slot
+                if file_slots:
+                    fields[0x05] = file_slots
 
-                # Prefer OPPORTUNISTIC (single encrypted packet, no link needed).
-                # LXMessage automatically falls back to DIRECT if the content
-                # is too large for a single packet.
-                lxmf_msg = LXMF.LXMessage(
-                    lxmf_dest,
-                    source_dest,
-                    content,
-                    title=title or "",
-                    fields=fields or None,
-                    desired_method=LXMF.LXMessage.OPPORTUNISTIC,
-                )
+            # Prefer OPPORTUNISTIC (single encrypted packet, no link needed).
+            # LXMessage automatically falls back to DIRECT if the content
+            # is too large for a single packet.
+            lxmf_msg = LXMF.LXMessage(
+                lxmf_dest,
+                source_dest,
+                content,
+                title=title or "",
+                fields=fields or None,
+                desired_method=LXMF.LXMessage.OPPORTUNISTIC,
+            )
 
-                # Callbacks update the store whenever delivery completes —
-                # no fixed wait so long messages don't time out prematurely.
-                def _delivered(_m):
-                    real_id = _m.hash.hex() if _m.hash else msg_id
-                    if self._msg_store:
-                        self._msg_store.update_sent(msg_id, "delivered", real_id=real_id)
-                    log.info("Delivered %s → %s", msg_id[:8], dest_hash_hex[:16])
+            # Callbacks update the store whenever delivery completes —
+            # no fixed wait so long messages don't time out prematurely.
+            def _delivered(_m):
+                real_id = _m.hash.hex() if _m.hash else msg_id
+                if self._msg_store:
+                    self._msg_store.update_sent(msg_id, "delivered", real_id=real_id)
+                log.info("Delivered %s → %s", msg_id[:8], dest_hash_hex[:16])
 
-                def _failed(_m):
-                    if self._msg_store:
-                        self._msg_store.update_sent(msg_id, "failed")
-                    log.warning("Delivery failed %s → %s", msg_id[:8], dest_hash_hex[:16])
-
-                lxmf_msg.register_delivery_callback(_delivered)
-                lxmf_msg.register_failed_callback(_failed)
-                router.handle_outbound(lxmf_msg)
-                log.info("Queued LXMF message %s → %s", msg_id[:8], dest_hash_hex[:16])
-
-            except Exception:
-                log.exception("Async LXMF delivery error for %s", msg_id[:8])
+            def _failed(_m):
                 if self._msg_store:
                     self._msg_store.update_sent(msg_id, "failed")
+                log.warning("Delivery failed %s → %s", msg_id[:8], dest_hash_hex[:16])
 
-        threading.Thread(target=_deliver, daemon=True).start()
-        return True, msg_id
+            lxmf_msg.register_delivery_callback(_delivered)
+            lxmf_msg.register_failed_callback(_failed)
+            router.handle_outbound(lxmf_msg)
+            log.info("Queued LXMF message %s → %s", msg_id[:8], dest_hash_hex[:16])
+
+        except Exception:
+            log.exception("Async LXMF delivery error for %s", msg_id[:8])
+            if self._msg_store:
+                self._msg_store.update_sent(msg_id, "failed")
+
+    def _launch_delivery(self, *args) -> None:
+        threading.Thread(target=self._run_delivery, args=args, daemon=True).start()
