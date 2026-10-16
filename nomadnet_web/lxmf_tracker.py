@@ -42,6 +42,7 @@ class LXMFPeerTracker:
         self._path  = os.path.join(storage_dir, "lxmf_peers.json")
         self._lock  = threading.Lock()
         self._peers: dict = {}
+        self._listeners: list = []
         self._dirty = False
         self._dirty_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -100,6 +101,12 @@ class LXMFPeerTracker:
 
     def register_announce_handler(self) -> "_LXMFAnnounceHandler":
         return _LXMFAnnounceHandler(self)
+
+    def add_announce_listener(self, listener) -> None:
+        """Call ``listener(destination_hash_hex)`` for every LXMF
+        announce recorded. A listener that raises is logged and does not
+        affect the others or the tracker."""
+        self._listeners.append(listener)
 
     # ------------------------------------------------------------------
     # Internal
@@ -162,6 +169,11 @@ class LXMFPeerTracker:
 
         log.info("LXMF peer announce: %s (%s)", hash_hex[:16], name or "no name")
         self._mark_dirty()
+        for listener in list(self._listeners):
+            try:
+                listener(hash_hex)
+            except Exception:
+                log.exception("LXMF announce listener failed")
 
     def _load(self) -> None:
         if not os.path.exists(self._path):

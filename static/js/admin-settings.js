@@ -145,6 +145,7 @@
       payload.prescribed_nodes = document.getElementById('s-prescribed-nodes').value;
       payload.lxmf_stamp_cost = parseInt(document.getElementById('s-stamp-cost').value || '0', 10) || 0;
       payload.lxmf_enforce_stamps = document.getElementById('s-stamp-enforce').checked;
+      payload.lxmf_auto_resend = document.getElementById('s-auto-resend').checked;
       payload.abuse_contact = document.getElementById('s-abuse-contact').value.trim();
       // Site-hosting tri-state. Empty string from the dropdown means
       // "fall through to env var" — send as null so the server keeps

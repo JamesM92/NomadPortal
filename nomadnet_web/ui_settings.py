@@ -132,6 +132,8 @@ class UISettings:
         # Incoming-message proof of work (see stamps.py). 0 = none required.
         "lxmf_stamp_cost":      0,
         "lxmf_enforce_stamps":  False,
+        # Try failed messages again when the recipient next announces.
+        "lxmf_auto_resend":     True,
         "abuse_contact":       "",
         # Site-server toggles (None = "fall through to env var"; True/False
         # = explicit override). Operators can flip these via Admin →
@@ -233,6 +235,8 @@ class UISettings:
                     self._data["lxmf_stamp_cost"] = cost
             if "lxmf_enforce_stamps" in patch:
                 self._data["lxmf_enforce_stamps"] = bool(patch["lxmf_enforce_stamps"])
+            if "lxmf_auto_resend" in patch:
+                self._data["lxmf_auto_resend"] = bool(patch["lxmf_auto_resend"])
             if "abuse_contact" in patch:
                 self._data["abuse_contact"] = str(patch["abuse_contact"]).strip()[:256]
             snapshot = dict(self._data)
@@ -256,6 +260,7 @@ class UISettings:
                 cost = parse_stamp_cost(data.get("lxmf_stamp_cost", 0))
                 self._data["lxmf_stamp_cost"] = cost if cost is not None else 0
                 self._data["lxmf_enforce_stamps"] = bool(data.get("lxmf_enforce_stamps", False))
+                self._data["lxmf_auto_resend"] = bool(data.get("lxmf_auto_resend", True))
                 if "abuse_contact" in data:
                     self._data["abuse_contact"] = str(data["abuse_contact"]).strip()[:256]
 

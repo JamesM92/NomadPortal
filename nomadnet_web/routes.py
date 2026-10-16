@@ -1545,6 +1545,31 @@ def api_conversation_delete(hash_hex: str):
     return jsonify({"ok": True, "removed": removed})
 
 
+def _message_action(action) -> tuple:
+    """Shared body for cancel / retry: the sender's own message only."""
+    messaging = current_app.config.get("MESSAGING")
+    if messaging is None:
+        abort(503)
+    ok, reason = action(messaging)
+    if ok:
+        return jsonify({"ok": True}), 200
+    return jsonify({"ok": False, "error": reason}), 409
+
+
+@bp.post("/api/messages/<msg_id>/cancel")
+@login_required
+def api_message_cancel(msg_id: str):
+    """Stop a message that has not been delivered yet."""
+    return _message_action(lambda m: m.cancel_send(msg_id, current_user.id))
+
+
+@bp.post("/api/messages/<msg_id>/retry")
+@login_required
+def api_message_retry(msg_id: str):
+    """Send a failed or cancelled message again."""
+    return _message_action(lambda m: m.retry_send(msg_id, current_user.id))
+
+
 @bp.get("/api/messages/<msg_id>/attachments/<int:idx>")
 @login_required
 def api_message_attachment(msg_id: str, idx: int):

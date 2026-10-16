@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cancel, retry and automatic re-send for sent messages (MeshChat
+  parity).** A message that is still on its way shows a **Cancel** button;
+  a message that failed or was cancelled shows **Retry**. Cancel stops a
+  message in the router, stops one that is still waiting for the
+  recipient's path, and repeats the cancel if it arrived while the message
+  was being queued (LXMF cannot see it then); a late failure never
+  overwrites a cancel. When the recipient **announces again**, recent
+  failed messages to them are sent once more automatically (never
+  cancelled ones; at most 3 times, within 24 hours, and not more than every
+  2 minutes for the same person), marked with ↻ in the chat. Admin →
+  Settings has a switch to turn that off. A message that arrived but whose
+  receipt was lost can arrive twice. A retry uses the sender's current
+  identity. New ``POST /api/messages/<id>/cancel`` and ``/retry``. The
+  delivery thread's body was moved into a method first (a separate commit,
+  verified to be a pure move) so a retry reuses the same code. 38 Python
+  tests (the delivery code runs against fakes of RNS and LXMF, including
+  the cancel race) and 11 browser checks, one of which found a button
+  that stayed disabled after a refusal. See check G in
+  docs/design/validation-suite.md.
 - **Required stamp cost for incoming messages (Admin → Settings).** An
   operator can ask senders to attach a proof-of-work stamp (a small
   amount of work their device does before sending), which makes bulk
@@ -99,10 +118,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 91 checks across nine suites (saved-copy
+  against a small mock backend: 102 checks across ten suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, inline images, and conversation extras). It runs as a new CI job,
+  partials, inline images, conversation extras, and send control). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

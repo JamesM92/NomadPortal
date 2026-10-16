@@ -1381,3 +1381,13 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
 .conv-pin { font-size: 10px; margin-right: 2px; }
 .conv-note { font-size: 10px; margin-left: 2px; cursor: help; }
 .peer-radio { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; cursor: pointer; }
+
+/* Cancel / Retry on a sent message, and the automatic-resend marker. */
+.chat-msg-action {
+  background: none; border: 1px solid var(--border); color: var(--accent);
+  font-family: var(--font-mono); font-size: 10px; padding: 0 6px; margin-left: 4px;
+  border-radius: 2px; cursor: pointer;
+}
+.chat-msg-action:hover { border-color: var(--accent); }
+.chat-msg-action:disabled { opacity: 0.5; cursor: default; }
+.chat-resent { color: var(--text-dim); font-size: 10px; cursor: help; }
