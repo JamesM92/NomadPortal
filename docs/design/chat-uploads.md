@@ -164,3 +164,16 @@ All four open questions from the initial draft resolved:
 2. **Audio codec: pass-through** — send whatever the browser's `MediaRecorder` produces (webm/mp4-containered audio). Zero server codec dependencies. Recipient's browser plays via `<audio controls>`. If bandwidth becomes an observed issue later, add server-side Opus transcode as a follow-up.
 3. **Sent-message attachment retention: forever** — matches current text-message lifecycle. No eviction. Reconsider if disk usage becomes an issue in practice (admin toggle can be added later).
 4. **Contact-icon vs message-attachment split: proceed on assumption** — my read of MeshChat is that `FIELD_IMAGE` on an announce is a contact icon, `FIELD_IMAGE` on a chat message with text content is an attachment. If wrong, symptom will be obvious during receive-side testing (icon flipping on inbound messages, or attachments not rendering) and the fix is localized to `_on_delivery` in `messaging.py`. Not worth blocking build on a verification round-trip.
+
+## Correction: the audio field uses integer modes (found 2026-10-16)
+
+The design above (and the first implementation) assumed `FIELD_AUDIO` carries a short string such as `"opus"` or `"webm"`. That was wrong. It was checked against LXMF's own constants and MeshChat's source:
+
+- `FIELD_AUDIO` is `[audio_mode, audio_bytes]` and `audio_mode` is an **integer**: `LXMF.AM_OPUS_OGG` (0x10), the Codec2 modes `AM_CODEC2_450PWB` ... `AM_CODEC2_3200` (0x01 to 0x09), and raw Opus presets (0x11 to 0x19).
+- MeshChat's sender passes the integer through unchanged. Its player handles `0x10` (Ogg Opus, played from a blob) and the Codec2 modes (decoded with a wasm library). Anything else shows "Unsupported Audio (mode N)" with a download button.
+- Images and files were right: `FIELD_IMAGE` is `[type_string, bytes]` and `FIELD_FILE_ATTACHMENTS` is a list of `[name, bytes]`.
+
+So, until this fix, audio sent from the portal showed as "Unsupported Audio" in MeshChat, and audio received from MeshChat or Sideband was stored as an unplayable blob.
+
+Now: Ogg Opus is sent as `[0x10, bytes]`, and only if the bytes really start with `OggS`. Any other audio (mp3, wav, m4a, WebM) is sent as an ordinary file attachment that every client can download. On receive, `0x10` plays inline; Codec2 and raw Opus presets are kept as downloadable files (a browser cannot play them without a decoder); the old string modes are still accepted so messages from older portals play. The MeshChat round-trip in `docs/design/validation-suite.md` (check A) is still the final proof.
+

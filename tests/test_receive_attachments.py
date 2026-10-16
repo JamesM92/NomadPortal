@@ -245,53 +245,74 @@ class TestFileAttachments:
 
 
 class TestAudioAttachment:
-    """FIELD_AUDIO (0x07) — [audio_mode_str, audio_bytes]. audio_mode
-    is a codec/container identifier (e.g. ``"opus"``, ``"webm"``).
-    (v1.3.0 step 3.)
+    """FIELD_AUDIO (0x07) -- [audio_mode, audio_bytes] where audio_mode is
+    an INTEGER from LXMF's AM_* constants (checked against LXMF and
+    MeshChat's source). Ogg Opus (0x10) plays inline; Codec2 and the raw
+    Opus presets are kept as downloadable files. Short string modes are what
+    older portal versions sent, and still play.
     """
 
-    def test_opus_audio_attachment(self, svc):
-        service, msg, att = svc
-        service._on_delivery(_MockMessage(
-            msg_id="e0" * 16, source="d0" * 16,
-            title=b"", content=b"voice note",
-            fields={0x07: ["opus", b"OggS\x00opus_frames_here"]},
-        ), user_sub="user1")
-        entry = msg.received_messages()[0]
-        assert len(entry["attachments"]) == 1
-        a0 = entry["attachments"][0]
-        assert a0["kind"]     == "audio"
-        assert a0["mime"]     == "audio/opus"
-        assert a0["filename"] == "audio.opus"
+    OGG = b"OggS\x00\x02" + b"\x00" * 20
 
-    def test_webm_audio_attachment(self, svc):
-        # Browsers' MediaRecorder often emits webm audio — check we
-        # accept and label it correctly.
+    def receive(self, svc, fields, tag="e0"):
         service, msg, att = svc
         service._on_delivery(_MockMessage(
-            msg_id="e1" * 16, source="d1" * 16,
-            title=b"", content=b"voice note",
-            fields={0x07: ["webm", b"webm audio bytes"]},
+            msg_id=tag * 16, source="d0" * 16, title=b"", content=b"voice note",
+            fields=fields,
         ), user_sub="user1")
-        entry = msg.received_messages()[0]
-        assert entry["attachments"][0]["mime"] == "audio/webm"
+        return msg.received_messages()[0]["attachments"]
 
-    def test_unknown_audio_mode_still_persists(self, svc):
-        # An unknown codec still saves the bytes (with an
-        # application/octet-stream MIME so the browser can at least
-        # download the blob).
-        service, msg, att = svc
-        service._on_delivery(_MockMessage(
-            msg_id="e2" * 16, source="d2" * 16,
-            title=b"", content=b"weird codec",
-            fields={0x07: ["weirdcodec", b"raw bytes"]},
-        ), user_sub="user1")
-        entry = msg.received_messages()[0]
-        assert entry["attachments"][0]["mime"] == "application/octet-stream"
-        assert entry["attachments"][0]["filename"] == "audio"
+    def test_ogg_opus_plays_inline(self, svc):
+        atts = self.receive(svc, {0x07: [0x10, self.OGG]})
+        assert len(atts) == 1
+        assert (atts[0]["kind"], atts[0]["mime"], atts[0]["filename"]) == (
+            "audio", "audio/ogg", "voice.ogg")
+
+    def test_the_bytes_are_stored_unchanged(self, svc):
+        self.receive(svc, {0x07: [0x10, self.OGG]})
+        assert svc[2].read("e0" * 16, 0) == self.OGG
+
+    def test_ogg_mode_with_bytes_that_are_not_ogg_is_not_played(self, svc):
+        atts = self.receive(svc, {0x07: [0x10, b"<html>not audio"]})
+        assert atts[0]["kind"] == "file" and atts[0]["mime"] == "application/octet-stream"
+
+    @pytest.mark.parametrize("mode,name", [(0x01, "450pwb"), (0x08, "2400"), (0x09, "3200")])
+    def test_codec2_is_kept_as_a_downloadable_file(self, svc, mode, name):
+        atts = self.receive(svc, {0x07: [mode, b"codec2 frames"]})
+        assert atts[0]["kind"] == "file"
+        assert atts[0]["filename"] == f"voice-codec2-{name}.c2"
+
+    def test_raw_opus_presets_are_kept_as_files(self, svc):
+        atts = self.receive(svc, {0x07: [0x11, b"raw opus"]})
+        assert atts[0]["kind"] == "file" and atts[0]["filename"] == "voice-opus-lbw.opus"
+
+    def test_an_unknown_integer_mode_still_saves_the_bytes(self, svc):
+        atts = self.receive(svc, {0x07: [77, b"???"]})
+        assert atts[0]["kind"] == "file" and atts[0]["filename"] == "voice-mode-77.bin"
+
+    @pytest.mark.parametrize("mode", [True, None, 1.5, b"x", [1]])
+    def test_nonsense_modes_do_not_crash(self, svc, mode):
+        atts = self.receive(svc, {0x07: [mode, b"bytes"]})
+        assert atts[0]["kind"] == "file"
+
+    # -- older portal versions sent short strings; keep those playable -----
+
+    def test_legacy_string_modes_still_play(self, svc):
+        atts = self.receive(svc, {0x07: ["opus", b"OggS\x00opus_frames_here"]})
+        assert (atts[0]["kind"], atts[0]["mime"], atts[0]["filename"]) == (
+            "audio", "audio/opus", "audio.opus")
+
+    def test_legacy_webm_string_mode(self, svc):
+        atts = self.receive(svc, {0x07: ["webm", b"webm audio bytes"]}, tag="e1")
+        assert atts[0]["kind"] == "audio" and atts[0]["mime"] == "audio/webm"
+
+    def test_unknown_string_mode_is_a_file(self, svc):
+        atts = self.receive(svc, {0x07: ["weirdcodec", b"raw bytes"]}, tag="e2")
+        assert (atts[0]["kind"], atts[0]["mime"], atts[0]["filename"]) == (
+            "file", "application/octet-stream", "audio")
 
     def test_all_three_kinds_together(self, svc):
-        # Image + files + audio all in one message — order in the
+        # Image + files + audio all in one message -- order in the
         # attachments array is image, files, audio (matches MeshChat's
         # own send-side ordering).
         service, msg, att = svc
@@ -301,7 +322,7 @@ class TestAudioAttachment:
             fields={
                 0x06: ["png", _FAKE_PNG],
                 0x05: [["note.txt", b"n"], ["doc.pdf", b"p"]],
-                0x07: ["opus", b"o"],
+                0x07: [0x10, self.OGG],
             },
         ), user_sub="user1")
         entry = msg.received_messages()[0]

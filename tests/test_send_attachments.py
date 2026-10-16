@@ -26,9 +26,9 @@ from nomadnet_web.attachment_store import AttachmentStore
 from nomadnet_web.message_store import MessageStore
 from nomadnet_web.messaging import (
     MessagingService,
-    _MIME_TO_AUDIO_MODE,
     _MIME_TO_IMAGE_EXT,
     _classify_attachment_kind,
+    audio_field_for_send,
 )
 
 
@@ -89,11 +89,17 @@ class TestClassifier:
         assert _classify_attachment_kind("image/png")  == "image"
         assert _classify_attachment_kind("image/webp") == "image"
 
-    def test_audio_mimes_classify_as_audio(self):
+    def test_ogg_opus_classifies_as_audio(self):
+        assert _classify_attachment_kind("audio/ogg")  == "audio"
         assert _classify_attachment_kind("audio/opus") == "audio"
-        assert _classify_attachment_kind("audio/mpeg") == "audio"
-        assert _classify_attachment_kind("audio/webm") == "audio"
-        assert _classify_attachment_kind("audio/mp4")  == "audio"
+
+    def test_other_audio_formats_go_as_files(self):
+        # MeshChat plays FIELD_AUDIO only as Ogg Opus (or Codec2); an
+        # mp3 / WebM / m4a sent as an audio field would show as
+        # "Unsupported Audio", so these travel as ordinary file
+        # attachments that every client can download.
+        for m in ("audio/mpeg", "audio/webm", "audio/mp4", "audio/wav", "audio/aac", "audio/flac"):
+            assert _classify_attachment_kind(m) == "file", m
 
     def test_generic_mimes_classify_as_file(self):
         assert _classify_attachment_kind("application/pdf")  == "file"
@@ -107,7 +113,7 @@ class TestClassifier:
         assert _classify_attachment_kind("image/heic") == "file"
 
     def test_audio_variant_without_native_slot_falls_back_to_file(self):
-        # Similarly for audio codecs we don't have in the map.
+        # Similarly for audio formats that cannot be an audio field.
         assert _classify_attachment_kind("audio/vnd.rn-realaudio") == "file"
 
     def test_case_insensitive(self):
@@ -255,26 +261,28 @@ class TestReverseMimeMaps:
         assert _MIME_TO_IMAGE_EXT["image/gif"]  == "gif"
         assert _MIME_TO_IMAGE_EXT["image/webp"] == "webp"
 
-    def test_audio_mime_to_mode_covers_common_codecs(self):
-        assert _MIME_TO_AUDIO_MODE["audio/opus"] == "opus"
-        assert _MIME_TO_AUDIO_MODE["audio/mpeg"] == "mp3"
-        assert _MIME_TO_AUDIO_MODE["audio/wav"]  == "wav"
-        assert _MIME_TO_AUDIO_MODE["audio/webm"] == "webm"
+    def test_ogg_opus_is_sent_with_the_integer_opus_ogg_mode(self):
+        ogg = b"OggS\x00\x02" + b"\x00" * 16
+        assert audio_field_for_send("audio/ogg", ogg) == [0x10, ogg]
+        assert audio_field_for_send("audio/opus", ogg) == [0x10, ogg]
+        assert audio_field_for_send("Audio/OGG", ogg) == [0x10, ogg]
 
-    def test_maps_agree_with_receive_side_extensions(self):
+    def test_the_mode_is_the_lxmf_constant(self):
+        import LXMF
+        assert audio_field_for_send("audio/ogg", b"OggS....")[0] == LXMF.AM_OPUS_OGG
+
+    def test_a_mislabelled_file_is_not_sent_as_audio(self):
+        assert audio_field_for_send("audio/ogg", b"<html>not an ogg stream") is None
+        assert audio_field_for_send("audio/ogg", b"") is None
+
+    def test_formats_that_cannot_be_an_audio_field_are_refused(self):
+        for m in ("audio/mpeg", "audio/webm", "audio/wav", "audio/mp4"):
+            assert audio_field_for_send(m, b"OggS....") is None, m
+
+    def test_image_exts_have_a_receive_mapping(self):
         # For every image ext we send, the receive side has a MIME
-        # mapping — otherwise sender and recipient would disagree
-        # about how to render the same bytes.
-        from nomadnet_web.messaging import (
-            _AUDIO_MODE_TO_EXT,
-            _AUDIO_MODE_TO_MIME,
-            _IMAGE_EXT_TO_MIME,
-        )
+        # mapping, otherwise sender and recipient would disagree about
+        # how to render the same bytes.
+        from nomadnet_web.messaging import _IMAGE_EXT_TO_MIME
         for mime, ext in _MIME_TO_IMAGE_EXT.items():
-            assert ext in _IMAGE_EXT_TO_MIME, \
-                f"send ext '{ext}' has no receive mapping"
-        for mime, mode in _MIME_TO_AUDIO_MODE.items():
-            assert mode in _AUDIO_MODE_TO_MIME, \
-                f"send audio mode '{mode}' has no receive mapping"
-            assert mode in _AUDIO_MODE_TO_EXT, \
-                f"send audio mode '{mode}' has no receive ext"
+            assert ext in _IMAGE_EXT_TO_MIME, f"send ext '{ext}' has no receive mapping"

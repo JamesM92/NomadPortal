@@ -64,27 +64,74 @@ _IMAGE_EXT_TO_MIME = {
 }
 
 
-# ``audio_mode`` component of ``FIELD_AUDIO (0x07)`` → MIME type +
-# file extension. MeshChat's own recorder produces ``"opus"``. Other
-# clients may send container-wrapped forms (webm audio, ogg, mp3);
-# we accept those too so playback works via the recipient's
-# ``<audio>`` element. Unknown modes fall back to
-# ``application/octet-stream`` at the call site so at least the
-# blob can be downloaded even if the browser can't decode it.
-_AUDIO_MODE_TO_MIME = {
+# ``FIELD_AUDIO (0x07)`` is ``[audio_mode, audio_bytes]`` and ``audio_mode``
+# is an INTEGER from LXMF's own ``AM_*`` constants. Checked against LXMF and
+# against MeshChat's source (its sender passes the int straight through; its
+# player handles only ``AM_OPUS_OGG`` and the Codec2 modes). Sideband uses the
+# same constants.
+#
+# - ``AM_OPUS_OGG`` (0x10): the bytes are an Ogg-wrapped Opus stream, which a
+#   browser's <audio> element can play.
+# - ``AM_CODEC2_*`` (0x01-0x09): Codec2 frames. A browser cannot play these
+#   without a decoder, so they are kept as a downloadable file.
+# - The other Opus modes (0x11-0x19) are raw Opus presets with no container;
+#   also kept as a file.
+#
+# Until v1.3.x the portal read and wrote short strings here ("opus", "webm",
+# "mp3"), so audio never interoperated with a real client. The string table
+# below is kept ONLY so messages from those older portal versions still play.
+AM_OPUS_OGG = 0x10
+_CODEC2_MODES = {
+    0x01: "450pwb", 0x02: "450", 0x03: "700c", 0x04: "1200", 0x05: "1300",
+    0x06: "1400", 0x07: "1600", 0x08: "2400", 0x09: "3200",
+}
+_OPUS_PRESETS = {
+    0x11: "lbw", 0x12: "mbw", 0x13: "ptt", 0x14: "rt-hdx", 0x15: "rt-fdx",
+    0x16: "standard", 0x17: "hq", 0x18: "broadcast", 0x19: "lossless",
+}
+_LEGACY_AUDIO_STRING_TO_MIME = {
     "opus":  "audio/opus",  "ogg":  "audio/ogg",  "oga": "audio/ogg",
     "mp3":   "audio/mpeg",  "mpeg": "audio/mpeg",
     "wav":   "audio/wav",   "wave": "audio/wav",
     "webm":  "audio/webm",  "m4a":  "audio/mp4",  "mp4": "audio/mp4",
     "aac":   "audio/aac",   "flac": "audio/flac",
 }
-_AUDIO_MODE_TO_EXT = {
+_LEGACY_AUDIO_STRING_TO_EXT = {
     "opus":  "opus", "ogg":  "ogg",  "oga":  "oga",
     "mp3":   "mp3",  "mpeg": "mp3",
     "wav":   "wav",  "wave": "wav",
     "webm":  "webm", "m4a":  "m4a",  "mp4":  "mp4",
     "aac":   "aac",  "flac": "flac",
 }
+
+
+def _is_ogg(data) -> bool:
+    return bytes(data[:4]) == b"OggS"
+
+
+def classify_audio_field(mode, data) -> tuple:
+    """What a received ``FIELD_AUDIO`` is: ``(kind, mime, filename)``.
+
+    ``kind`` is ``"audio"`` only when a browser can play it (Ogg Opus, or a
+    legacy string mode from an older portal); everything else is a ``"file"``
+    so the recipient can still download the bytes instead of getting a dead
+    player. Never raises.
+    """
+    if isinstance(mode, int) and not isinstance(mode, bool):
+        if mode == AM_OPUS_OGG and _is_ogg(data):
+            return "audio", "audio/ogg", "voice.ogg"
+        if mode in _CODEC2_MODES:
+            return "file", "application/octet-stream", f"voice-codec2-{_CODEC2_MODES[mode]}.c2"
+        if mode in _OPUS_PRESETS:
+            return "file", "application/octet-stream", f"voice-opus-{_OPUS_PRESETS[mode]}.opus"
+        return "file", "application/octet-stream", f"voice-mode-{mode}.bin"
+    if isinstance(mode, str):
+        key = mode.lower()
+        mime = _LEGACY_AUDIO_STRING_TO_MIME.get(key)
+        if mime:
+            ext = _LEGACY_AUDIO_STRING_TO_EXT.get(key, "")
+            return "audio", mime, f"audio.{ext}" if ext else "audio"
+    return "file", "application/octet-stream", "audio"
 
 
 # Reverse of ``_IMAGE_EXT_TO_MIME`` for the send side. Given a MIME
@@ -102,28 +149,21 @@ _MIME_TO_IMAGE_EXT = {
     "image/svg+xml": "svg",
 }
 
-# Reverse of ``_AUDIO_MODE_TO_MIME`` for the send side. Picks the
-# canonical ``audio_mode_str`` MeshChat sends in slot 0 of
-# ``FIELD_AUDIO = [audio_mode_str, audio_bytes]``. Where multiple
-# extensions map to the same MIME (opus / ogg / mp4 / mp3), the value
-# below is the one MeshChat's own recorder + player expect. Unknown
-# audio MIMEs return "" and the caller demotes the attachment to
-# ``FIELD_FILE_ATTACHMENTS`` rather than guessing.
-_MIME_TO_AUDIO_MODE = {
-    "audio/opus":       "opus",
-    "audio/ogg":        "ogg",
-    "audio/mpeg":       "mp3",
-    "audio/mp3":        "mp3",
-    "audio/wav":        "wav",
-    "audio/x-wav":      "wav",
-    "audio/wave":       "wav",
-    "audio/webm":       "webm",
-    "audio/mp4":        "m4a",
-    "audio/x-m4a":      "m4a",
-    "audio/aac":        "aac",
-    "audio/flac":       "flac",
-    "audio/x-flac":     "flac",
-}
+# Audio that can be sent as a real ``FIELD_AUDIO`` (mode ``AM_OPUS_OGG``):
+# Ogg-wrapped Opus only, which is what MeshChat plays. Anything else the
+# user attaches (mp3, wav, m4a, WebM audio, ...) goes as an ordinary file
+# attachment, which every client can download, instead of as an audio field
+# no client can play.
+_OGG_AUDIO_MIMES = ("audio/ogg", "audio/opus", "application/ogg")
+
+
+def audio_field_for_send(mime: str, blob) -> Optional[list]:
+    """``[mode, bytes]`` for ``FIELD_AUDIO``, or None when this audio cannot
+    be sent as one (the caller then sends it as a file). The bytes must
+    really be an Ogg stream: a mislabelled file is not sent as audio."""
+    if (mime or "").lower() in _OGG_AUDIO_MIMES and _is_ogg(blob):
+        return [AM_OPUS_OGG, bytes(blob)]
+    return None
 
 
 def _classify_attachment_kind(mime: str) -> str:
@@ -137,7 +177,7 @@ def _classify_attachment_kind(mime: str) -> str:
     m = (mime or "").lower()
     if m in _MIME_TO_IMAGE_EXT:
         return "image"
-    if m in _MIME_TO_AUDIO_MODE:
+    if m in _OGG_AUDIO_MIMES:
         return "audio"
     return "file"
 
@@ -824,24 +864,17 @@ class MessagingService:
                         log.warning("File attachment persist failed for %s: %s",
                                     msg_id[:16] if msg_id else "?", exc)
 
-            # FIELD_AUDIO (0x07) — [audio_mode_str, audio_bytes].
-            # ``audio_mode`` is a codec/container identifier from the
-            # sender (MeshChat uses ``"opus"`` for its recordings).
-            # We map it to a real MIME so the recipient's <audio>
-            # element can decode. Unknown modes fall back to
-            # ``application/octet-stream`` so at minimum the byte
-            # can be downloaded, even if the browser can't play it.
+            # FIELD_AUDIO (0x07) — [audio_mode (int), audio_bytes]. See
+            # classify_audio_field(): Ogg Opus plays inline, anything else
+            # (Codec2, raw Opus presets, unknown modes) is kept as a file.
             try:
                 if (isinstance(audio, list) and len(audio) >= 2
                         and isinstance(audio[1], (bytes, bytearray))):
-                    mode = (audio[0] or "").lower() if isinstance(audio[0], str) else ""
-                    mime = _AUDIO_MODE_TO_MIME.get(mode, "application/octet-stream")
-                    ext = _AUDIO_MODE_TO_EXT.get(mode, "")
-                    filename = f"audio.{ext}" if ext else "audio"
+                    kind, mime, filename = classify_audio_field(audio[0], audio[1])
                     idx = len(attachments)
                     self._attachments.write(msg_id, idx, filename, bytes(audio[1]))
                     attachments.append({
-                        "kind":     "audio",
+                        "kind":     kind,
                         "idx":      idx,
                         "filename": filename,
                         "mime":     mime,
@@ -1058,13 +1091,13 @@ class MessagingService:
                         ext = _MIME_TO_IMAGE_EXT.get(mime.lower(), "")
                         image_slot = [ext, blob]
                     elif kind == "audio" and audio_slot is None:
-                        mode = _MIME_TO_AUDIO_MODE.get(mime.lower(), "")
-                        if mode:
-                            audio_slot = [mode, blob]
+                        slot = audio_field_for_send(mime, blob)
+                        if slot is not None:
+                            audio_slot = slot
                         else:
-                            # Unknown audio codec — demote to a file
-                            # attachment so at least the recipient
-                            # can download the bytes.
+                            # Not real Ogg Opus (a mislabelled file) —
+                            # send it as a file so the recipient can
+                            # still download the bytes.
                             file_slots.append([name, blob])
                     else:
                         file_slots.append([name, blob])

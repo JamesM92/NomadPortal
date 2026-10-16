@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fix: audio attachments now use the wire format real clients expect.**
+  ``FIELD_AUDIO`` is ``[mode, bytes]`` where the mode is an **integer** from
+  LXMF (checked against the LXMF constants and MeshChat's source). The
+  portal sent and read short strings (``"opus"``, ``"webm"``), so audio
+  sent from the portal showed as "Unsupported Audio" in MeshChat, and
+  audio received from MeshChat or Sideband was saved as an unplayable
+  blob. Now: Ogg Opus is sent as ``[0x10, bytes]`` (only if the bytes really
+  are Ogg); any other audio (mp3, wav, m4a, WebM) is sent as a normal file
+  attachment every client can download; on receive ``0x10`` plays inline,
+  Codec2 and raw-Opus presets are kept as downloadable files, and the old
+  string modes still play so messages from earlier portals are not lost.
+  Images and files were already correct. This bug shipped in v1.3.0. The
+  old tests encoded the wrong assumption and were rewritten; 28 new tests,
+  including ones that run the real delivery code and inspect the LXMF
+  message's fields. Check A in docs/design/validation-suite.md remains the
+  final proof against a real MeshChat.
 - **Cancel, retry and automatic re-send for sent messages (MeshChat
   parity).** A message that is still on its way shows a **Cancel** button;
   a message that failed or was cancelled shows **Retry**. Cancel stops a
