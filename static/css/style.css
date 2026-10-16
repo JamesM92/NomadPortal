@@ -962,6 +962,31 @@ a.mu-link {
   text-decoration: none;
 }
 a.mu-link:hover { text-decoration: underline; }
+/* Stand-in for a page with no saved copy that couldn't be loaded. */
+.page-unavailable {
+  max-width: 420px;
+  margin: 48px auto;
+  padding: 0 16px;
+  text-align: center;
+}
+.page-unavailable-mark {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--error);
+}
+.page-unavailable h2 { margin: 12px 0 8px; font-size: 16px; }
+.page-unavailable p { margin: 0 0 16px; color: var(--text-dim); }
+.page-unavailable-retry {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 18px;
+  border-radius: 2px;
+  cursor: pointer;
+  font: inherit;
+}
+.page-unavailable-retry:hover { border-color: var(--accent); }
+.page-unavailable-why { font-size: 11px; opacity: 0.8; }
 /* A link the viewer isn't allowed to follow, shown as plain text. */
 .mu-offnode { cursor: help; text-decoration: none; }
 

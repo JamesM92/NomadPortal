@@ -118,6 +118,14 @@ class TestPoll:
         assert poll(app).status_code == 503
         assert kiosk.get(kiosk_key(NODE, "/page/index.mu")).content == b"old"
 
+    def test_failed_cold_fetch_stores_nothing(self, env):
+        app, browser, kiosk = env
+        start(app)
+        browser._jobs["job1"].update(status="error", error="timeout")
+        assert poll(app).status_code == 503
+        assert kiosk.get(kiosk_key(NODE, "/page/index.mu")) is None
+        assert kiosk.stats()["entries"] == 0
+
     def test_unflagged_job_is_not_cached(self, env):
         app, browser, kiosk = env
         start(app)

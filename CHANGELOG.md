@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk: friendly page when a first load can't complete.** A page with
+  no saved copy that fails for a transient reason (mesh busy or down,
+  server hiccup) is now retried quietly for about 30 seconds, with the
+  loading text changing to "Still trying to reach this page…". If it
+  still fails, the visitor sees a plain "This page can't be loaded right
+  now" page with a red ✕ and a Retry button, with no network jargon;
+  admins also see the reason. Real answers (login required, access
+  denied, too large) are shown as-is and never retried, form
+  submissions are never re-sent automatically, and a failed fetch never
+  leaves anything in the cache. ``apiFetch`` errors now carry
+  ``status``. Checked in headless Chromium.
 - **Kiosk: a list of prescribed nodes, and no more dead links (step 5
   of 5).** Admin → Settings has a new "Prescribed nodes" box: one node
   hash per line, the first being the landing page, up to 20. When it has

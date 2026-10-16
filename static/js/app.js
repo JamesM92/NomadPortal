@@ -187,7 +187,9 @@ async function apiFetch(url, opts = {}) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.description || body.error || `HTTP ${res.status}`);
+    const err = new Error(body.description || body.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -1320,7 +1322,9 @@ async function pollFetchJob(jobId, quiet = false) {
     }
     await new Promise(r => setTimeout(r, interval));
   }
-  throw new Error('Fetch timed out waiting for response');
+  const timeout = new Error('Fetch timed out waiting for response');
+  timeout.kind = 'mesh';
+  throw timeout;
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,6 +1624,50 @@ async function _refreshInBackground(url, jobId, cached, seq) {
   }
 }
 
+// A load with no saved copy that fails for a transient reason (the mesh
+// is busy or down, the server hiccupped) is retried quietly for a short
+// window before the visitor is told. Real answers (login required,
+// access denied, too large) are never retried. Mutable so a test can
+// shorten it.
+const _COLD_RETRY = { windowMs: 30000, gapMs: 3000 };
+
+function _isTransientFetchError(e) {
+  if (!e) return false;
+  if (e.kind === 'mesh') return true;
+  if (typeof e.status === 'number') return e.status >= 500;
+  return /Failed to fetch|NetworkError|Load failed/i.test(String(e.message || ''));
+}
+
+// Friendly stand-in for a page that couldn't be loaded and has no saved
+// copy. No mesh jargon for visitors; admins also get the reason.
+function showUnavailable(url, err) {
+  pageError.hidden = true;
+  pageContent.textContent = '';
+  const box = document.createElement('div');
+  box.className = 'page-unavailable';
+  const mark = document.createElement('div');
+  mark.className = 'page-unavailable-mark';
+  mark.textContent = '✕';
+  mark.setAttribute('aria-hidden', 'true');
+  const title = document.createElement('h2');
+  title.textContent = 'This page can’t be loaded right now';
+  const body = document.createElement('p');
+  body.textContent = 'The network may be busy. Please try again in a moment.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.className = 'page-unavailable-retry';
+  retry.textContent = 'Retry';
+  retry.addEventListener('click', () => { fetchPage(url); });
+  box.append(mark, title, body, retry);
+  if (_authState.is_admin && err && err.message) {
+    const why = document.createElement('p');
+    why.className = 'page-unavailable-why';
+    why.textContent = humanizeError(err.message);
+    box.append(why);
+  }
+  pageContent.append(box);
+}
+
 async function fetchPage(url, extraFields = null) {
   if (state.loading) return false;
   state.loading = true;
@@ -1628,6 +1676,7 @@ async function fetchPage(url, extraFields = null) {
   setStatus('Fetching page…', 'busy');
   pageError.hidden = true;
   _setRefreshState(null);
+  let hasFields = false;
 
   try {
     // Only attach field data when the caller passed `extraFields` — i.e.
@@ -1637,15 +1686,16 @@ async function fetchPage(url, extraFields = null) {
     // form state on the page (and the backend treats any request with
     // fields as a form submission, gated by _can_interact).
     const fields = extraFields || {};
-    const hasFields = Object.keys(fields).length > 0;
+    hasFields = Object.keys(fields).length > 0;
     // Start the fetch — server returns a job_id immediately.
     const startBody = { url };
     if (hasFields) startBody.fields = fields;
-    const startResp = await apiFetch('/api/page/fetch', {
+    const startFetch = () => apiFetch('/api/page/fetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(startBody),
     });
+    const startResp = await startFetch();
 
     // A last-good copy exists: show it now, refresh behind it. The
     // visitor can navigate away without waiting for the mesh.
@@ -1661,7 +1711,25 @@ async function fetchPage(url, extraFields = null) {
       return true;
     }
 
-    const data = await pollFetchJob(startResp.job_id);
+    // No saved copy. Retry transient failures for a short window, but
+    // never re-send a form submission on the visitor's behalf.
+    const t0 = Date.now();
+    let jobId = startResp.job_id;
+    let data;
+    for (;;) {
+      try {
+        data = await pollFetchJob(jobId);
+        break;
+      } catch (e) {
+        const timeLeft = _COLD_RETRY.windowMs - (Date.now() - t0);
+        if (hasFields || !_isTransientFetchError(e) || timeLeft <= _COLD_RETRY.gapMs) throw e;
+        _loadingNote = 'Still trying to reach this page…';
+        showLoading(true, 0);
+        await new Promise(r => setTimeout(r, _COLD_RETRY.gapMs));
+        jobId = (await startFetch()).job_id;
+      }
+    }
+    _loadingNote = '';
     showLoading(false);
     _showPage(url, data);
 
@@ -1669,12 +1737,19 @@ async function fetchPage(url, extraFields = null) {
     _updateNodeLoadStatus(data.hash, true);
     return true;
   } catch (e) {
+    _loadingNote = '';
     showLoading(false);
-    showError(e.message);
-    setStatus(humanizeError(e.message), 'error');
+    if (!hasFields && _isTransientFetchError(e)) {
+      showUnavailable(url, e);
+      setStatus('Page unavailable', 'error');
+    } else {
+      showError(e.message);
+      setStatus(humanizeError(e.message), 'error');
+    }
     _updateNodeLoadStatus(_extractNodeHash(url), false);
     return false;
   } finally {
+    _loadingNote = '';
     state.loading = false;
   }
 }
@@ -1874,11 +1949,17 @@ function setStatus(msg, level = 'idle') {
   statusDot.className = `status-${level}`;
 }
 
+// Shown instead of the generic "Connecting…" while a cold load is being
+// retried in the background (set by fetchPage, cleared when it ends).
+let _loadingNote = '';
+
 function showLoading(show, percent) {
   loadingOver.hidden = !show;
   if (show) {
     const txt = document.getElementById('loading-text');
-    if (txt) {
+    if (txt && _loadingNote && !(typeof percent === 'number' && percent > 0)) {
+      txt.textContent = _loadingNote;
+    } else if (txt) {
       // Backend bumps `progress` only once the RNS Resource transfer begins.
       // Before that — path discovery, link establishment, request awaiting
       // first byte — progress stays at 0, so we show a neutral phrase
