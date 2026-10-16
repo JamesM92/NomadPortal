@@ -783,7 +783,7 @@ def api_ui_settings_save():
         "guests_network_panel", "users_network_panel", "admins_network_panel",
         "users_can_message",
         # General settings
-        "app_title", "site_name", "default_node",
+        "app_title", "site_name", "default_node", "prescribed_nodes",
         "access_mode", "lockdown_node",  # presets / backwards-compat alias
         "abuse_contact",
         # Site-server toggles (None = "fall through to env var")

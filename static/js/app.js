@@ -1438,6 +1438,17 @@ function renderPageContent() {
     _restoreFormState(_autoReload.pendingFormState);
     _autoReload.pendingFormState = null;
   }
+  // Links the server marked as off-limits for this viewer (a guest locked
+  // to the operator's nodes) become plain text with a tooltip, so a
+  // visitor can't wander down a link rabbit hole. The server refuses the
+  // fetch regardless; this only removes the dead link.
+  pageContent.querySelectorAll('a[href="#offnode"]').forEach(a => {
+    const span = document.createElement('span');
+    span.className = 'mu-offnode';
+    span.title = 'This link leaves this site and isn’t available here.';
+    while (a.firstChild) span.appendChild(a.firstChild);
+    a.replaceWith(span);
+  });
   pageContent.querySelectorAll('a.mu-link, a.mu-dynamic').forEach(a => {
     a.addEventListener('click', e => {
       e.preventDefault();

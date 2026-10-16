@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kiosk: a list of prescribed nodes, and no more dead links (step 5
+  of 5).** Admin → Settings has a new "Prescribed nodes" box: one node
+  hash per line, the first being the landing page, up to 20. When it has
+  entries it replaces the single Default node; visitors who are locked
+  to the operator's nodes can reach all of them. In pages shown to such
+  a visitor, a link to anywhere else is now plain text with a tooltip
+  ("This link leaves this site and isn't available here") instead of a
+  live link that would be refused. The server still refuses the fetch
+  either way. Links on pages for everyone else are unchanged. File
+  links are covered too.
 - **The browser no longer keeps its own copy of the lock rules (step 4
   of 5).** ``/api/ui/settings`` now includes an ``access`` snapshot from
   the server (role, whether the viewer is confined, the trusted nodes,

@@ -12,7 +12,7 @@ import re
 import time
 import logging
 import urllib.parse
-from flask import Blueprint, jsonify, request, abort, current_app
+from flask import Blueprint, jsonify, request, abort, current_app, g, has_request_context
 from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
@@ -61,6 +61,11 @@ def _validate_field_data(field_data):
     return field_data, None
 
 
+# Placeholder href for a link the viewer may not follow; app.js turns
+# these into plain text with a tooltip.
+OFFNODE_HREF = "#offnode"
+
+
 def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
     """Wrap canonical NomadNet URLs in this app's /page?url= route.
 
@@ -73,12 +78,23 @@ def _web_url_resolver(url: str, node_hash: str, base_path: str) -> str:
     URL canonicalisation logic locally.
     """
     canonical = default_url_resolver(url, node_hash, base_path)
+    if has_request_context() and canonical.startswith("hash://"):
+        # A link this viewer isn't allowed to follow (e.g. a guest
+        # locked to the operator's nodes). The browser shows it as plain
+        # text with a tooltip; the server would refuse the fetch anyway.
+        target = _parse_nomadnet_url(canonical)[0]
+        if target and not _policy().link_filter()(target):
+            return OFFNODE_HREF
     if canonical == "#" and "/file/" in url:
         unblocked = default_url_resolver(
             url.replace("/file/", "/page/", 1),
             node_hash, base_path,
         )
         if unblocked.startswith("hash://"):
+            if has_request_context():
+                target = _parse_nomadnet_url(unblocked)[0]
+                if target and not _policy().link_filter()(target):
+                    return OFFNODE_HREF
             file_canonical = unblocked.replace("/page/", "/file/", 1)
             return f"/file?url={urllib.parse.quote(file_canonical, safe='')}"
     if canonical.startswith("hash://"):
@@ -169,16 +185,20 @@ def _policy():
     ``access.py``; this is the only place that gathers its inputs from
     the request (the user, the stored UI settings, the hosted site hash
     and the node blocklist)."""
+    cached = getattr(g, "_access_policy", None)
+    if cached is not None:
+        return cached
     ui = current_app.config.get("UI_SETTINGS")
     site_server = current_app.config.get("SITE_SERVER")
     hosted = site_server.node_hash() if (site_server and site_server.node_hash()) else ""
-    return policy_for(
+    g._access_policy = policy_for(
         current_user,
         ui.get_all() if ui else {},
         hosted=hosted,
         # Looked up on use, so the role rule alone never needs the browser.
         is_blocked=lambda node_hash: _browser().is_blocked(node_hash),
     )
+    return g._access_policy
 
 
 def _can_browse(node_hash: str) -> bool:

@@ -91,3 +91,34 @@ def test_blocked_node_is_403_with_the_blocked_message():
 def test_locked_guest_may_still_reach_the_hosted_site(locked):
     r = locked.post("/api/page/fetch", json={"hash": HOSTED, "path": "/page/index.mu"})
     assert r.status_code not in (401, 403)
+
+
+PAGE_WITH_LINKS = (
+    f"`[Stay here`{HOSTED}:/page/other.mu]\n"
+    f"`[Leave`{OTHER}:/page/index.mu]\n"
+).encode()
+
+
+def page_html(client, node=HOSTED):
+    r = client.get(f"/api/page?hash={node}&path=/page/index.mu")
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()["html"]
+
+
+class TestOffLimitsLinks:
+    def test_confined_guest_gets_off_node_link_marked_and_on_node_link_live(self):
+        c = build({"guests_default_lock": True})
+        c.application.config["SITE_SERVER"].fetch_page.return_value = (PAGE_WITH_LINKS, None)
+        html = page_html(c)
+        assert 'href="#offnode"' in html
+        assert "/page?url=" in html and "other.mu" in html
+
+    def test_unconfined_guest_keeps_every_link_live(self):
+        c = build({"guests_default_lock": False})
+        c.application.config["SITE_SERVER"].fetch_page.return_value = (PAGE_WITH_LINKS, None)
+        assert "#offnode" not in page_html(c)
+
+    def test_prescribed_node_links_stay_live_for_a_confined_guest(self):
+        c = build({"guests_default_lock": True, "prescribed_nodes": [OTHER]})
+        c.application.config["SITE_SERVER"].fetch_page.return_value = (PAGE_WITH_LINKS, None)
+        assert "#offnode" not in page_html(c)

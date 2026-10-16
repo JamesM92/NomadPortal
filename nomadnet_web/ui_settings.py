@@ -10,6 +10,27 @@ _ADDR_BAR_STATES = {"enabled", "disabled", "hidden"}
 _ACCESS_PRESETS  = {"public", "gated", "locked"}
 _HEX_RE          = re.compile(r'^[0-9a-f]{1,128}$')
 
+# Most prescribed nodes an operator can list. A kiosk normally has one.
+MAX_PRESCRIBED_NODES = 20
+
+
+def clean_node_list(raw) -> list:
+    """Normalise an operator-entered list of node hashes: accepts a list
+    or a newline / comma / space separated string, lowercases, drops
+    anything that isn't hex, removes duplicates (keeping first-seen
+    order, since the first entry is the landing page) and caps the length."""
+    if isinstance(raw, str):
+        raw = re.split(r'[\s,]+', raw)
+    if not isinstance(raw, (list, tuple)):
+        return []
+    seen, out = set(), []
+    for item in raw:
+        v = str(item).strip().lower()
+        if _HEX_RE.match(v) and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out[:MAX_PRESCRIBED_NODES]
+
 # Per-audience field templates for each preset. The Settings UI offers these
 # as a "fill the table" action; the per-audience values are the source of
 # truth, the preset is purely a display label computed from them.
@@ -105,6 +126,7 @@ class UISettings:
         "app_title":           "`F4af■ NomadPortal`f",
         "site_name":           "",
         "default_node":        "",
+        "prescribed_nodes":    [],
         "abuse_contact":       "",
         # Site-server toggles (None = "fall through to env var"; True/False
         # = explicit override). Operators can flip these via Admin →
@@ -125,11 +147,13 @@ class UISettings:
         self._file = os.path.join(config_dir, "ui_settings.json")
         self._lock = threading.Lock()
         self._data = dict(self.DEFAULTS)
+        self._data["prescribed_nodes"] = []   # never share the class-level list
         self._load()
 
     def get_all(self) -> dict:
         with self._lock:
             data = dict(self._data)
+        data["prescribed_nodes"] = list(data["prescribed_nodes"])
         data["access_mode"] = matching_preset(data)
         return data
 
@@ -196,6 +220,8 @@ class UISettings:
             if "default_node" in patch:
                 v = str(patch["default_node"]).strip().lower()
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
+            if "prescribed_nodes" in patch:
+                self._data["prescribed_nodes"] = clean_node_list(patch["prescribed_nodes"])
             if "abuse_contact" in patch:
                 self._data["abuse_contact"] = str(patch["abuse_contact"]).strip()[:256]
             snapshot = dict(self._data)
@@ -214,6 +240,8 @@ class UISettings:
                     self._data["site_name"] = str(data["site_name"]).strip()[:64]
                 v = str(data.get("default_node", "")).strip().lower()
                 self._data["default_node"] = v if _HEX_RE.match(v) else ""
+                if "prescribed_nodes" in data:
+                    self._data["prescribed_nodes"] = clean_node_list(data["prescribed_nodes"])
                 if "abuse_contact" in data:
                     self._data["abuse_contact"] = str(data["abuse_contact"]).strip()[:256]
 

@@ -142,6 +142,7 @@
       payload.app_title     = document.getElementById('s-app-title').value.trim() || '`F4af■ NomadPortal`f';
       payload.site_name     = document.getElementById('s-site-name').value.trim();
       payload.default_node  = document.getElementById('s-default-node').value.trim().toLowerCase();
+      payload.prescribed_nodes = document.getElementById('s-prescribed-nodes').value;
       payload.abuse_contact = document.getElementById('s-abuse-contact').value.trim();
       // Site-hosting tri-state. Empty string from the dropdown means
       // "fall through to env var" — send as null so the server keeps

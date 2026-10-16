@@ -132,6 +132,16 @@
     </span>
   </div>
 
+  <div class="form-field" style="margin-bottom:18px;">
+    <label>Prescribed nodes (kiosk)</label>
+    <textarea id="s-prescribed-nodes" rows="3"
+              style="max-width:480px;font-size:12px;" maxlength="4096"
+              placeholder="one hex hash per line — optional">{{ (settings.prescribed_nodes or []) | join("\n") | e }}</textarea>
+    <span class="dim" style="margin-top:4px;">
+      The nodes a locked-down visitor can reach, besides your hosted site. The first line is the landing page. When this list has entries it replaces the Default node above. Links to anywhere else show as plain text for visitors who are locked to these nodes. Most sites need only one.
+    </span>
+  </div>
+
   <div class="form-field" style="margin-bottom:8px;">
     <label>Access preset</label>
     <select id="s-access-preset" style="max-width:260px;">

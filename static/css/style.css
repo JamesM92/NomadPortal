@@ -962,6 +962,8 @@ a.mu-link {
   text-decoration: none;
 }
 a.mu-link:hover { text-decoration: underline; }
+/* A link the viewer isn't allowed to follow, shown as plain text. */
+.mu-offnode { cursor: help; text-decoration: none; }
 
 a.mu-dynamic {
   color: var(--warn);
