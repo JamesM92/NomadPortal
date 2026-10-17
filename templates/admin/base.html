@@ -23,6 +23,7 @@
       <a href="{{ url_for('admin.interfaces') }}" class="{{ 'active' if request.endpoint in ('admin.interfaces','admin.interfaces_save') }}">&#9675; Interfaces</a>
       <a href="{{ url_for('admin.traffic') }}"    class="{{ 'active' if request.endpoint == 'admin.traffic' }}">&#9638; Traffic</a>
       <a href="{{ url_for('admin.cache_view') }}" class="{{ 'active' if 'cache' in (request.endpoint or '') }}">&#9702; Cache</a>
+      <a href="{{ url_for('admin.propagation_page') }}" class="{{ 'active' if 'propagation' in (request.endpoint or '') }}">&#9707; Node</a>
       <a href="{{ url_for('admin.users') }}"      class="{{ 'active' if 'users' in (request.endpoint or '') }}">&#9671; Users</a>
       <a href="{{ url_for('admin.sessions') }}"   class="{{ 'active' if 'session' in (request.endpoint or '') }}">&#9678; Sessions</a>
       <a href="{{ url_for('admin.logs_page') }}"  class="{{ 'active' if request.endpoint in ('admin.logs_page','admin.logs_stream') }}">&#9776; Logs</a>

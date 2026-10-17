@@ -499,6 +499,58 @@ def node_ping(hash_hex: str):
 
 
 # ---------------------------------------------------------------------------
+# Propagation node  (admin only — see propagation_host.py)
+# ---------------------------------------------------------------------------
+
+def _prop_host():
+    return current_app.config.get("PROPAGATION_HOST")
+
+
+def _no_host():
+    return jsonify({"error": "The propagation node is not available."}), 503
+
+
+@admin_bp.get("/propagation")
+@admin_required
+def propagation_page():
+    return render_template("admin/propagation.html", user=current_user)
+
+
+@admin_bp.get("/api/propagation")
+@admin_required
+def propagation_status():
+    host = _prop_host()
+    return jsonify(host.status()) if host else _no_host()
+
+
+@admin_bp.post("/api/propagation")
+@admin_required
+def propagation_update():
+    host = _prop_host()
+    if not host:
+        return _no_host()
+    patch = request.get_json(silent=True)
+    if not isinstance(patch, dict):
+        return jsonify({"errors": ["Expected a JSON object."]}), 400
+    result = host.update(patch)
+    _audit_warn("propagation_update: actor=%s keys=%s",
+                getattr(current_user, "name", "?"), sorted(patch))
+    return jsonify(result), (400 if result["errors"] else 200)
+
+
+@admin_bp.post("/api/propagation/announce")
+@admin_required
+def propagation_announce():
+    host = _prop_host()
+    if not host:
+        return _no_host()
+    result = host.announce()
+    if result.get("ok"):
+        return jsonify(result)
+    return jsonify(result), (429 if "retry_in_s" in result else 409)
+
+
+# ---------------------------------------------------------------------------
 # Cache  (admin only)
 # ---------------------------------------------------------------------------
 

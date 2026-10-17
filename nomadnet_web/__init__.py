@@ -17,6 +17,7 @@ from .admin_routes import admin_bp
 from .identity_store import IdentityStore
 from .messaging import MessagingService
 from .lxmf_sync import PropagationSyncService
+from .propagation_host import PropagationHost
 from .message_store import MessageStore
 from .attachment_store import AttachmentStore
 from .contact_store import ContactStoreManager
@@ -191,6 +192,27 @@ def create_app(
     )
     app.config["PROP_SYNC"] = prop_sync
     _defer_after_rns("LXMF propagation sync service", prop_sync.start)
+
+    # Hosting our own LXMF propagation node (off unless the operator turns
+    # it on in Admin) — see nomadnet_web/propagation_host.py. Kept in its
+    # own directory under config/ (local disk only: it writes per message).
+    def _start_propagation_host():
+        import LXMF
+        import RNS
+        host = PropagationHost(os.path.join(config_dir, "propagation"), LXMF, RNS)
+        app.config["PROPAGATION_HOST"] = host
+        host.apply()
+
+        def _tick_loop():
+            while True:
+                time.sleep(60)
+                try:
+                    host.tick()
+                except Exception:
+                    log.exception("propagation re-announce failed")
+        threading.Thread(target=_tick_loop, name="propagation-tick", daemon=True).start()
+    app.config["PROPAGATION_HOST"] = None
+    _defer_after_rns("LXMF propagation node host", _start_propagation_host)
 
     lxmf_tracker = LXMFPeerTracker(config_dir)
     app.config["LXMF_TRACKER"] = lxmf_tracker

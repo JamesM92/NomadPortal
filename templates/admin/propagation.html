@@ -1,0 +1,46 @@
+{% extends "admin/base.html" %}
+{% block title %}Propagation node{% endblock %}
+
+{% block content %}
+<div class="section-title">Propagation node</div>
+<p class="dim">
+  A propagation node holds messages for people who are offline, and passes them
+  on when they next connect. Switching it on stores other people's messages on
+  this server, within the limit below, and uses some bandwidth.
+</p>
+
+<div id="pn-error" class="card" hidden style="border-color:var(--danger,#c33)"></div>
+<div id="pn-restart" class="card" hidden>
+  Some changes (name, limits, peering) take effect the next time the portal restarts.
+</div>
+
+<div class="stat-grid" id="pn-stats"></div>
+
+<div class="card">
+  <div class="card-title">Settings</div>
+  <form id="pn-form" autocomplete="off">
+    <label><input type="checkbox" id="pn-enabled"> Run a propagation node</label>
+    <p class="dim">Name shown to others <input id="pn-name" maxlength="64"></p>
+    <p class="dim">Storage limit (MB) <input id="pn-storage" type="number" min="1"></p>
+    <p class="dim">Largest message accepted (KB) <input id="pn-limit" type="number" min="1"></p>
+    <p class="dim">Spam brake (stamp cost, 0 to 32) <input id="pn-stamp" type="number" min="0" max="32"></p>
+    <label><input type="checkbox" id="pn-autopeer"> Find and peer with other nodes automatically</label>
+    <p class="dim">Most peers <input id="pn-maxpeers" type="number" min="0"></p>
+    <p class="dim">How far to look for peers (hops) <input id="pn-depth" type="number" min="1"></p>
+    <p class="dim">Fixed peers (one address per line, 32 hex characters)<br>
+      <textarea id="pn-static" rows="3" cols="40"></textarea></p>
+    <label><input type="checkbox" id="pn-onlystatic"> Peer only with the fixed list</label>
+    <p><button type="submit" class="btn btn-neutral" id="pn-save">Save</button>
+       <button type="button" class="btn btn-neutral" id="pn-announce">Announce now</button>
+       <span id="pn-msg" class="dim"></span></p>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Peers</div>
+  <table class="table" id="pn-peers"><tbody></tbody></table>
+  <p class="dim" id="pn-nopeers">No peers yet.</p>
+</div>
+
+<script src="/static/js/admin-propagation.js"></script>
+{% endblock %}
