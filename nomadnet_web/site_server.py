@@ -360,8 +360,10 @@ class SiteServer:
         log.debug("Peer connected to site node")
 
     def _serve_page(self, path, data, request_id, link_id, remote_identity, requested_at):
-        file_path = path.replace("/page", self._pages_dir, 1)
-        log.debug("Page request: %s → %s", path, file_path)
+        file_path = _inside(self._pages_dir, path.replace("/page", self._pages_dir, 1))
+        if file_path is None:
+            return b">Page Not Found\n\nThe requested page does not exist."
+        log.debug("Page request served from the pages directory")
         try:
             if not os.path.isfile(file_path):
                 return b">Page Not Found\n\nThe requested page does not exist."
@@ -389,9 +391,10 @@ class SiteServer:
             return None
 
     def _serve_file(self, path, data, request_id, link_id, remote_identity, requested_at):
-        file_path = path.replace("/file", self._files_dir, 1)
+        file_path = _inside(self._files_dir, path.replace("/file", self._files_dir, 1))
+        if file_path is None:
+            return None
         file_name = path.replace("/file/", "", 1)
-        log.debug("File request: %s → %s", path, file_path)
         try:
             if not is_request_allowed(file_path, getattr(remote_identity, "hash", None)):
                 log.debug("Denying file request: requester not on the access list")
@@ -544,6 +547,18 @@ def load_allowed_hashes(allowed_path: str, timeout: float = _ALLOWED_SCRIPT_TIME
         except ValueError:
             continue
     return allowed
+
+
+def _inside(base: str, candidate: str):
+    """``candidate`` tidied, or None if it is not inside ``base``. Lexical on
+    purpose: ``..`` is refused, but a symlink the operator placed in the
+    directory is still followed. Reticulum only calls a handler for a path
+    it was registered under, so this is a second lock, not the only one."""
+    base = os.path.normpath(base)
+    full = os.path.normpath(candidate)
+    if full == base or not full.startswith(base + os.sep):
+        return None
+    return full
 
 
 def is_request_allowed(file_path: str, identity_hash) -> bool:
