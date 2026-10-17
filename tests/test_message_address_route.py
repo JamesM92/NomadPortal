@@ -50,7 +50,13 @@ def post(c, dest, content="hi"):
 
 
 @pytest.fixture
-def person():
+def person(monkeypatch):
+    # Newer Reticulum's recall() notes the lookup on the running instance;
+    # there is none in tests, so give it one that ignores the note.
+    class _Instance:
+        def _used_destination_data(self, _h):
+            pass
+    monkeypatch.setattr(RNS.Reticulum, "get_instance", staticmethod(lambda: _Instance()))
     i = RNS.Identity()
     dest = RNS.Destination.hash_from_name_and_identity("lxmf.delivery", i)
     yield i, dest
