@@ -27,12 +27,13 @@ def clean_state():
 
 
 @pytest.fixture
-def app(tmp_path):
+def app(tmp_path, monkeypatch):
     a = Flask(__name__, root_path=ROOT)
     a.config.update(TESTING=True, SECRET_KEY="t", ADMIN_USERNAME="root", ADMIN_PASSWORD="s3cret",
                     USER_STORE=UserStore(str(tmp_path / "users.yml")), CACHE=PageCache(),
                     RNS_CONFIG_DIR=str(tmp_path))
-    auth.login_manager.login_view = "auth.login_page"
+    # login_manager is shared by the whole process: put the setting back afterwards
+    monkeypatch.setattr(auth.login_manager, "login_view", "auth.login_page")
     auth.login_manager.init_app(a)
     csrf_mod.init_csrf(a)
     a.register_blueprint(auth.auth_bp)
