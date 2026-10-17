@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Design: hosting a propagation node** (`docs/design/propagation-hosting.md`).
+  A proposal only; nothing is built yet.
 - **Network map (MeshChat parity).** A map button in the Network tab opens a
   picture of everything the portal has heard, centred on the portal: its
   interfaces around it (red when down, each labelled with how many
