@@ -1,6 +1,6 @@
 # Hosting an LXMF propagation node
 
-Status: **proposal, not built.** Covers MeshChat parity item 8 and the
+Status: **in progress** (host module built; routes, panel and picker to come). Covers MeshChat parity item 8 and the
 deferred NomadNet item "host a propagation node" (they are the same feature:
 NomadNet and MeshChat both just switch on LXMF's `enable_propagation()`).
 
@@ -78,6 +78,17 @@ only through Reticulum, by design.
 propagation picker lists it as "This portal" and uses it first, so a small
 deployment works with no outside node at all.
 
+**D9. One router per run; most settings apply at restart.** Found while
+building: an `LXMRouter` cannot be torn down (its job thread and Reticulum
+destinations live until the process exits, and a second router on the same
+identity would collide). So the router is created once, on first enable;
+switching the node on and off reuses it, and the storage cap changes live.
+Name, per-transfer limit, peering and stamp-cost settings are saved at once and
+take effect at the next portal restart; the panel says "restart required".
+
+**Decided with the operator ("use your preference"):** 500 MB cap, static peers
+only until auto-peering is turned on, LXMF's default stamp cost of 16.
+
 ## What it must not do
 
 - Start without the operator asking, or survive a config where the cap is unset.
@@ -105,7 +116,7 @@ deployment works with no outside node at all.
 What stays unverifiable here (no mesh in the sandbox): real peering, real
 message hand-off, bandwidth cost. Those are check L.
 
-## Open questions for the operator
+## Open questions for the operator (answered above)
 
 1. Default storage cap: 500 MB, or smaller for a small VPS?
 2. Auto-peer by default, or static peers only until the operator opts in?
