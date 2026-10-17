@@ -2047,7 +2047,21 @@ if (_ddAutoReload) _ddAutoReload.addEventListener('change', () => {
 // ---------------------------------------------------------------------------
 // Address bar
 // ---------------------------------------------------------------------------
+// A messaging address typed into the page address bar (lxmf@..., or the
+// lxma:// link from a QR code) is not a page to fetch. Open a new message to
+// it instead of failing with a confusing page error.
+const _MESSAGING_ADDRESS_RE = /^\s*<?(lxmf@|lxmf:\/\/|lxma:\/\/)/i;
+
 function _submitAddrBar() {
+  if (_MESSAGING_ADDRESS_RE.test(addrBar.value)) {
+    if (!_authState.logged_in) {
+      setStatus('Sign in to send messages. This is a messaging address, not a page.', 'error');
+      return;
+    }
+    openComposeModal(addrBar.value.trim());
+    setStatus('That is a messaging address, so a new message is open.', 'idle');
+    return;
+  }
   const fixed = _normaliseAddress(addrBar.value);
   if (fixed !== addrBar.value) addrBar.value = fixed;
   navigateTo(fixed);

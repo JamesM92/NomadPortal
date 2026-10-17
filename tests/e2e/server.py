@@ -57,6 +57,7 @@ DEFAULTS = {
     "sent": [],            # /api/messages/sent (each: id, dest, content, sent_at, state, resends?)
     "msg_actions": [],     # ["cancel:<id>", "retry:<id>"] in the order they were POSTed
     "msg_refuse": "",      # when set, cancel/retry answer 409 with this text
+    "message_error": "",   # when set, POST /api/messages answers 400 with this text
     "message_posts": [],   # what POST /api/messages received (files seen as name, type, first bytes)
     "prop": {},            # /api/propagation status; see propagation() for the fields filled in
     "prop_sync_refuse": "",# when set, POST /api/propagation/sync answers 409 with this text
@@ -259,6 +260,11 @@ def messages_sent():
 
 @app.post("/api/messages")
 def messages_post():
+    if S["message_error"]:
+        return jsonify(error=S["message_error"]), 400
+    if request.is_json:
+        S["message_posts"].append({"content_type": "application/json", "json": request.get_json(), "files": []})
+        return jsonify(ok=True, id="new")
     files = [{"name": f.filename, "type": f.mimetype, "head": f.read(4).decode("latin1"), "size": f.seek(0, 2)}
              for f in request.files.getlist("attachments")] if request.files else []
     S["message_posts"].append({"content_type": request.content_type.split(";")[0],

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Message anyone by address, in the forms people share.** The New Message
+  dialog now takes a bare address, ``lxmf@<address>`` (also in angle brackets),
+  or the ``lxma://<address>:<public key>`` link from this portal's own QR code
+  (the portal could show that link but never read one). A link carries the
+  person's public key, so the first message can go out **before they
+  announce**, instead of waiting for a path that may never come. The key is
+  checked first: the address is rebuilt from the key and the link is refused
+  unless they match, because otherwise anyone could plant a false key for any
+  address and read or impersonate that person. A wrong address gets a plain
+  explanation, not "Invalid destination hash". Typing or pasting a messaging
+  address into the page address bar opens a new message instead of failing as a
+  page fetch. Also adds ``tests/conftest.py``, which clears the rate limiter
+  between tests (its counts are global, so a test could be refused by requests
+  made in earlier tests). 33 + 14 Python tests (the key check uses real
+  Reticulum identities) and 11 browser checks. See check J in
+  docs/design/validation-suite.md.
 - **Propagation nodes: choose one, sync on demand, and use it when a message
   cannot be delivered (MeshChat parity).** New **Settings → Propagation**
   tab: pick a node from the ones the portal has heard (with distance and
@@ -174,10 +190,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 163 checks across twelve suites (saved-copy
+  against a small mock backend: 175 checks across thirteen suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, inline images, conversation extras, send control, voice messages, and propagation). It runs as a new CI job,
+  partials, inline images, conversation extras, send control, voice messages, propagation, and addresses). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

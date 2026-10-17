@@ -33,6 +33,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `10-send-control` | A queued message offers Cancel, a failed or cancelled one offers Retry, a delivered one has no buttons. A refusal is explained and the button works again. Automatic re-sends are marked. |
 | `11-voice-message` | The Ogg Opus muxer, checked with an independent parser and (when ffmpeg exists) a real decoder: the audio comes out bit-identical. The recorder in Chromium: timer, stop, cancel, Escape, a staged `audio/ogg` file that the browser's own decoder opens, the microphone always released, a refused microphone explained, no room in the message, no button without WebCodecs. **Microphone capture is stubbed** (see below). |
 | `12-propagation` | Settings > Propagation: Automatic first and naming the nearest node, node distances, choosing a node, going back to automatic, typing a node in (Enter works), a bad hash explained, Sync now with progress then the result, the inbox refreshed afterwards, a refused sync shown, polling stopped when the dialog closes. |
+| `13-lxmf-address` | A messaging address (`lxmf@...`, an `lxma://` link, in angle brackets) typed in the page address bar opens a new message and fetches no page. A node address still opens a page. Signed out, a message explains. The dialog sends the address as typed and shows the server's reason when it is wrong. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -133,6 +134,16 @@ You need at least one propagation node on the network (a MeshChat or NomadNet in
 8. Cancel a message while it is still "queued" and the client is off. It must stop and never arrive.
 
 Step 6 depends on the two clients using the same node, or nodes that peer with each other. If the message never arrives, check that first.
+
+### J. Messaging someone you have not heard from
+
+Use a second client whose QR code (or `lxma://` link) you can copy, on a network where the portal has **not** seen that client announce (restart the portal, or use a new identity on the client and do not announce).
+
+1. From the second client, copy the QR link, or read the address it shows.
+2. In the portal, press **New Message**, paste the `lxma://` link and send a short message. It must be delivered without waiting for an announce.
+3. Repeat with only the plain address (or `lxmf@...`) of an identity the portal has never heard. It must wait for the path, then fail or go to the propagation node. It must not claim success.
+4. Edit one character in the middle of the key in an `lxma://` link and send. The portal must refuse it with "does not belong to this address".
+5. Paste `lxmf@...` into the page address bar. A new message must open, not a page error.
 
 ### D. Public site
 
