@@ -87,9 +87,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The mock backend needs only Flask (same pin as requirements.txt).
-      - name: Install Flask for the mock backend
-        run: pip install flask==3.1.3
+      # The mock backend serves the real admin pages, so it imports the
+      # real package (Reticulum itself is never started). Same setup as
+      # the Test job.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc libssl-dev openssl
+
+      - name: Install dependencies for the mock backend
+        run: pip install -r requirements.txt
 
       - name: Install browser test dependencies
         working-directory: tests/e2e

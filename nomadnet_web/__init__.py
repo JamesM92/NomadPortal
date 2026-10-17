@@ -36,6 +36,15 @@ from . import csrf as csrf_mod
 log = logging.getLogger(__name__)
 
 
+def register_template_filters(app) -> None:
+    """The Jinja filters the admin templates use. A function of its own so
+    the browser-test backend registers exactly the same ones."""
+    app.jinja_env.filters["enumerate"] = lambda it: enumerate(it)
+    app.jinja_env.filters["strftime"] = lambda ts: (
+        datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "—"
+    )
+
+
 def _env_int(cfg: dict, name: str, default: int) -> int:
     """An integer setting from the app config or, failing that, the
     environment. A bad value falls back to the default instead of
@@ -377,10 +386,7 @@ def create_app(
     log_buffer.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(log_buffer)
 
-    app.jinja_env.filters["enumerate"] = lambda it: enumerate(it)
-    app.jinja_env.filters["strftime"] = lambda ts: (
-        datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "—"
-    )
+    register_template_filters(app)
 
     # CSRF token generation on every request + Jinja2 global
     csrf_mod.init_csrf(app)

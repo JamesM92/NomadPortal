@@ -20,6 +20,10 @@ import time
 from flask import Flask, jsonify, render_template, request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import admin_mock  # noqa: E402  (sits beside this file)
+
 app = Flask(__name__, template_folder=os.path.join(ROOT, "templates"),
             static_folder=os.path.join(ROOT, "static"))
 app.jinja_env.globals["csrf_token"] = lambda: "t"
@@ -35,6 +39,7 @@ DEFAULTS = {
     "access": None,        # /api/ui/settings "access" snapshot (None = omit)
     "ui_fail": False,      # make /api/ui/settings fail
     "admin": False,        # /api/auth/status says admin
+    "admin_role": "admin", # who the real /admin pages see: "admin", "user" or "anon"
     "cached": None,        # saved copy returned by /api/page/fetch
     "poll": [],            # see above
     "delay": 0.0,          # seconds each poll takes
@@ -52,6 +57,7 @@ DEFAULTS = {
     "media_max_inflight": 0,
 }
 S = dict(DEFAULTS)
+admin_mock.mount(app, lambda: S)
 
 
 @app.get("/")
@@ -81,6 +87,7 @@ def scenario():
     S["media_calls"] = {}
     S["media_inflight"] = 0
     S["media_max_inflight"] = 0
+    admin_mock.reset(app)
     return jsonify(ok=True)
 
 

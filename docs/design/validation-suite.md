@@ -29,6 +29,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `06-cache-directive` | A saved copy inside its page's `#!c=N` window shows as up to date with no network request. A plain revisit does not force a fetch. The Refresh button does. A copy past its window refreshes behind itself. |
 | `07-partials` | A partial loads in place and refreshes on a timer. A `p:` link reloads it by id. Links inside partial content work. Failures are shown plainly. Nesting and count are capped. Leaving the page stops the timers. |
 | `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
+| `15-admin-pages` | The genuine admin pages (real templates, routes, stores and scripts; only Reticulum is faked): every page loads with no failed requests or console errors, the navigation reaches all of them, non-admins and signed-out visitors are refused, Settings saves and cleans its fields, and the Node page runs a propagation node end to end (off, start, status, peers, live storage limit, restart notice, validation messages, announce and its rate limit, switching off, a failed start shown with its reason). |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
