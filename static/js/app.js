@@ -4201,6 +4201,83 @@ function makeNetworkItem(entry) {
   return li;
 }
 
+// ---------------------------------------------------------------------------
+// Network map (see network-map.js): everything the portal has heard, drawn
+// by interface, next hop and distance. Built from the same three lists as the
+// Network tab, plus the routing facts from /api/network/routes.
+// ---------------------------------------------------------------------------
+let _netMap = null;       // {zoom, reset, setKinds} for the open map
+
+function _netMapKinds() {
+  const on = new Set();
+  document.querySelectorAll('#netmap-kinds input[data-kind]').forEach(c => { if (c.checked) on.add(c.dataset.kind); });
+  return on;
+}
+
+async function _openNetworkMap() {
+  const modal = $('netmap-modal'), svg = $('netmap-svg'), empty = $('netmap-empty');
+  modal.hidden = false;
+  empty.hidden = true;
+  $('netmap-summary').textContent = 'Loading…';
+  try {
+    await refreshNetworkPanel();                  // fresh sites / peers / relays
+    const routes = await apiFetch('/api/network/routes');
+    const info = routes.routes || {};
+    const entries = [];
+    for (const n of _allNodes) entries.push({ kind: 'site', hash: n.hash, name: n.name, hops: n.hops, last_seen: n.last_seen,
+      first_seen: n.first_seen, announce_count: n.announce_count, last_load_ok: n.last_load_ok, ever_load_ok: n.ever_load_ok,
+      is_hosted: n.is_hosted, is_default: n.is_default, favorited: n.favorited });
+    for (const p of _allPeers) {
+      const c = _contacts.find(x => x.hash === p.hash);
+      entries.push({ kind: 'peer', hash: p.hash, name: c?.name || p.name, hops: p.hops, last_seen: p.last_seen,
+        first_seen: p.first_seen, announce_count: p.announce_count, call_capable: !!p.call_capable });
+    }
+    for (const r of _allRelays) entries.push({ kind: 'relay', hash: r.hash, name: null, hops: r.hops, last_seen: r.last_seen,
+      first_seen: r.first_seen, announce_count: r.announce_count, picked: r.picked });
+
+    const nodes = entries.map(e => {
+      const rt = info[e.hash] || {};
+      return { hash: e.hash, kind: e.kind, name: e.name, hops: rt.hops != null ? rt.hops : (e.hops ?? null),
+               iface: rt.iface || null, via: rt.via || null, entry: e };
+    });
+    if (!nodes.length && !(routes.interfaces || []).length) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      empty.hidden = false;
+      empty.textContent = 'Nothing has been heard on the network yet. Destinations appear here as they announce.';
+      $('netmap-summary').textContent = '';
+      _netMap = null;
+      return;
+    }
+    const layout = layoutNetworkMap({ interfaces: routes.interfaces || [], nodes });
+    _netMap = renderNetworkMap(svg, layout, { onSelect: n => _openAnnounceInfo(n.entry) });
+    _netMap.setKinds(_netMapKinds());
+    const routed = nodes.filter(n => n.iface).length;
+    $('netmap-summary').textContent =
+      `${nodes.length} destination${nodes.length === 1 ? '' : 's'} on ${(routes.interfaces || []).length} interface${(routes.interfaces || []).length === 1 ? '' : 's'}` +
+      (routed < nodes.length ? `; ${nodes.length - routed} with no route known` : '');
+  } catch (err) {
+    empty.hidden = false;
+    empty.textContent = `Could not load the map: ${humanizeError(err.message)}`;
+    $('netmap-summary').textContent = '';
+  }
+}
+
+function _closeNetworkMap() { $('netmap-modal').hidden = true; _netMap = null; }
+
+$('btn-network-map')?.addEventListener('click', _openNetworkMap);
+$('btn-netmap-close')?.addEventListener('click', _closeNetworkMap);
+$('netmap-modal')?.addEventListener('click', e => { if (e.target === $('netmap-modal')) _closeNetworkMap(); });
+// Escape closes the map from anywhere (not only when focus is inside it), but
+// not while a destination's details are open on top of it.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('netmap-modal').hidden && $('announce-info-modal').hidden) _closeNetworkMap();
+});
+$('btn-netmap-zoom-in')?.addEventListener('click', () => _netMap && _netMap.zoom(0.8));
+$('btn-netmap-zoom-out')?.addEventListener('click', () => _netMap && _netMap.zoom(1.25));
+$('btn-netmap-reset')?.addEventListener('click', () => _netMap && _netMap.reset());
+document.querySelectorAll('#netmap-kinds input[data-kind]').forEach(c =>
+  c.addEventListener('change', () => _netMap && _netMap.setKinds(_netMapKinds())));
+
 // Reused by the announce-info dialog's "Open Chat" button — was
 // previously inline in makeNetworkItem's own peer click handler,
 // factored out so both call sites share the same contact-creation +

@@ -1411,3 +1411,35 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
 #btn-chat-voice.recording { color: var(--error); }
 @keyframes voice-pulse { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { #chat-voice-bar .voice-dot { animation: none; } }
+
+/* ---- Network map ---------------------------------------------------- */
+.netmap-box { width: min(1100px, 96vw); max-width: 96vw; height: min(820px, 92vh); display: flex; flex-direction: column; padding: 14px 16px; }
+#netmap-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+#netmap-kinds { display: flex; gap: 12px; flex: 1; flex-wrap: wrap; }
+.netmap-kind { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+.nm-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+#netmap-wrap { position: relative; flex: 1; min-height: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+#netmap-svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; }
+#netmap-svg.nm-grabbing { cursor: grabbing; }
+#netmap-empty:not([hidden]) { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px; }
+#netmap-foot { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; margin-top: 6px; flex-wrap: wrap; }
+.nm-site  { fill: #9B6BC8; background: #9B6BC8; }
+.nm-peer  { fill: #5BC8C8; background: #5BC8C8; }
+.nm-relay { fill: #C8C85B; background: #C8C85B; }
+.nm-node { stroke: var(--bg); stroke-width: 1.5; cursor: pointer; }
+.nm-node:hover, .nm-node:focus { stroke: var(--text); stroke-width: 2; outline: none; }
+.nm-ring { fill: none; stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 5; opacity: 0.7; }
+.nm-ring-label { fill: var(--text-dim); font-size: 10px; }
+.nm-edge { stroke: var(--border); stroke-width: 1; opacity: 0.55; }
+.nm-edge-iface { stroke: var(--accent); opacity: 0.6; stroke-width: 1.5; }
+.nm-edge-hub { stroke: var(--text-dim); opacity: 0.5; }
+.nm-hub path { fill: var(--text-dim); }
+.nm-iface rect { fill: var(--bg3); stroke: var(--accent2); stroke-width: 2; }
+.nm-iface text { fill: var(--text); font-size: 11px; }
+.nm-iface-down rect { stroke: var(--error); }
+.nm-iface-unrouted rect { stroke: var(--text-dim); stroke-dasharray: 3 3; }
+.nm-portal circle { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+.nm-portal text { fill: var(--bg); font-size: 10px; font-weight: 700; }
+.nm-hide-site .nm-site.nm-node, .nm-hide-site .nm-edge-to-site,
+.nm-hide-peer .nm-peer.nm-node, .nm-hide-peer .nm-edge-to-peer,
+.nm-hide-relay .nm-relay.nm-node, .nm-hide-relay .nm-edge-to-relay { display: none; }

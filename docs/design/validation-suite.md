@@ -34,6 +34,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `11-voice-message` | The Ogg Opus muxer, checked with an independent parser and (when ffmpeg exists) a real decoder: the audio comes out bit-identical. The recorder in Chromium: timer, stop, cancel, Escape, a staged `audio/ogg` file that the browser's own decoder opens, the microphone always released, a refused microphone explained, no room in the message, no button without WebCodecs. **Microphone capture is stubbed** (see below). |
 | `12-propagation` | Settings > Propagation: Automatic first and naming the nearest node, node distances, choosing a node, going back to automatic, typing a node in (Enter works), a bad hash explained, Sync now with progress then the result, the inbox refreshed afterwards, a refused sync shown, polling stopped when the dialog closes. |
 | `13-lxmf-address` | A messaging address (`lxmf@...`, an `lxma://` link, in angle brackets) typed in the page address bar opens a new message and fetches no page. A node address still opens a page. Signed out, a message explains. The dialog sends the address as typed and shows the server's reason when it is wrong. |
+| `14-network-map` | The map layout under random data from a seeded generator (every destination placed once, none overlapping, each inside its interface's slice, farther means further out, deterministic, fast, tolerant of messy input) and the map in Chromium (what is drawn, labels, offline interfaces, next-hop nodes, click and keyboard to details, kind filters, zoom, wheel and drag, Escape and Close, empty, interfaces-only and server-error states). |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -144,6 +145,18 @@ Use a second client whose QR code (or `lxma://` link) you can copy, on a network
 3. Repeat with only the plain address (or `lxmf@...`) of an identity the portal has never heard. It must wait for the path, then fail or go to the propagation node. It must not claim success.
 4. Edit one character in the middle of the key in an `lxma://` link and send. The portal must refuse it with "does not belong to this address".
 5. Paste `lxmf@...` into the page address bar. A new message must open, not a page error.
+
+### K. Network map
+
+Run the portal on a network with at least two interfaces (for example a TCP hub and a LoRa radio) for an hour, so it has heard a mix of sites, peers and relays.
+
+1. Open **Network** and press the map button. Every interface in **Admin > Interfaces** must appear, and an interface that is down must be drawn in red.
+2. On the host, run `rnpath -t` (or `rnstatus -a`) and pick three destinations. On the map, each must sit on the same interface, at the same hop count, as `rnpath` reports.
+3. Destinations that share a next hop must hang from the same diamond. Hover the diamond: the next-hop id must match `rnpath`'s "via".
+4. A destination the portal has heard announce but has no path for (path expired) must appear in the grey "No route known" slice.
+5. Click a destination. Its details must open on top of the map. Close them: the map must still be there.
+6. Zoom, drag and tick or untick the kinds. Nothing may jump or disappear that was not asked for.
+7. With 500 or more destinations, the map must open in about a second and stay smooth while zooming.
 
 ### D. Public site
 

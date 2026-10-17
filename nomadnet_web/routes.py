@@ -2382,6 +2382,31 @@ def api_lxmf_peers():
     return jsonify({"peers": peers})
 
 
+@bp.get("/api/network/routes")
+def api_network_routes():
+    """For the network map: how the portal reaches every destination it has
+    heard (interface and next hop), plus the interfaces themselves. A public
+    read, like the three lists it summarises (sites, peers, relays): it is
+    mesh topology, not per-account data."""
+    browser = _browser()
+    hashes = [n["hash"] for n in browser.get_nodes()]
+    tracker = current_app.config.get("LXMF_TRACKER")
+    if tracker is not None:
+        hashes += [p["hash"] for p in tracker.get_peers()]
+    prop_sync = current_app.config.get("PROP_SYNC")
+    if prop_sync is not None:
+        hashes += [r["hash"] for r in prop_sync.list_known_nodes()]
+    try:
+        interfaces = [
+            {"name": i.get("name"), "online": i.get("online"),
+             "rxb": i.get("rxb", 0), "txb": i.get("txb", 0)}
+            for i in (browser.get_status().get("interfaces") or [])
+        ]
+    except Exception:
+        interfaces = []
+    return jsonify({"routes": browser.route_info(dict.fromkeys(hashes)), "interfaces": interfaces})
+
+
 @bp.get("/api/relays")
 def api_relays():
     """LXMF propagation-node (store-and-forward mesh infrastructure)

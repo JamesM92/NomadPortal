@@ -54,6 +54,8 @@ DEFAULTS = {
     "contacts": [],        # /api/contacts (each: hash, name, trust?, pinned?, note?)
     "settings_posts": [],  # bodies POSTed to /api/contacts/<hash>/settings
     "ui_extra": {},        # extra keys merged into /api/ui/settings (e.g. panel visibility)
+    "net_nodes": [], "net_peers": [], "net_relays": [],   # the Network tab's three lists
+    "net_routes": {}, "net_ifaces": [], "net_routes_fail": False,   # /api/network/routes
     "sent": [],            # /api/messages/sent (each: id, dest, content, sent_at, state, resends?)
     "msg_actions": [],     # ["cancel:<id>", "retry:<id>"] in the order they were POSTed
     "msg_refuse": "",      # when set, cancel/retry answer 409 with this text
@@ -301,6 +303,35 @@ def contact_settings(h):
     c = {"hash": h, "name": h[:16], **body}
     S["contacts"].append(c)
     return jsonify(ok=True, contact=c)
+
+
+@app.get("/api/calls/status")
+def calls_status():
+    # The real shape. Anything else (an empty list, say) reads as an active
+    # call and the call overlay appears and swallows clicks.
+    return jsonify(status="idle", remote_identity_hash=None, remote_name=None)
+
+
+@app.get("/api/nodes")
+def api_nodes():
+    return jsonify(nodes=S["net_nodes"])
+
+
+@app.get("/api/lxmf-peers")
+def api_peers():
+    return jsonify(peers=S["net_peers"])
+
+
+@app.get("/api/relays")
+def api_relays():
+    return jsonify(relays=S["net_relays"])
+
+
+@app.get("/api/network/routes")
+def api_network_routes():
+    if S["net_routes_fail"]:
+        return jsonify(error="boom"), 500
+    return jsonify(routes=S["net_routes"], interfaces=S["net_ifaces"])
 
 
 @app.route("/api/<path:rest>", methods=["GET", "POST", "PUT", "DELETE"])

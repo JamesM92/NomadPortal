@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Network map (MeshChat parity).** A map button in the Network tab opens a
+  picture of everything the portal has heard, centred on the portal: its
+  interfaces around it (red when down, each labelled with how many
+  destinations it carries, and a slice of the circle that grows with its
+  load), the next-hop nodes shared by several destinations drawn as
+  diamonds, and destinations on rings by hop count; anything Reticulum has
+  no route for goes in a grey slice. Sites, peers and relays are coloured as
+  in the Network tab and can be switched on and off; scroll or the +/- buttons
+  zoom, dragging moves, a button fits everything. Clicking (or Enter on) a
+  destination opens its usual details on top of the map. It reads the
+  routing table through a new ``GET /api/network/routes`` (a public read like
+  the three lists it summarises) and the existing lists. The layout is
+  deterministic and keeps destinations apart (a crowded ring grows extra rows
+  instead of piling up), and 2000 destinations lay out in about 35 ms. It was
+  tested with random networks of up to 1500 destinations; whether it matches a
+  real mesh is check K in docs/design/validation-suite.md. The test mock
+  also now returns the real call-status shape; the old empty-list answer
+  made a phantom call overlay appear and swallow clicks in some runs.
 - **Message anyone by address, in the forms people share.** The New Message
   dialog now takes a bare address, ``lxmf@<address>`` (also in angle brackets),
   or the ``lxma://<address>:<public key>`` link from this portal's own QR code
@@ -190,10 +208,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 175 checks across thirteen suites (saved-copy
+  against a small mock backend: 228 checks across fourteen suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, inline images, conversation extras, send control, voice messages, propagation, and addresses). It runs as a new CI job,
+  partials, inline images, conversation extras, send control, voice messages, propagation, addresses, and the network map). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real
