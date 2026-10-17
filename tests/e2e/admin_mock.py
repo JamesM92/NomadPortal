@@ -16,6 +16,7 @@ from flask import request
 from nomadnet_web import csrf as csrf_mod, register_template_filters
 from nomadnet_web.admin_routes import admin_bp
 from nomadnet_web.auth import OIDCUser, auth_bp, login_manager as lm
+from nomadnet_web.admin_account import AdminAccount
 from nomadnet_web.cache import PageCache
 from nomadnet_web.identity_store import IdentityStore
 from nomadnet_web.traffic import TrafficCounters
@@ -36,8 +37,14 @@ class FakeBrowser:
              "bitrate": 10_000_000, "clients": None, "mode": "full"}]}
 
 
+_scenario = lambda: {}   # noqa: E731  (replaced by mount())
+
+
 def reset(app):
-    """Fresh stores in a fresh directory (called at the start of every scenario)."""
+    """Fresh stores in a fresh directory (called at the start of every scenario).
+    Scenario keys used here: ``admin_env_password`` (turns the ADMIN_PASSWORD
+    override on) and ``admin_account`` ({"username", "password"} to start with
+    an account already set up)."""
     tmp = tempfile.mkdtemp(prefix="np-e2e-admin-")
     os.makedirs(os.path.join(tmp, "rns"), exist_ok=True)
     app.config.update(
@@ -49,10 +56,19 @@ def reset(app):
         IDENTITY_STORE=IdentityStore(os.path.join(tmp, "rns")),
     )
     app.config["E2E_TMP"] = tmp
+    scn = _scenario()
+    account = AdminAccount(tmp)
+    if scn.get("admin_account"):
+        account.set_password(scn["admin_account"]["password"], username=scn["admin_account"]["username"])
+    app.config.update(ADMIN_ACCOUNT=account, ADMIN_PASSWORD=scn.get("admin_env_password", ""),
+                      ADMIN_USERNAME="root")
+    account.ensure_setup_code()
 
 
 def mount(app, scenario):
     """``scenario`` is a callable returning the current scenario dict."""
+    global _scenario
+    _scenario = scenario
     reset(app)
 
     lm.init_app(app)     # the admin blueprint's guard calls this very object
@@ -65,11 +81,7 @@ def mount(app, scenario):
         if not request.path.startswith("/admin"):
             return None
         role = scenario().get("admin_role", "admin")
-        return {"admin": admin, "user": plain}.get(role)
-
-    @lm.user_loader
-    def _by_id(uid):
-        return None
+        return {"admin": admin, "user": plain}.get(role)     # "real": use the genuine session
 
     register_template_filters(app)
     csrf_mod.init_csrf(app)

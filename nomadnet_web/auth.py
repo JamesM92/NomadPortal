@@ -182,7 +182,7 @@ def _is_locked_out(ip: str, username: str) -> bool:
 class OIDCUser(UserMixin):
     def __init__(self, sub: str, email: str = "", name: str = "",
                  claims: dict = None, is_admin: bool = False,
-                 super_admin: bool = False):
+                 super_admin: bool = False, stored_admin: bool = False):
         self.id          = sub
         self.email       = email
         self.name        = name or email
@@ -193,6 +193,8 @@ class OIDCUser(UserMixin):
         # account that is configured outside the running app and therefore
         # can't be modified from within it.
         self.super_admin = super_admin or False
+        # Signed in with the admin account stored by the app (see admin_account.py).
+        self.stored_admin = stored_admin
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +304,13 @@ def load_user(user_id: str):
     if time.time() - entry["login_at"] > SESSION_TTL:
         _user_cache.pop(user_id, None)
         return None
+    # A console password reset signs the stored admin account out everywhere.
+    # (The reset runs in another process, so it can only leave a timestamp.)
+    if getattr(entry["user"], "stored_admin", False):
+        acct = current_app.config.get("ADMIN_ACCOUNT")
+        if acct is not None and acct.changed_at() > entry["login_at"]:
+            _user_cache.pop(user_id, None)
+            return None
     # Refresh activity timestamp / source IP on every authenticated request.
     entry["last_seen"] = time.time()
     ip = request.remote_addr if request else None
@@ -360,19 +369,92 @@ def _ui_context():
 
 @auth_bp.before_request
 def _auth_csrf():
-    if request.endpoint == "auth.local_login":
+    if request.endpoint in ("auth.local_login", "auth.setup_submit"):
         csrf_mod.check()
+
+
+def _account():
+    return current_app.config.get("ADMIN_ACCOUNT")
+
+
+def _setup_pending() -> bool:
+    """True while the first-run admin setup is open: there is an account
+    store, no account in it, and no ADMIN_PASSWORD override in use."""
+    acct = _account()
+    if acct is None or current_app.config.get("ADMIN_PASSWORD"):
+        return False
+    return acct.ensure_setup_code()
 
 
 @auth_bp.get("/login")
 def login_page():
+    if _setup_pending():
+        return redirect(url_for("auth.setup_page"))
     oidc_enabled = bool(current_app.config.get("OIDC_CLIENT_ID"))
     return render_template("admin/login.html", oidc_enabled=oidc_enabled)
 
 
+def _clean(text: str) -> str:
+    return text.replace("\r", "").replace("\n", "")
+
+
+def _finish_sign_in(user, ip: str):
+    """Common to every local sign-in: session, identity, messaging, calls."""
+    _record_session(user, ip)
+    login_user(user, remember=False)
+    id_store = current_app.config.get("IDENTITY_STORE")
+    if id_store:
+        id_store.ensure_for_user(user.id, user.name)
+    messaging = current_app.config.get("MESSAGING")
+    if messaging:
+        messaging.setup_user(user.id)
+    _start_call_engine(user.id)
+    return redirect(url_for("admin.dashboard") if user.is_admin else "/")
+
+
+def _sign_in_super_admin(username: str, ip: str, stored: bool):
+    user = OIDCUser(sub=f"local:{username}", email="", name=username,
+                    is_admin=True, super_admin=True, stored_admin=stored)
+    log.info("Local login: %s from %s", _clean(username), _clean(ip))
+    return _finish_sign_in(user, ip)
+
+
+@auth_bp.get("/setup")
+def setup_page():
+    if not _setup_pending():
+        return redirect(url_for("auth.login_page"))
+    return render_template("admin/setup.html", error=None)
+
+
+@auth_bp.post("/setup")
+def setup_submit():
+    """Create the admin account. Needs the one-time code from the config
+    directory; closed for good once an account exists."""
+    if not _setup_pending():
+        return redirect(url_for("auth.login_page"))
+    ip = request.remote_addr or "unknown"
+
+    def _again(error, status=400):
+        return render_template("admin/setup.html", error=error), status
+
+    if not rate_limit.check(f"setup:{ip}", 10, 300):
+        return _again("Too many requests. Try again later.", 429)
+    form = request.form
+    password = form.get("password", "")
+    if password != form.get("confirm", ""):
+        return _again("The two passwords do not match.")
+    username = form.get("username", "").strip()
+    err = _account().complete_setup(form.get("code", ""), username, password)
+    if err:
+        return _again(err, 429 if err.startswith("Too many") else 400)
+    log.info("Admin account created through first-run setup from %s", _clean(ip))
+    return _sign_in_super_admin(username, ip, stored=True)
+
+
 @auth_bp.post("/local")
 def local_login():
-    """Authenticate with the local admin credentials set via ADMIN_PASSWORD."""
+    """Authenticate with a local account: one an admin created, the admin
+    account stored by the app, or the ADMIN_PASSWORD override."""
     import hmac as _hmac
     oidc_enabled = bool(current_app.config.get("OIDC_CLIENT_ID"))
 
@@ -386,27 +468,15 @@ def local_login():
 
     # IP-level rate limit (20 attempts per 5 min regardless of username)
     if not rate_limit.check(f"login:{ip}", 20, 300):
-        log.warning("Login rate limit exceeded from %s",
-                    ip.replace("\r", "").replace("\n", ""))
+        log.warning("Login rate limit exceeded from %s", _clean(ip))
         return _fail("Too many requests — try again later.", 429)
 
     # Per-(IP, username) lockout after repeated failures
     if _is_locked_out(ip, username):
-        log.warning("Login locked out: ip=%s username=%s",
-                    ip.replace("\r", "").replace("\n", ""),
-                    username.replace("\r", "").replace("\n", ""))
+        log.warning("Login locked out: ip=%s username=%s", _clean(ip), _clean(username))
         return _fail("Too many failed attempts — try again in a few minutes.", 429)
 
-    expected_user = current_app.config.get("ADMIN_USERNAME", "admin")
-    expected_pass = current_app.config.get("ADMIN_PASSWORD", "")
-
-    if not expected_pass:
-        return _fail("Local login is disabled (ADMIN_PASSWORD is not set).", 403)
-
-    user_ok = _hmac.compare_digest(username.encode(), expected_user.encode())
-    pass_ok = _hmac.compare_digest(password.encode(), expected_pass.encode())
-
-    # Check admin-created local users in UserStore first
+    # Accounts an admin created in the Users page
     user_store = current_app.config.get("USER_STORE")
     if user_store:
         record = user_store.authenticate_local(username, password)
@@ -415,42 +485,30 @@ def local_login():
                 sub=record["sub"], email="", name=record["name"],
                 is_admin=record.get("is_admin", False),
             )
-            _record_session(user, ip)
-            login_user(user, remember=False)
-            id_store = current_app.config.get("IDENTITY_STORE")
-            if id_store:
-                id_store.ensure_for_user(user.id, user.name)
-            messaging = current_app.config.get("MESSAGING")
-            if messaging:
-                messaging.setup_user(user.id)
-            _start_call_engine(user.id)
-            user_store.register_or_update(record["sub"], "", record["name"])
-            log.info("Local user login: %s from %s",
-                     username.replace("\r", "").replace("\n", ""),
-                     ip.replace("\r", "").replace("\n", ""))
-            return redirect(url_for("admin.dashboard") if user.is_admin else "/")
+            if user_store:
+                user_store.register_or_update(record["sub"], "", record["name"])
+            log.info("Local user login: %s from %s", _clean(username), _clean(ip))
+            return _finish_sign_in(user, ip)
 
-    if user_ok and pass_ok:
-        user = OIDCUser(sub=f"local:{username}", email="", name=username,
-                        is_admin=True, super_admin=True)
-        _record_session(user, ip)
-        login_user(user, remember=False)
-        id_store = current_app.config.get("IDENTITY_STORE")
-        if id_store:
-            id_store.ensure_for_user(user.id, user.name)
-        messaging = current_app.config.get("MESSAGING")
-        if messaging:
-            messaging.setup_user(user.id)
-        _start_call_engine(user.id)
-        log.info("Local login: %s from %s",
-                 username.replace("\r", "").replace("\n", ""),
-                 ip.replace("\r", "").replace("\n", ""))
-        return redirect(url_for("admin.dashboard") if user.is_admin else "/")
+    env_password = current_app.config.get("ADMIN_PASSWORD", "")
+    account = _account()
+    if env_password:
+        # Override: the variable, when set, is the admin login.
+        expected_user = current_app.config.get("ADMIN_USERNAME", "admin")
+        user_ok = _hmac.compare_digest(username.encode(), expected_user.encode())
+        pass_ok = _hmac.compare_digest(password.encode(), env_password.encode())
+        if user_ok and pass_ok:
+            return _sign_in_super_admin(username, ip, stored=False)
+    elif account is not None:
+        if not account.configured():
+            return redirect(url_for("auth.setup_page"))
+        if account.verify(username, password):
+            return _sign_in_super_admin(username, ip, stored=True)
+    else:
+        return _fail("Local login is disabled (ADMIN_PASSWORD is not set).", 403)
 
     _record_failure(ip, username)
-    log.warning("Failed local login: username=%s ip=%s",
-                username.replace("\r", "").replace("\n", ""),
-                ip.replace("\r", "").replace("\n", ""))
+    log.warning("Failed local login: username=%s ip=%s", _clean(username), _clean(ip))
     return _fail("Invalid username or password.")
 
 

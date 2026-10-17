@@ -65,7 +65,7 @@ These are conscious decisions where we picked function over hardening. Documente
 If you're exposing NomadPortal beyond a trusted LAN:
 
 1. Set a strong, persistent `FLASK_SECRET_KEY` (`openssl rand -hex 32`).
-2. Set `ADMIN_PASSWORD` to a long random value or leave it empty and rely on OIDC.
+2. Create the admin account on first visit (the setup code is in `/config/admin_setup_code`, readable only from the container) or rely on OIDC. Avoid `ADMIN_PASSWORD`; if you must use it, make it long and random.
 3. Put a real TLS certificate in front (Let's Encrypt via your reverse proxy is easiest); set `HTTPS_REDIRECT: "true"` and `TRUSTED_PROXIES: "1"`.
 4. Set `OIDC_ALLOWED_EMAILS` (or `OIDC_ALLOWED_SUBJECTS`) to gate logins to known users — empty values mean any authenticated OIDC user can sign up.
 5. Keep `CACHE_TTL` short (`60`) on public instances so abuse content gets evicted quickly.

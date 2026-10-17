@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Admin account created in the app, not in an environment variable.** On
+  first start the sign-in page leads to a setup page that needs a one-time
+  code, read from a private file in the config directory (`admin_setup_code`;
+  never logged or shown on a web page, deleted once the account exists). The
+  password is stored as a salted hash in `config/admin_account.json` (owner
+  only), minimum 12 characters. To change it there is only the container
+  console: `python -m nomadnet_web.admin_cli reset-password` (or `status`),
+  which also signs the admin out everywhere; there is deliberately no web or
+  email reset. Wrong setup codes are limited to 5 per 15 minutes. `ADMIN_PASSWORD`
+  still works as an override (when set it is the admin login and no setup is
+  offered), so scripted deployments keep working; the shipped
+  `docker-compose.yml` no longer sets it to "changeme". Admin-created local
+  users can now sign in even when no master password exists (before, they
+  were blocked by the "login disabled" check). 105 new tests, 21 browser checks
+  (suite 16) and validation check M.
 - **Tests for modules that had none, and one hardening.** `config_gen` (writes
   the Reticulum config: 16 tests, parsed with Reticulum's own ConfigObj), the
   virus-scan client (24 tests against a fake clamd speaking the real INSTREAM
@@ -190,6 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
+  against a small mock backend: 322 checks across sixteen suites (saved-copy
   against a small mock backend: 301 checks across fifteen suites (saved-copy
   against a small mock backend: 70 checks across eight suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,

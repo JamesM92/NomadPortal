@@ -30,6 +30,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `07-partials` | A partial loads in place and refreshes on a timer. A `p:` link reloads it by id. Links inside partial content work. Failures are shown plainly. Nesting and count are capped. Leaving the page stops the timers. |
 | `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
 | `15-admin-pages` | The genuine admin pages (real templates, routes, stores and scripts; only Reticulum is faked): every page loads with no failed requests or console errors, the navigation reaches all of them, non-admins and signed-out visitors are refused, Settings saves and cleans its fields, and the Node page runs a propagation node end to end (off, start, status, peers, live storage limit, restart notice, validation messages, announce and its rate limit, switching off, a failed start shown with its reason). |
+| `16-admin-setup` | First-run admin setup in Chromium: no account leads to the setup page, the one-time code is in a private file and never on a page, a wrong code / mismatched / short password are explained and the code survives them, the right code (typed loosely) creates the account and signs in, the code file is deleted, setup is then closed, the normal sign-in accepts the right password and refuses a wrong one, signing out works, and `ADMIN_PASSWORD` set skips setup and still signs in. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -80,6 +81,17 @@ Set at least one prescribed node and leave the portal running for one hour.
 2. On NomadPortal, host a page with an image line and a WebP file in `site/pages/`. Open it from a NomadNet terminal client that supports images. The image must appear.
 3. Put a `.allowed` file next to the image. A reader who is not on the list must see only the alt text.
 4. Host an image larger than 2 MB. NomadPortal must show the alt text and no error page.
+
+### M. First-run admin setup and reset
+
+On a fresh install (empty `config/`, no `ADMIN_PASSWORD`):
+
+1. Start the container and open the site from another machine. You must land on the setup page, and `docker logs` must say where the code is without printing it.
+2. Try to set up with a wrong code, then with the real one from `docker exec <c> cat /config/admin_setup_code`. The first must fail, the second must sign you in; the code file must be gone and `config/admin_account.json` must hold a hash (no plain password).
+3. Restart the container: sign-in works with the same password; the setup page is closed.
+4. Sign in on two browsers. Run `docker exec -it <c> python -m nomadnet_web.admin_cli reset-password`. Both browsers must be signed out on their next click; the old password must fail and the new one work.
+5. Set `ADMIN_PASSWORD` in the compose file and restart: no setup page, that password signs in. Remove it and restart: the stored account works again.
+6. Check the file mode of `config/admin_account.json` (`-rw-------`).
 
 ### D. Public site
 

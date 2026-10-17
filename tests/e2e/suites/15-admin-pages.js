@@ -38,7 +38,7 @@ module.exports = async ctx => {
   }
   ctx.check(true, 'a signed-in non-admin is refused on every admin page except the dashboard');
   p = await ctx.openAdmin({ admin_role: 'anon' }, '/admin/cache');
-  ctx.check(/\/auth\/login/.test(p.url()), 'a visitor who is not signed in is sent to the login page');
+  ctx.check(/\/auth\/(login|setup)/.test(p.url()), 'a visitor who is not signed in is sent to sign in (or to first-run setup when there is no admin yet)');
 
   // ---- Settings ------------------------------------------------------
   p = await ctx.openAdmin({}, '/admin/settings');

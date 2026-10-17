@@ -39,7 +39,9 @@ DEFAULTS = {
     "access": None,        # /api/ui/settings "access" snapshot (None = omit)
     "ui_fail": False,      # make /api/ui/settings fail
     "admin": False,        # /api/auth/status says admin
-    "admin_role": "admin", # who the real /admin pages see: "admin", "user" or "anon"
+    "admin_role": "admin", # who the real /admin pages see: "admin", "user", "anon", or "real" (use the real session)
+    "admin_env_password": "",   # turns the ADMIN_PASSWORD override on
+    "admin_account": None, # {"username", "password"}: start with the stored admin account set up
     "cached": None,        # saved copy returned by /api/page/fetch
     "poll": [],            # see above
     "delay": 0.0,          # seconds each poll takes
@@ -89,6 +91,13 @@ def scenario():
     S["media_max_inflight"] = 0
     admin_mock.reset(app)
     return jsonify(ok=True)
+
+
+@app.get("/__setup_code")
+def setup_code():
+    """The first-run code, as the operator would read it from the file."""
+    path = app.config["ADMIN_ACCOUNT"].setup_code_path
+    return jsonify(code=open(path).read().strip() if os.path.exists(path) else None)
 
 
 @app.get("/__stats")

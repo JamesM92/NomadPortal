@@ -77,11 +77,30 @@ cd NomadPortal
 Edit `docker-compose.yml` and set at minimum:
 
 ```yaml
-ADMIN_PASSWORD: your-strong-password-here
 FLASK_SECRET_KEY: some-random-string-here
 ```
 
+The admin account is created in the browser the first time you open the site (see [First start: create the admin account](#first-start-create-the-admin-account)); you do not put the password in the compose file.
+
 > **Pre-built image** — every tagged release is also published to the GitHub Container Registry. The default `docker-compose.yml` already points at `image: ghcr.io/jamesm92/nomadportal:latest`. Pin a specific version, such as `:v0.9.4`, for a reproducible deployment. `git clone` is still the easiest way to get the docker-compose file and the `config/` skeleton.
+
+### First start: create the admin account
+
+The first time you open the site, the sign-in page sends you to **Set up your admin account**. To prove you run the server, it asks for a one-time code that is only in a file inside the container:
+
+```bash
+docker exec <container> cat /config/admin_setup_code
+```
+
+Type that code, choose a username and a password (at least 12 characters), and you are signed in. The password is stored hashed in `config/admin_account.json`, and the code file is deleted.
+
+There is no "forgot password" link and no email reset. If you forget it, run this inside the container (it asks for a new password twice, and signs the admin out everywhere):
+
+```bash
+docker exec -it <container> python -m nomadnet_web.admin_cli reset-password
+```
+
+`python -m nomadnet_web.admin_cli status` shows whether an account exists. If you set `ADMIN_PASSWORD` in the environment, it overrides all of this: that variable is then the admin login and no setup page is offered.
 
 ### 2. Configure Reticulum interfaces
 
@@ -119,8 +138,8 @@ All options are set through environment variables in `docker-compose.yml`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ADMIN_USERNAME` | `admin` | Local admin login username |
-| `ADMIN_PASSWORD` | *(unset)* | Local admin login password — **required** to enable local login |
+| `ADMIN_USERNAME` | `admin` | Admin username, **only used with `ADMIN_PASSWORD`** |
+| `ADMIN_PASSWORD` | *(unset)* | Optional override. Leave it unset and create the admin account on first visit instead. When set, this is the admin login and no setup page is offered. |
 | `FLASK_SECRET_KEY` | *(auto-generated)* | Session signing key. Set explicitly so sessions survive restarts |
 | `WEB_PORT` | `8080` | HTTP redirect port |
 | `WEB_PORT_HTTPS` | `8443` | HTTPS port (main app) |
@@ -162,7 +181,7 @@ All options are set through environment variables in `docker-compose.yml`.
 | `OIDC_ADMIN_SUBJECTS` | Comma-separated list of admin subject claims |
 | `OIDC_INSECURE_SKIP_VERIFY` | `true`/`false` — when `true`, NomadPortal skips TLS verification **for the OIDC provider's hostname only**. Use this only for a trusted-LAN setup with a self-signed Authentik/Keycloak. Logs a warning at startup. |
 
-> If both `OIDC_ADMIN_EMAILS` and `OIDC_ADMIN_SUBJECTS` are empty, OIDC users log in as **non-admins** by default. Use the local admin account (`ADMIN_PASSWORD`) to bootstrap, then promote users from the Users page, or set the env-var allowlists. The local admin user is always admin.
+> If both `OIDC_ADMIN_EMAILS` and `OIDC_ADMIN_SUBJECTS` are empty, OIDC users log in as **non-admins** by default. Use the local admin account (created on first visit, or `ADMIN_PASSWORD`) to bootstrap, then promote users from the Users page, or set the env-var allowlists. The local admin user is always admin.
 
 **Discovery URL examples:**
 
@@ -510,7 +529,7 @@ Volumes for `site/` (hosted pages and files) can safely live on network storage.
 
 ## Security notes
 
-- Change `ADMIN_PASSWORD` before you expose the service to any network.
+- Create the admin account (first visit) before you expose the service to any network. If you use the `ADMIN_PASSWORD` override instead, make it long and random.
 - Set `FLASK_SECRET_KEY` to a stable random value, so sessions survive restarts.
 - The self-signed certificate triggers browser warnings for direct access. This is expected. Use a reverse proxy with a real certificate for a public deployment.
 - CSRF tokens are required on every state-changing request.
