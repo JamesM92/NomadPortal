@@ -18,6 +18,7 @@ from .identity_store import IdentityStore
 from .messaging import MessagingService
 from .lxmf_sync import PropagationSyncService
 from .propagation_host import PropagationHost
+from .admin_account import AdminAccount
 from .message_store import MessageStore
 from .attachment_store import AttachmentStore
 from .contact_store import ContactStoreManager
@@ -154,8 +155,19 @@ def create_app(
     # Without this, the identity is created lazily on first login, so
     # messages sent before that first login are dropped at the network
     # level (no delivery destination registered).
-    if cfg.get("ADMIN_PASSWORD"):
-        admin_user = cfg.get("ADMIN_USERNAME", "admin")
+    # The admin account kept by the app (first-run setup; see admin_account.py).
+    # With ADMIN_PASSWORD set, that variable is the admin login and no setup is offered.
+    admin_account = AdminAccount(config_dir)
+    app.config["ADMIN_ACCOUNT"] = admin_account
+    if not cfg.get("ADMIN_PASSWORD") and admin_account.ensure_setup_code():
+        log.warning(
+            "No admin account yet. Open the web interface to set one up; the one-time "
+            "setup code is in the file admin_setup_code in the config directory "
+            "(docker exec <container> cat /config/admin_setup_code)."
+        )
+
+    admin_user = cfg.get("ADMIN_USERNAME", "admin") if cfg.get("ADMIN_PASSWORD") else admin_account.username()
+    if admin_user:
         admin_sub  = f"local:{admin_user}"
         try:
             # Side-effect call: ensure_for_user creates the identity if
@@ -515,12 +527,14 @@ def create_app(
 
     # Warn when OIDC is enabled with no admin configured anywhere
     if cfg.get("OIDC_CLIENT_ID") and not cfg.get("OIDC_ADMIN_EMAILS") \
-       and not cfg.get("OIDC_ADMIN_SUBJECTS") and not cfg.get("ADMIN_PASSWORD"):
+       and not cfg.get("OIDC_ADMIN_SUBJECTS") and not cfg.get("ADMIN_PASSWORD") \
+       and not admin_account.configured():
         log.warning(
             "OIDC is enabled but no admin path is configured. "
             "OIDC users will log in as non-admins and there is no local admin "
-            "recovery account. Set OIDC_ADMIN_EMAILS / OIDC_ADMIN_SUBJECTS or "
-            "ADMIN_PASSWORD to grant admin access."
+            "recovery account. Finish the first-run admin setup in the web "
+            "interface, or set OIDC_ADMIN_EMAILS / OIDC_ADMIN_SUBJECTS, to grant "
+            "admin access."
         )
 
     # robots.txt and sitemap.xml are served by spa.register_spa_routes().

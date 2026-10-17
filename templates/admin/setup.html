@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Set up</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; overflow: auto; }
+    .login-wrap { display: flex; align-items: center; justify-content: center; flex: 1; }
+    .login-box {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 3px; padding: 36px 40px; width: 340px;
+    }
+    .login-title { color: var(--text); font-size: 16px; font-weight: bold;
+                   margin-bottom: 24px; text-align:center; }
+
+    .login-error {
+      background: #2b0d0d; border: 1px solid #7a2a2a;
+      color: #c87a7a; padding: 10px 14px; border-radius: 2px;
+      font-size: 13px; margin-bottom: 16px;
+    }
+
+    /* Local form */
+    .form-field { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; }
+    .form-field label { font-size:11px; color:var(--text-dim); }
+    .form-field input {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono); font-size:13px;
+      padding: 6px 8px; border-radius: 2px; outline: none; width: 100%;
+    }
+    .form-field input:focus { border-color: var(--accent); }
+    .btn-login {
+      width: 100%; padding: 9px;
+      background: var(--accent); color: var(--bg);
+      border: none; border-radius: 2px; cursor: pointer;
+      font-family: var(--font-mono); font-size: 14px; font-weight: bold;
+      margin-top: 4px;
+    }
+    .btn-login:hover { background: #7ec8e3; }
+
+    /* Divider */
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      color: var(--text-dim); font-size: 11px; margin: 18px 0;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; border-top: 1px solid var(--border);
+    }
+
+    /* SSO button */
+    .btn-sso {
+      display: block; width: 100%; padding: 9px; text-align: center;
+      background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 2px; cursor: pointer; font-family: var(--font-mono);
+      font-size: 13px; text-decoration: none;
+    }
+    .btn-sso:hover { border-color: var(--accent); color: var(--accent); }
+
+    .login-note { font-size: 11px; color: var(--text-dim); line-height: 1.5;
+                  margin-top: 18px; text-align: center; }
+    .login-note a { color: var(--accent); text-decoration: none; }
+    .login-note a:hover { text-decoration: underline; }
+    .login-disclaimer {
+      margin-top: 18px; padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      font-size: 10px; color: var(--text-dim); line-height: 1.6;
+      text-align: center; opacity: 0.7;
+    }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <a class="brand" href="/" style="text-decoration:none;">{{ app_title_html | safe }}</a>
+  </header>
+  <div class="login-wrap">
+  <div class="login-box">
+    <div class="login-title">Set up your admin account</div>
+
+    {% if error %}
+      <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <p class="login-note" style="margin:0 0 14px;text-align:left;">
+      This is the first start, so there is no admin account yet. To prove you run
+      this server, open the file <code>admin_setup_code</code> in the config
+      directory (for Docker: <code>docker exec &lt;container&gt; cat /config/admin_setup_code</code>)
+      and type the code it holds. The file is deleted when you finish.
+    </p>
+
+    <form method="post" action="{{ url_for('auth.setup_submit') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-field">
+        <label for="code">Setup code</label>
+        <input type="text" id="code" name="code" autocomplete="off" autofocus required
+               placeholder="XXXX-XXXX-XXXX-XXXX">
+      </div>
+      <div class="form-field">
+        <label for="username">Admin username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required
+               maxlength="64" pattern="[A-Za-z0-9._\-]+" value="admin">
+      </div>
+      <div class="form-field">
+        <label for="password">Password (at least 12 characters)</label>
+        <input type="password" id="password" name="password" autocomplete="new-password"
+               required minlength="12" maxlength="256">
+      </div>
+      <div class="form-field">
+        <label for="confirm">Password again</label>
+        <input type="password" id="confirm" name="confirm" autocomplete="new-password"
+               required minlength="12" maxlength="256">
+      </div>
+      <button type="submit" class="btn-login">Create admin account</button>
+    </form>
+
+    <p class="login-note">
+      Forgotten later? There is no email reset. Run
+      <code>python -m nomadnet_web.admin_cli reset-password</code> inside the container.
+    </p>
+
+    <div class="login-disclaimer">
+      This web interface is not a hardened or secure way to access LXMF.
+      Site administrators may have access to your messages and private information.
+      It is intended primarily to provide clearnet access to a NomadNet site.
+      For private communications, use a dedicated LXMF client directly.
+    </div>
+  </div>
+  </div>
+</body>
+</html>

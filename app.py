@@ -20,7 +20,7 @@ Environment variables:
     HTTPS_REDIRECT         "true" to redirect HTTP → HTTPS (needs TRUSTED_PROXIES≥1)
 
     ADMIN_USERNAME         Local admin username    (default admin)
-    ADMIN_PASSWORD         Local admin password    (no default — local login disabled if unset)
+    ADMIN_PASSWORD         Local admin password    (optional override; if unset, set the admin up on first visit)
 
     OIDC_CLIENT_ID         OIDC client ID
     OIDC_CLIENT_SECRET     OIDC client secret
@@ -256,7 +256,8 @@ def create_wsgi():
     register_spa_routes(app)
 
     if not flask_config["ADMIN_PASSWORD"]:
-        _log.warning("ADMIN_PASSWORD is not set — local login is disabled.")
+        _log.info("ADMIN_PASSWORD is not set — the admin account is created through the "
+                  "first-run setup page.")
     elif flask_config["ADMIN_PASSWORD"] in ("changeme", "admin", "password"):
         _log.warning(
             "ADMIN_PASSWORD is set to a default value — change it before "

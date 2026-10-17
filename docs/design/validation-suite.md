@@ -36,6 +36,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `13-lxmf-address` | A messaging address (`lxmf@...`, an `lxma://` link, in angle brackets) typed in the page address bar opens a new message and fetches no page. A node address still opens a page. Signed out, a message explains. The dialog sends the address as typed and shows the server's reason when it is wrong. |
 | `14-network-map` | The map layout under random data from a seeded generator (every destination placed once, none overlapping, each inside its interface's slice, farther means further out, deterministic, fast, tolerant of messy input) and the map in Chromium (what is drawn, labels, offline interfaces, next-hop nodes, click and keyboard to details, kind filters, zoom, wheel and drag, Escape and Close, empty, interfaces-only and server-error states). |
 | `15-admin-pages` | The genuine admin pages (real templates, routes, stores and scripts; only Reticulum is faked): every page loads with no failed requests or console errors, the navigation reaches all of them, non-admins and signed-out visitors are refused, Settings saves and cleans its fields, and the Node page runs a propagation node end to end (off, start, status, peers, live storage limit, restart notice, validation messages, announce and its rate limit, switching off, a failed start shown with its reason). |
+| `16-admin-setup` | First-run admin setup in Chromium: no account leads to the setup page, the one-time code is in a private file and never on a page, a wrong code / mismatched / short password are explained and the code survives them, the right code (typed loosely) creates the account and signs in, the code file is deleted, setup is then closed, the normal sign-in accepts the right password and refuses a wrong one, signing out works, and `ADMIN_PASSWORD` set skips setup and still signs in. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -172,6 +173,17 @@ MeshChat or Sideband on a phone.
 6. Switch the node off. The phone's node list must stop offering A within a few minutes, and A's disk usage must stop growing. Switch it on again: it must resume without a restart.
 7. Change "Most peers" and confirm the page says a restart is needed. Restart, and confirm the new value is in use.
 8. Point the data directory at a network share and confirm the node refuses to start and says why.
+
+### M. First-run admin setup and reset
+
+On a fresh install (empty `config/`, no `ADMIN_PASSWORD`):
+
+1. Start the container and open the site from another machine. You must land on the setup page, and `docker logs` must say where the code is without printing it.
+2. Try to set up with a wrong code, then with the real one from `docker exec <c> cat /config/admin_setup_code`. The first must fail, the second must sign you in; the code file must be gone and `config/admin_account.json` must hold a hash (no plain password).
+3. Restart the container: sign-in works with the same password; the setup page is closed.
+4. Sign in on two browsers. Run `docker exec -it <c> python -m nomadnet_web.admin_cli reset-password`. Both browsers must be signed out on their next click; the old password must fail and the new one work.
+5. Set `ADMIN_PASSWORD` in the compose file and restart: no setup page, that password signs in. Remove it and restart: the stored account works again.
+6. Check the file mode of `config/admin_account.json` (`-rw-------`).
 
 ### D. Public site
 

@@ -92,12 +92,10 @@ class TestLocalLogin:
         r = c.post("/auth/local", data={"username": "root", "password": "s3cret"})
         assert r.status_code == 403 and auth.list_sessions() == []
 
-    def test_admin_created_users_cannot_sign_in_either_without_an_admin_password(self, app):
-        # Current behaviour, pinned: the "disabled" check comes before the user
-        # store is consulted, so ADMIN_PASSWORD gates every local account.
+    def test_admin_created_users_sign_in_even_with_no_admin_password(self, app):
         app.config["USER_STORE"].create_local_user("bob", "pw12345678")
         app.config["ADMIN_PASSWORD"] = ""
-        assert login(app, "bob", "pw12345678")[1].status_code == 403
+        assert login(app, "bob", "pw12345678")[1].status_code == 302
 
     def test_an_admin_created_user_signs_in_as_an_ordinary_user(self, app):
         app.config["USER_STORE"].create_local_user("bob", "pw12345678", is_admin=False)
@@ -150,7 +148,8 @@ class TestSessions:
         c, _ = login(app, "root", "s3cret")
         auth._user_cache["local:root"]["login_at"] -= auth.SESSION_TTL + 1
         assert auth.list_sessions() == []
-        assert auth.load_user("local:root") is None
+        with app.test_request_context("/"):
+            assert auth.load_user("local:root") is None
         assert "local:root" not in auth._user_cache
 
     def test_revoking_one_session_signs_that_person_out(self, app):
@@ -167,7 +166,8 @@ class TestSessions:
         assert auth.revoke_all_sessions() == 2 and auth.list_sessions() == []
 
     def test_unknown_users_load_as_nobody(self, app):
-        assert auth.load_user("nobody") is None
+        with app.test_request_context("/"):
+            assert auth.load_user("nobody") is None
 
 
 class TestAdminResolution:

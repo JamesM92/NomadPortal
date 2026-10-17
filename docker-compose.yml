@@ -35,11 +35,15 @@ services:
       LOG_LEVEL: INFO
 
       # ── Local admin login ──────────────────────────────────────────
-      ADMIN_USERNAME: admin
-      # Set a strong password here to enable local admin login.
-      # Local login is disabled while this is empty (the app logs a warning at startup).
-      # CHANGE THIS BEFORE EXPOSING TO ANY NETWORK — "changeme" is a placeholder.
-      ADMIN_PASSWORD: "changeme"
+      # Leave these two commented out. On the first visit the app asks you to
+      # create the admin account, using a one-time code you read from the
+      # container:  docker exec <container> cat /config/admin_setup_code
+      # The password is then stored (hashed) in ./config. To change it later:
+      #   docker exec -it <container> python -m nomadnet_web.admin_cli reset-password
+      # Setting ADMIN_PASSWORD overrides all of that (handy for scripted
+      # deployments): the variable then is the admin login and no setup is offered.
+      # ADMIN_USERNAME: admin
+      # ADMIN_PASSWORD: ""
 
       # ── Flask session key ───────────────────────────────────────────
       # Set explicitly so sessions survive container rebuilds.
@@ -147,7 +151,7 @@ services:
       OIDC_ALLOWED_EMAILS: ""
       OIDC_ALLOWED_SUBJECTS: ""
       # Users on neither list are treated as standard users. Use the
-      # local ADMIN_USERNAME / ADMIN_PASSWORD account as the bootstrap
+      # local admin account (created on first visit) as the bootstrap
       # admin, then promote OIDC users from Admin → Users.
       OIDC_ADMIN_EMAILS: ""
       OIDC_ADMIN_SUBJECTS: ""

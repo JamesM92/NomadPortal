@@ -41,7 +41,7 @@ module.exports = async ctx => {
   p = await ctx.openAdmin({ admin_role: 'user' }, '/admin/api/propagation');
   ctx.check(p.status === 403, 'and on the propagation API');
   p = await ctx.openAdmin({ admin_role: 'anon' }, '/admin/propagation');
-  ctx.check(/\/auth\/login/.test(p.url()), 'a visitor who is not signed in is sent to the login page');
+  ctx.check(/\/auth\/(login|setup)/.test(p.url()), 'a visitor who is not signed in is sent to sign in (or to first-run setup when there is no admin yet)');
 
   // ---- Settings ------------------------------------------------------
   p = await ctx.openAdmin({}, '/admin/settings');
