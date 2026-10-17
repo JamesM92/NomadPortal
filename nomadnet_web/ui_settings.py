@@ -134,6 +134,8 @@ class UISettings:
         "lxmf_enforce_stamps":  False,
         # Try failed messages again when the recipient next announces.
         "lxmf_auto_resend":     True,
+        # When direct delivery fails, hand the message to a propagation node.
+        "lxmf_propagate_on_fail": True,
         "abuse_contact":       "",
         # Site-server toggles (None = "fall through to env var"; True/False
         # = explicit override). Operators can flip these via Admin →
@@ -237,6 +239,8 @@ class UISettings:
                 self._data["lxmf_enforce_stamps"] = bool(patch["lxmf_enforce_stamps"])
             if "lxmf_auto_resend" in patch:
                 self._data["lxmf_auto_resend"] = bool(patch["lxmf_auto_resend"])
+            if "lxmf_propagate_on_fail" in patch:
+                self._data["lxmf_propagate_on_fail"] = bool(patch["lxmf_propagate_on_fail"])
             if "abuse_contact" in patch:
                 self._data["abuse_contact"] = str(patch["abuse_contact"]).strip()[:256]
             snapshot = dict(self._data)
@@ -261,6 +265,7 @@ class UISettings:
                 self._data["lxmf_stamp_cost"] = cost if cost is not None else 0
                 self._data["lxmf_enforce_stamps"] = bool(data.get("lxmf_enforce_stamps", False))
                 self._data["lxmf_auto_resend"] = bool(data.get("lxmf_auto_resend", True))
+                self._data["lxmf_propagate_on_fail"] = bool(data.get("lxmf_propagate_on_fail", True))
                 if "abuse_contact" in data:
                     self._data["abuse_contact"] = str(data["abuse_contact"]).strip()[:256]
 

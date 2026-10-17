@@ -187,6 +187,7 @@ def create_app(
     prop_sync = PropagationSyncService(
         rns=browser._rns,
         messaging_service=messaging,
+        storage_dir=config_dir,
     )
     app.config["PROP_SYNC"] = prop_sync
     _defer_after_rns("LXMF propagation sync service", prop_sync.start)
@@ -226,6 +227,7 @@ def create_app(
     messaging.set_stamp_policy(_ui_boot.get("lxmf_stamp_cost", 0),
                                _ui_boot.get("lxmf_enforce_stamps", False))
     messaging.set_auto_resend(_ui_boot.get("lxmf_auto_resend", True))
+    messaging.set_propagate_on_fail(_ui_boot.get("lxmf_propagate_on_fail", True))
 
     # Kiosk pre-warm: keeps the prescribed nodes' landing pages (and their
     # same-node links) fresh in the kiosk cache so a first-time visitor

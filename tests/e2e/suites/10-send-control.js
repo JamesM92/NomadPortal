@@ -53,6 +53,12 @@ module.exports = async ctx => {
   ctx.check(await p.locator('button[data-action="cancel"]').count() === 1 && !(await p.locator('button[data-action="cancel"]').isDisabled()),
     'and the button works again');
 
+  // 4b. a message left with a propagation node is "stored on a relay", not delivered
+  p = await open(ctx, [msg('h', 'held')]);
+  s = await stateOf(p, 'h');
+  ctx.check(/stored on a relay/.test(s.text) && !/delivered/.test(s.text) && s.buttons.length === 0,
+    `a held message says it is stored on a relay and offers no buttons (${s.text.trim()})`);
+
   // 5. automatic re-sends are marked
   p = await open(ctx, [msg('r', 'queued', { resends: 2 })]);
   const marker = await p.evaluate(() => document.querySelector('.chat-resent')?.textContent);

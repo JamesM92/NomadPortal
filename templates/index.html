@@ -857,6 +857,7 @@
       <button type="button" class="settings-tab active" data-tab="identities">Identities</button>
       <button type="button" class="settings-tab" data-tab="terminal">Terminal</button>
       <button type="button" class="settings-tab" data-tab="calls">Calls</button>
+      <button type="button" class="settings-tab" data-tab="propagation">Propagation</button>
     </div>
 
     <div id="settings-panel-identities" class="settings-panel">
@@ -913,6 +914,25 @@
       <div id="calls-settings-error" class="settings-error" hidden></div>
       <div class="settings-hint" style="margin-top:14px;">Recent calls</div>
       <div id="calls-history-list"></div>
+    </div>
+
+    <div id="settings-panel-propagation" class="settings-panel" hidden>
+      <p class="settings-hint">
+        A propagation node holds messages for people who are offline. Yours is
+        used to collect the messages waiting for you, and, when a message cannot
+        be delivered directly, to hold it until the person comes back. Choose
+        one, or let the portal use the nearest one it has heard.
+      </p>
+      <label for="prop-node-select" class="settings-hint" style="margin:0 0 3px;display:block;">Propagation node</label>
+      <select id="prop-node-select" style="width:100%;max-width:100%;"></select>
+      <div id="prop-manual-row" style="display:flex;gap:6px;margin:8px 0;">
+        <input type="text" id="prop-node-input" spellcheck="false" autocomplete="off"
+               placeholder="or enter a node hash (32 characters)" style="flex:1;min-width:0;">
+        <button type="button" id="btn-prop-use" class="btn btn-sm btn-neutral">Use</button>
+      </div>
+      <div id="prop-status" class="settings-hint" role="status" aria-live="polite" style="margin-top:10px;line-height:1.6;"></div>
+      <button type="button" id="btn-prop-sync" class="btn btn-sm btn-primary" style="margin-top:6px;">Sync now</button>
+      <div id="prop-error" class="settings-error" hidden></div>
     </div>
 
     <div class="modal-actions">

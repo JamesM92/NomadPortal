@@ -296,6 +296,9 @@ class MessagingService:
         self._outbound: dict = {}
         self._cancelled: set = set()
         self._auto_resend: bool = True
+        # When direct delivery fails, hand the message to the sender's
+        # propagation node (as MeshChat does). See _try_propagation().
+        self._propagate_on_fail: bool = True
         self._resend_last: dict = {}        # dest hash -> time of the last auto-resend
         os.makedirs(storage_path, exist_ok=True)
 
@@ -1017,10 +1020,15 @@ class MessagingService:
         att_meta: list,
         router,
         source_dest,
+        propagate: bool = False,
     ) -> None:
         """Build the LXMF message for a stored sent entry and hand it
         to the router. Runs on its own thread (see _launch_delivery).
         Used for the first send and for any later retry.
+
+        ``propagate`` sends it through the sender's propagation node
+        instead of directly: the node holds it until the recipient
+        collects it. Used only as the fallback after a direct attempt failed.
         """
         import RNS, LXMF
         try:
@@ -1117,7 +1125,8 @@ class MessagingService:
                 content,
                 title=title or "",
                 fields=fields or None,
-                desired_method=LXMF.LXMessage.OPPORTUNISTIC,
+                desired_method=(LXMF.LXMessage.PROPAGATED if propagate
+                                else LXMF.LXMessage.OPPORTUNISTIC),
             )
 
             # Callbacks update the store whenever delivery completes —
@@ -1125,11 +1134,20 @@ class MessagingService:
             def _delivered(_m):
                 self._forget(msg_id)
                 real_id = _m.hash.hex() if _m.hash else msg_id
+                # A propagation node accepting the message is not the
+                # recipient having it: say "held", never "delivered".
                 if self._msg_store:
-                    self._msg_store.update_sent(msg_id, "delivered", real_id=real_id)
-                log.info("Delivered %s → %s", msg_id[:8], dest_hash_hex[:16])
+                    self._msg_store.update_sent(
+                        msg_id, "held" if propagate else "delivered", real_id=real_id)
+                log.info("%s %s → %s",
+                         "Held by propagation node:" if propagate else "Delivered",
+                         msg_id[:8], dest_hash_hex[:16])
 
             def _failed(_m):
+                if not propagate and self._try_propagation(
+                        msg_id, dest_hash_hex, dest_hash, title, content,
+                        user_sub, att_meta, router, source_dest):
+                    return
                 self._mark_failed(msg_id)
                 log.warning("Delivery failed %s → %s", msg_id[:8], dest_hash_hex[:16])
 
@@ -1260,6 +1278,35 @@ class MessagingService:
                 self._resend_last[dest_hash_hex] = now
             log.info("Re-sending %d failed message(s) to %s", started, dest_hash_hex[:16])
         return started
+
+    def propagate_on_fail_enabled(self) -> bool:
+        with self._lock:
+            return self._propagate_on_fail
+
+    def set_propagate_on_fail(self, enabled: bool) -> None:
+        with self._lock:
+            self._propagate_on_fail = bool(enabled)
+
+    def _try_propagation(self, msg_id, dest_hash_hex, dest_hash, title, content,
+                         user_sub, att_meta, router, source_dest) -> bool:
+        """Direct delivery failed: hand the message to the sender's
+        propagation node instead, if there is one. True when that has been
+        started (the message stays "queued"); False means the caller should
+        mark it failed. Never for a cancelled message, never when switched
+        off, never without a node to use."""
+        if not self.propagate_on_fail_enabled() or self._is_cancelled(msg_id):
+            return False
+        try:
+            node = router.get_outbound_propagation_node()
+        except Exception:
+            return False
+        if not node:
+            return False
+        self._forget(msg_id)
+        log.info("Direct delivery of %s failed; handing it to a propagation node", msg_id[:8])
+        self._launch_delivery(msg_id, dest_hash_hex, dest_hash, title, content,
+                              user_sub, att_meta, router, source_dest, True)
+        return True
 
     def _launch_delivery(self, *args) -> None:
         threading.Thread(target=self._run_delivery, args=args, daemon=True).start()

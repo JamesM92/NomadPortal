@@ -32,6 +32,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `09-conversation-extras` | Chats can be filtered All / Trusted / Untrusted (unknown counts as untrusted), with counts and unread badges. "All" is the default and the choice is remembered. Pinned conversations sort first. A peer with a note shows a marker. The peer dialog saves trust, pin and note, and Escape saves nothing. |
 | `10-send-control` | A queued message offers Cancel, a failed or cancelled one offers Retry, a delivered one has no buttons. A refusal is explained and the button works again. Automatic re-sends are marked. |
 | `11-voice-message` | The Ogg Opus muxer, checked with an independent parser and (when ffmpeg exists) a real decoder: the audio comes out bit-identical. The recorder in Chromium: timer, stop, cancel, Escape, a staged `audio/ogg` file that the browser's own decoder opens, the microphone always released, a refused microphone explained, no room in the message, no button without WebCodecs. **Microphone capture is stubbed** (see below). |
+| `12-propagation` | Settings > Propagation: Automatic first and naming the nearest node, node distances, choosing a node, going back to automatic, typing a node in (Enter works), a bad hash explained, Sync now with progress then the result, the inbox refreshed afterwards, a refused sync shown, polling stopped when the dialog closes. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -117,6 +118,21 @@ Use a real microphone and a second client that plays voice messages (MeshChat is
 6. Open the portal in Firefox and Safari. The microphone button should appear only where the browser can encode Opus; if it does not appear, the paperclip must still attach an audio file.
 
 The automated browser test cannot run the real microphone path. The headless Chromium used in CI and in development has no audio hardware, and without an audio device the browser never starts the AudioWorklet thread (its `addModule` waits forever). The test therefore replaces only the capture step with a generated tone, and runs everything after it for real. The worklet file (`call-audio-worklet.js`, shared with voice calls) and the real microphone are what this check covers.
+
+### I. Propagation nodes
+
+You need at least one propagation node on the network (a MeshChat or NomadNet instance running one, or a public one), and a second client you can switch off.
+
+1. Open **Settings > Propagation**. After a few minutes of the portal running, a node must be listed, and "Automatic" must name the nearest one.
+2. Choose a different node. The status must say "your choice". Choose "Automatic". It must go back.
+3. Type in the hash of a node you know. It must be used even though the portal has not heard it announce.
+4. From the second client, send a message to the portal user while the portal is **not** the destination reached directly (switch the portal's identity off, or send via propagation). Press **Sync now**. The progress line must show "receiving messages", then "Last collection: 1 new message". The message must appear in the chat without a reload.
+5. Switch the second client off. Send it a message from the portal and wait. After the delivery attempts the message must change to **stored on a relay** (not "failed", and never "delivered").
+6. Switch the second client on and make it collect from the same node (or a node peered with it). The message must arrive.
+7. In **Admin > Settings**, untick "leave it with a propagation node". Repeat step 5. The message must show "failed".
+8. Cancel a message while it is still "queued" and the client is off. It must stop and never arrive.
+
+Step 6 depends on the two clients using the same node, or nodes that peer with each other. If the message never arrives, check that first.
 
 ### D. Public site
 

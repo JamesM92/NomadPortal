@@ -58,6 +58,12 @@ DEFAULTS = {
     "msg_actions": [],     # ["cancel:<id>", "retry:<id>"] in the order they were POSTed
     "msg_refuse": "",      # when set, cancel/retry answer 409 with this text
     "message_posts": [],   # what POST /api/messages received (files seen as name, type, first bytes)
+    "prop": {},            # /api/propagation status; see propagation() for the fields filled in
+    "prop_sync_refuse": "",# when set, POST /api/propagation/sync answers 409 with this text
+    "prop_posts": [],      # nodes POSTed to /api/propagation/node
+    "prop_phase": None,    # None, or how many status reads have happened since "Sync now"
+    "prop_gets": 0,        # GET /api/propagation calls
+    "received_gets": 0,    # GET /api/messages/received calls (the inbox refresh)
 }
 S = dict(DEFAULTS)
 
@@ -93,6 +99,11 @@ def scenario():
     S["sent"] = [dict(m) for m in S["sent"]]
     S["msg_actions"] = []
     S["message_posts"] = []
+    S["prop"] = dict(S["prop"])
+    S["prop_posts"] = []
+    S["prop_phase"] = None
+    S["prop_gets"] = 0
+    S["received_gets"] = 0
     S["settings_posts"] = []
     return jsonify(ok=True)
 
@@ -103,7 +114,8 @@ def stats():
                    path_fetches=S["path_fetches"], media_calls=S["media_calls"],
                    media_max_inflight=S["media_max_inflight"],
                    settings_posts=S["settings_posts"], msg_actions=S["msg_actions"],
-                   message_posts=S["message_posts"])
+                   message_posts=S["message_posts"], prop_posts=S["prop_posts"],
+                   prop_gets=S["prop_gets"], received_gets=S["received_gets"])
 
 
 @app.get("/api/auth/status")
@@ -183,7 +195,61 @@ def media():
 
 @app.get("/api/messages/received")
 def messages_received():
+    S["received_gets"] += 1
     return jsonify(messages=S["received"])
+
+
+def _prop_status():
+    p = {"mode": "auto", "node": None, "preferred": None, "picked": None, "nodes": [],
+         "last_synced_at": None, "last_error": None,
+         "transfer": {"state": "idle", "code": 0, "active": False, "progress": 0.0,
+                      "last_result": None, "last_duplicates": None}}
+    p.update(S["prop"])
+    phase = S["prop_phase"]
+    if phase is not None:                       # a sync is under way, then done
+        if phase < 2:
+            p["transfer"] = {"state": "receiving messages", "code": 5, "active": True,
+                             "progress": 0.4 * (phase + 1), "last_result": None, "last_duplicates": None}
+        else:
+            p["transfer"] = {"state": "complete", "code": 7, "active": False, "progress": 1.0,
+                             "last_result": 3, "last_duplicates": 1}
+            p["last_synced_at"] = time.time()
+    return p
+
+
+@app.get("/api/propagation")
+def propagation():
+    S["prop_gets"] += 1
+    out = _prop_status()
+    if S["prop_phase"] is not None:
+        S["prop_phase"] += 1
+    return jsonify(out)
+
+
+@app.post("/api/propagation/node")
+def propagation_node():
+    node = (request.get_json(silent=True) or {}).get("node")
+    S["prop_posts"].append(node)
+    if node and len(node) != 32:
+        return jsonify(ok=False, error="A node hash is 32 hexadecimal characters"), 400
+    p = S["prop"]
+    p["preferred"] = node or None
+    p["mode"] = "manual" if node else "auto"
+    p["node"] = node or p.get("picked")
+    if node and not any(n["hash"] == node for n in p.get("nodes", [])):
+        p.setdefault("nodes", []).append({"hash": node, "hops": None, "first_seen": None, "last_seen": None,
+                                          "announce_count": 0, "picked": False, "preferred": True})
+    for n in p.get("nodes", []):
+        n["preferred"] = (n["hash"] == node)
+    return jsonify(ok=True, **_prop_status())
+
+
+@app.post("/api/propagation/sync")
+def propagation_sync():
+    if S["prop_sync_refuse"]:
+        return jsonify(ok=False, error=S["prop_sync_refuse"]), 409
+    S["prop_phase"] = 0
+    return jsonify(ok=True, **_prop_status())
 
 
 @app.get("/api/messages/sent")
