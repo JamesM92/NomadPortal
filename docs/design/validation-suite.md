@@ -158,6 +158,20 @@ Run the portal on a network with at least two interfaces (for example a TCP hub 
 6. Zoom, drag and tick or untick the kinds. Nothing may jump or disappear that was not asked for.
 7. With 500 or more destinations, the map must open in about a second and stay smooth while zooming.
 
+### L. Hosting a propagation node
+
+Needs two portals (A and B) that can reach each other over Reticulum, and a
+MeshChat or Sideband on a phone.
+
+1. On A, open **Admin > Node**, tick "Run a propagation node", give it a name, save. State must read Running; after about 20 seconds B (and the phone) must list it among known propagation nodes.
+2. On B, enter A's address in B's own node box (Messages > Propagation > enter by hand). B's node list must show A as reachable.
+3. Send a message from the phone to a user on B while that user is offline. Pick A as the phone's node. Bring the B user online and press Sync now: the message must arrive. In A's Admin page, "Messages held" must have gone up, then down after pickup.
+4. Loopback: on A, enter A's own address as A's user's node and press Sync now. Record whether it works. Do not rely on it until it does (design doc D8).
+5. Fill A's storage limit (set it to 1 MB and send a few attachments): A must stay under the limit and stay running.
+6. Switch the node off. The phone's node list must stop offering A within a few minutes, and A's disk usage must stop growing. Switch it on again: it must resume without a restart.
+7. Change "Most peers" and confirm the page says a restart is needed. Restart, and confirm the new value is in use.
+8. Point the data directory at a network share and confirm the node refuses to start and says why.
+
 ### D. Public site
 
 1. Fetch a page URL with `curl` (no JavaScript). The content, `<title>` and canonical link must be in the response.

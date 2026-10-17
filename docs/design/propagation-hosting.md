@@ -74,9 +74,16 @@ from `compile_stats()`, polled; no websocket.
 guest can see or reach the node settings or stats. The node itself is reachable
 only through Reticulum, by design.
 
-**D8. Our own client prefers our own node.** When the node is on, the
-propagation picker lists it as "This portal" and uses it first, so a small
-deployment works with no outside node at all.
+**D8. (Changed) Our own users are not switched to our own node automatically.**
+The first plan was to list the node as "This portal" and prefer it. That needs
+a Reticulum link from the portal's router to a destination in the same
+process, and nothing here proves Reticulum delivers that locally (it normally
+carries traffic between instances, not to itself). A wrong guess would
+silently break message delivery for every user, so it is not done. The node's
+address is shown in Admin; an operator can paste it into the picker's
+"enter a node by hand" box, and check **L** step 4 in the validation suite
+records whether that works on a real mesh. If it does, preferring the local
+node becomes a small follow-up.
 
 **D9. One router per run; most settings apply at restart.** Found while
 building: an `LXMRouter` cannot be torn down (its job thread and Reticulum
@@ -107,7 +114,7 @@ only until auto-peering is turned on, LXMF's default stamp cost of 16.
    check, stats to a display shape) are plain functions.
 2. Settings and Admin routes (`/api/admin/propagation`: get, set, announce).
 3. Admin panel, plus browser-suite coverage (new suite 15).
-4. Picker integration (D8).
+4. ~~Picker integration (D8)~~ deferred until check L step 4 shows loopback works.
 5. Docs: README, CHANGELOG, `docs/` and a manual check **L** in
    `validation-suite.md` (two portals peer with each other; a message sent to
    an offline user through node A is collected from node B; a stranger's

@@ -9,8 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Design: hosting a propagation node** (`docs/design/propagation-hosting.md`).
-  A proposal only; nothing is built yet.
+- **Host a propagation node.** Admin > Node switches on an LXMF propagation
+  node: a mailbox that holds messages for people who are offline and passes
+  them on, peering with other nodes. Off by default. It has its own identity
+  and keeps its store on local disk (it refuses to start on network storage),
+  capped at 500 MB by default (changes at once); name, largest message,
+  stamp-cost spam brake and peering settings (fixed list only by default) are
+  saved at once and used after a restart, which the page says. It announces
+  itself every 6 hours, can announce on demand (once a minute at most), and
+  shows state, address, uptime, messages held, storage used, peers and
+  traffic. A failure to start leaves the node off and the portal running,
+  with the reason shown. Design: `docs/design/propagation-hosting.md`.
+  Tested with fakes for LXMF and Reticulum (63 new tests); real peering and
+  hand-off is check L in the validation suite. Your own users are not moved
+  to the node automatically: that needs Reticulum to carry traffic to a
+  destination in the same process, which is untested (check L step 4).
 - **Network map (MeshChat parity).** A map button in the Network tab opens a
   picture of everything the portal has heard, centred on the portal: its
   interfaces around it (red when down, each labelled with how many
