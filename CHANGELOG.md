@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Voice messages (MeshChat parity).** A microphone button beside the
+  paperclip records a voice message: it is encoded as Opus with the
+  browser's WebCodecs encoder (the same settings as voice calls), wrapped
+  in an Ogg container by a new small muxer (``ogg-opus.js``, RFC 7845), and
+  staged like any attachment, so the size limits and the send path are
+  unchanged. It goes out as ``FIELD_AUDIO`` mode ``AM_OPUS_OGG``, which
+  MeshChat plays inline. A bar shows a timer and the longest clip that
+  fits the message; Stop adds the clip, Cancel or Escape throws it away.
+  The microphone is always released (on stop, cancel, error, and when the
+  page is closed). The button appears only in browsers that can encode
+  Opus (Chromium today; attaching an audio file works everywhere), and is
+  refused during a call. Quality is Opus at 24 kbit/s, mono: about 3 KB a
+  second, so up to about 2 minutes fit in the 500 KB limit. The muxer was
+  checked against an independent parser and against ffmpeg (the decoded
+  audio is bit-identical to the original encoding); in Chromium the
+  browser's own decoder opens what the recorder produces. 35 new browser
+  checks. **Not covered here:** the real microphone and the AudioWorklet
+  (the test environment has no audio hardware, so the test stubs only the
+  capture step) and playback in MeshChat: see check H in
+  docs/design/validation-suite.md.
 - **Fix: audio attachments now use the wire format real clients expect.**
   ``FIELD_AUDIO`` is ``[mode, bytes]`` where the mode is an **integer** from
   LXMF (checked against the LXMF constants and MeshChat's source). The
@@ -134,10 +154,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 102 checks across ten suites (saved-copy
+  against a small mock backend: 146 checks across eleven suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, inline images, conversation extras, and send control). It runs as a new CI job,
+  partials, inline images, conversation extras, send control, and voice messages). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

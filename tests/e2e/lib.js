@@ -29,7 +29,9 @@ async function start() {
   const server = spawn(process.env.E2E_PYTHON || 'python3',
     [path.join(__dirname, 'server.py'), String(port)], { stdio: ['ignore', 'ignore', 'inherit'] });
   await waitForServer(base);
-  const launch = { args: ['--no-sandbox'] };
+  // The fake-device flags give getUserMedia a test tone and accept the
+  // permission prompt, so recording can be tested without hardware.
+  const launch = { args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] };
   if (process.env.E2E_CHROMIUM) launch.executablePath = process.env.E2E_CHROMIUM;
   const browser = await chromium.launch(launch);
 
@@ -55,6 +57,7 @@ async function start() {
       for (const old of opened.splice(0)) await old.close().catch(() => {});
       const context = await browser.newContext();
       opened.push(context);
+      if (opts.initScript) await context.addInitScript(opts.initScript);
       const page = await context.newPage();
       page.dialogs = [];
       page.on('dialog', d => { page.dialogs.push(d.type()); opts.acceptDialogs === false ? d.dismiss() : d.accept(); });

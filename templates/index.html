@@ -646,12 +646,28 @@
             <!-- Attachment chips list — one entry per staged attachment,
                  with a × button to remove. Populated by _updateAttachChips. -->
             <div id="chat-attach-list" hidden></div>
+            <!-- Voice message recording bar: shown only while recording. -->
+            <div id="chat-voice-bar" hidden role="status" aria-live="polite">
+              <span class="voice-dot" aria-hidden="true">&#9679;</span>
+              <span>Recording</span>
+              <span id="chat-voice-timer">0:00</span>
+              <span id="chat-voice-limit" class="dim"></span>
+              <button type="button" id="btn-voice-stop" class="voice-btn">Stop</button>
+              <button type="button" id="btn-voice-cancel" class="voice-btn">Cancel</button>
+            </div>
             <div class="chat-input-row">
               <button id="btn-chat-attach"
                       title="Attach file (image, audio, or any file — 500 KB cap)"
                       style="background:none;border:none;font-size:16px;
                              cursor:pointer;padding:2px 6px;color:var(--text-dim);">
                 📎
+              </button>
+              <button id="btn-chat-voice" type="button" hidden
+                      title="Record a voice message"
+                      aria-label="Record a voice message"
+                      style="background:none;border:none;font-size:16px;
+                             cursor:pointer;padding:2px 6px;color:var(--text-dim);">
+                🎤
               </button>
               <textarea id="chat-input" rows="2" placeholder="Message… (Enter to send)"></textarea>
               <button id="btn-chat-send">&#10140;</button>
@@ -906,6 +922,8 @@
 </div>
 
 <script src="/static/js/call-audio.js"></script>
+<script src="/static/js/ogg-opus.js"></script>
+<script src="/static/js/voice-message.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

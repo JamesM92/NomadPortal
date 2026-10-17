@@ -57,6 +57,7 @@ DEFAULTS = {
     "sent": [],            # /api/messages/sent (each: id, dest, content, sent_at, state, resends?)
     "msg_actions": [],     # ["cancel:<id>", "retry:<id>"] in the order they were POSTed
     "msg_refuse": "",      # when set, cancel/retry answer 409 with this text
+    "message_posts": [],   # what POST /api/messages received (files seen as name, type, first bytes)
 }
 S = dict(DEFAULTS)
 
@@ -91,6 +92,7 @@ def scenario():
     S["contacts"] = [dict(c) for c in S["contacts"]]
     S["sent"] = [dict(m) for m in S["sent"]]
     S["msg_actions"] = []
+    S["message_posts"] = []
     S["settings_posts"] = []
     return jsonify(ok=True)
 
@@ -100,7 +102,8 @@ def stats():
     return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
                    path_fetches=S["path_fetches"], media_calls=S["media_calls"],
                    media_max_inflight=S["media_max_inflight"],
-                   settings_posts=S["settings_posts"], msg_actions=S["msg_actions"])
+                   settings_posts=S["settings_posts"], msg_actions=S["msg_actions"],
+                   message_posts=S["message_posts"])
 
 
 @app.get("/api/auth/status")
@@ -186,6 +189,15 @@ def messages_received():
 @app.get("/api/messages/sent")
 def messages_sent():
     return jsonify(messages=S["sent"])
+
+
+@app.post("/api/messages")
+def messages_post():
+    files = [{"name": f.filename, "type": f.mimetype, "head": f.read(4).decode("latin1"), "size": f.seek(0, 2)}
+             for f in request.files.getlist("attachments")] if request.files else []
+    S["message_posts"].append({"content_type": request.content_type.split(";")[0],
+                               "form": dict(request.form), "files": files})
+    return jsonify(ok=True, id="new")
 
 
 @app.post("/api/messages/<mid>/<action>")
