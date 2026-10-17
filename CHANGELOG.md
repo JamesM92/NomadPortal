@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tests for modules that had none, and one hardening.** `config_gen` (writes
+  the Reticulum config: 16 tests, parsed with Reticulum's own ConfigObj), the
+  virus-scan client (24 tests against a fake clamd speaking the real INSTREAM
+  protocol) and the hosted site's request handlers (16 tests). The last found
+  that the page and file handlers trusted the requested path: Reticulum only
+  calls them for registered paths, so a `..` could not get through in practice,
+  but called directly one could read outside the site folder. Both handlers now
+  refuse any path that leaves their directory (symlinks the operator put there
+  still work). The handlers also no longer log the requested path.
 - **Admin pages in the browser tests.** The mock backend now mounts the real
   admin blueprint, templates and stores (only Reticulum is faked), so suite
   `15-admin-pages` loads all eleven admin pages in Chromium, follows the
