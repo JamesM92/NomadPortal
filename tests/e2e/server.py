@@ -20,6 +20,10 @@ import time
 from flask import Flask, jsonify, render_template, request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import admin_mock  # noqa: E402  (sits beside this file)
+
 app = Flask(__name__, template_folder=os.path.join(ROOT, "templates"),
             static_folder=os.path.join(ROOT, "static"))
 app.jinja_env.globals["csrf_token"] = lambda: "t"
@@ -35,6 +39,7 @@ DEFAULTS = {
     "access": None,        # /api/ui/settings "access" snapshot (None = omit)
     "ui_fail": False,      # make /api/ui/settings fail
     "admin": False,        # /api/auth/status says admin
+    "admin_role": "admin", # who the real /admin pages see: "admin", "user" or "anon"
     "cached": None,        # saved copy returned by /api/page/fetch
     "poll": [],            # see above
     "delay": 0.0,          # seconds each poll takes
@@ -69,6 +74,7 @@ DEFAULTS = {
     "received_gets": 0,    # GET /api/messages/received calls (the inbox refresh)
 }
 S = dict(DEFAULTS)
+admin_mock.mount(app, lambda: S)
 
 
 @app.get("/")
@@ -108,6 +114,16 @@ def scenario():
     S["prop_gets"] = 0
     S["received_gets"] = 0
     S["settings_posts"] = []
+    admin_mock.reset(app)
+    return jsonify(ok=True)
+
+
+@app.post("/__admin_break_propagation")
+def admin_break_propagation():
+    """Make the propagation node think its data directory is on network
+    storage, so a start fails the way it would on a NAS."""
+    host = app.config["PROPAGATION_HOST"]
+    host._mounts_text = f"nas:/x {host._dir} nfs4 rw 0 0\n"
     return jsonify(ok=True)
 
 

@@ -70,6 +70,25 @@ async function start() {
       await page.waitForTimeout(300);
       return page;
     },
+    // A real admin page (the genuine templates, routes and scripts; only
+    // Reticulum is faked). `scn.admin_role` is "admin" (default), "user"
+    // or "anon". Failed same-origin responses and console errors are kept
+    // on page.bad for the suite to judge.
+    async openAdmin(scn, route) {
+      for (const old of opened.splice(0)) await old.close().catch(() => {});
+      const context = await browser.newContext();
+      opened.push(context);
+      const page = await context.newPage();
+      page.bad = [];
+      page.on('pageerror', e => ctx.check(false, `uncaught page error: ${e.message}`));
+      page.on('response', r => { if (r.url().startsWith(base) && r.status() >= 400 && !r.url().includes('favicon')) page.bad.push(`${r.status()} ${r.url().replace(base, '')}`); });
+      page.on('console', m => { if (m.type() === 'error' && !/status of (4|5)\d\d/.test(m.text())) page.bad.push(`console: ${m.text()}`); });
+      await page.goto(base + '/__stats');
+      await ctx.scenario(page, scn);
+      const resp = await page.goto(base + route);
+      page.status = resp.status();
+      return page;
+    },
     text: page => page.evaluate(() => document.getElementById('page-content').innerText),
     fetches: page => page.evaluate(() => fetch('/__stats').then(r => r.json()).then(j => j.fetches)),
   };

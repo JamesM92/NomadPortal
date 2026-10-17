@@ -87,6 +87,7 @@ module.exports = async ctx => {
   await p.click('#btn-prop-sync');
   await p.waitForFunction(() => /Collecting messages/.test(document.getElementById('prop-status').innerText), null, { timeout: 5000 });
   await p.evaluate(() => _closeSettingsModal());
+  await p.waitForTimeout(800);   // let a status read already on its way land before counting
   const g1 = (await stats(p)).prop_gets;
   await p.waitForTimeout(3500);
   const g2 = (await stats(p)).prop_gets;

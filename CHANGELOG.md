@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Admin pages in the browser tests.** The mock backend now mounts the real
+  admin blueprint, templates and stores (only Reticulum is faked), so suite
+  `15-admin-pages` loads all eleven admin pages in Chromium, follows the
+  navigation, checks who is refused, and drives Settings and the new Node page
+  (73 checks). The template filters moved into `register_template_filters` so
+  the test backend uses the very same ones. The CI browser job now installs
+  `requirements.txt` for this.
 - **Host a propagation node.** Admin > Node switches on an LXMF propagation
   node: a mailbox that holds messages for people who are offline and passes
   them on, peering with other nodes. Off by default. It has its own identity
@@ -223,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 228 checks across fourteen suites (saved-copy
+  against a small mock backend: 301 checks across fifteen suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
   partials, inline images, conversation extras, send control, voice messages, propagation, addresses, and the network map). It runs as a new CI job,
