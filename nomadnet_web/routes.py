@@ -455,15 +455,7 @@ def api_debug_state():
     # NodeBrowser — fetch jobs + link cache.
     if browser is not None:
         try:
-            with browser._jobs_lock:
-                job_ages = sorted(
-                    (time.time() - j.get("started", time.time()))
-                    for j in browser._jobs.values()
-                )
-            out["fetch_jobs"] = {
-                "count":                    len(job_ages),
-                "oldest_started_seconds_ago": int(job_ages[-1]) if job_ages else 0,
-            }
+            out["fetch_jobs"] = browser.jobs_summary()
         except Exception as exc:
             out["fetch_jobs"] = {"error": str(exc)}
 
@@ -981,19 +973,7 @@ def api_page_fetch_start():
         if not field_data:
             _count_view(node_hash, path, "live")
         # synthesize a "done" job entry so the polling flow is uniform
-        import secrets
-        job_id = secrets.token_hex(8)
-        with _browser()._jobs_lock:
-            _browser()._jobs[job_id] = {
-                "status":    "done",
-                "progress":  1.0,
-                "node_hash": node_hash.lower(),
-                "path":      path,
-                "started":   time.time(),
-                "completed": time.time(),
-                "content":   content_b,
-                "error":     None,
-            }
+        job_id = _browser().add_finished_job(node_hash, path, content_b)
         return jsonify({"job_id": job_id, "raw": raw})
 
     # Remote — normal async fetch. Anonymous plain GETs also consult the
@@ -1020,10 +1000,7 @@ def api_page_fetch_start():
     )
     resp = {"job_id": job_id, "raw": raw}
     if cacheable:
-        with _browser()._jobs_lock:
-            job = _browser()._jobs.get(job_id)
-            if job is not None:
-                job["kiosk_cacheable"] = True
+        _browser().flag_job(job_id, kiosk_cacheable=True)
     if cached is not None:
         resp["cached"] = cached
     if not field_data:
@@ -1149,7 +1126,7 @@ def api_file_fetch_start():
     site_server = current_app.config.get("SITE_SERVER")
     is_local = site_server and site_server.node_hash() == node_hash.lower()
     if is_local:
-        import os, secrets
+        import os
         from werkzeug.utils import safe_join
         # Use Werkzeug's ``safe_join`` for path traversal containment.
         # It rejects any input that escapes ``files_root`` (absolute
@@ -1208,21 +1185,10 @@ def api_file_fetch_start():
                 )
                 content = None
 
-        job_id = secrets.token_hex(8)
-        with _browser()._jobs_lock:
-            _browser()._jobs[job_id] = {
-                "status":        "error" if local_error else "done",
-                "progress":      1.0,
-                "node_hash":     node_hash.lower(),
-                "path":          path,
-                "started":       time.time(),
-                "completed":     time.time(),
-                "content":       content,
-                "error":         local_error,
-                "response_size": len(content) if content is not None else 0,
-                "transfer_size": len(content) if content is not None else 0,
-                "scan_result":   scan_dict,
-            }
+        size = len(content) if content is not None else 0
+        job_id = _browser().add_finished_job(
+            node_hash, path, content, local_error,
+            response_size=size, transfer_size=size, scan_result=scan_dict)
         return jsonify({
             "job_id":    job_id,
             "filename":  filename,

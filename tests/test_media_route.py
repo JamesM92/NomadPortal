@@ -3,13 +3,13 @@
 Access rules, size and type checks, caching, the concurrency limit, and
 what the response says about itself."""
 
-import threading
 from unittest import mock
 
 import pytest
 from flask import Flask
 from flask_login import LoginManager
 
+from tests.job_table import JobsMixin
 from nomadnet_web import routes
 from nomadnet_web.cache import PageCache
 from nomadnet_web.kiosk_cache import KioskCache, kiosk_key
@@ -22,13 +22,12 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 PATH = "/media/logo.webp"
 
 
-class Browser:
+class Browser(JobsMixin):
     def __init__(self, result=(WEBP, None), blocked=()):
         self.result = result
         self.blocked = set(blocked)
         self.calls = []
-        self._jobs = {}
-        self._jobs_lock = threading.Lock()
+        self.__init_jobs__()
         self.scanner = None
         self.scan_required = False
 

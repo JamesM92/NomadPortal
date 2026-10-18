@@ -3,13 +3,13 @@ after moving to ``nomadnet_web.access``: status codes and exact message
 text for browse, form submit and file download, plus the blocklist.
 """
 
-import threading
 from unittest import mock
 
 import pytest
 from flask import Flask
 from flask_login import LoginManager
 
+from tests.job_table import JobsMixin
 from nomadnet_web import routes
 from nomadnet_web.cache import PageCache
 
@@ -17,11 +17,10 @@ HOSTED = "aa" * 16
 OTHER = "cc" * 16
 
 
-class Browser:
+class Browser(JobsMixin):
     def __init__(self, blocked=()):
         self.blocked = set(blocked)
-        self._jobs = {}
-        self._jobs_lock = threading.Lock()
+        self.__init_jobs__()
 
     def _record_fetch(self, *a, **k):
         pass

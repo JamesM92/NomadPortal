@@ -2,13 +2,13 @@
 like a Reticulum requester is held to, and must never serve an access
 list itself."""
 
-import threading
 from unittest import mock
 
 import pytest
 from flask import Flask
 from flask_login import LoginManager
 
+from tests.job_table import JobsMixin
 from nomadnet_web import routes
 from nomadnet_web.cache import PageCache
 
@@ -16,10 +16,9 @@ HOSTED = "aa" * 16
 ALICE = "ab" * 16
 
 
-class Browser:
+class Browser(JobsMixin):
     def __init__(self):
-        self._jobs = {}
-        self._jobs_lock = threading.Lock()
+        self.__init_jobs__()
         self.scanner = None
         self.scan_required = False
 

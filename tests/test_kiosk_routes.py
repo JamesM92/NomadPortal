@@ -47,6 +47,17 @@ class FakeBrowser:
     def drop_job(self, job_id, grace_seconds=0):
         self._jobs.pop(job_id, None)
 
+    def flag_job(self, job_id, **flags):
+        if job_id not in self._jobs:
+            return False
+        self._jobs[job_id].update(flags)
+        return True
+
+    def add_finished_job(self, node_hash, path, content, error=None, **extra):
+        self._jobs["local"] = {"status": "done", "content": content, "node_hash": node_hash,
+                               "path": path, "error": error, **extra}
+        return "local"
+
     def finish(self, content):
         self._jobs["job1"].update(status="done", content=content, progress=1.0)
 
