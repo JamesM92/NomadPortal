@@ -13,6 +13,8 @@ import threading
 import time
 from typing import Optional
 
+from .fetch_jobs import FetchJobs
+
 log = logging.getLogger(__name__)
 
 APP_NAME    = "nomadnetwork"
@@ -186,8 +188,7 @@ class NodeBrowser:
         # job_id (16-hex) -> { status: "fetching"|"done"|"error",
         #                      progress: 0.0-1.0, content, error,
         #                      node_hash, path, started, completed }
-        self._jobs: dict = {}
-        self._jobs_lock = threading.Lock()
+        self._fetch_jobs = FetchJobs()
 
         # RNS.Link cache for page-fetch reuse. Matches rBrowser's pattern:
         # keep the link alive after a successful fetch so the next page-load
@@ -1613,46 +1614,18 @@ class NodeBrowser:
         Caller polls `get_job(job_id)` until status != 'fetching'.
         Job entries are kept for ~5 min after completion so the client
         has a window to retrieve the result; older entries are evicted
-        by `cleanup_jobs()` (called periodically from the housekeeping thread).
+        by `cleanup_jobs()` (called whenever a new job starts).
         """
-        import secrets
-        job_id = secrets.token_hex(8)
-        # Opportunistic cleanup of any abandoned jobs before adding a new one.
-        self.cleanup_jobs()
-        with self._jobs_lock:
-            self._jobs[job_id] = {
-                "status":        "fetching",
-                "progress":      0.0,
-                "node_hash":     destination_hash_hex.lower(),
-                "path":          path,
-                "started":       time.time(),
-                "completed":     None,
-                "content":       None,
-                "error":         None,
-                "response_size": None,
-                "transfer_size": None,
-                "scan_result":   None,
-            }
-
-        def _set_progress(p):
-            with self._jobs_lock:
-                if job_id in self._jobs:
-                    self._jobs[job_id]["progress"] = p
-
-        def _set_sizes(response_size, transfer_size):
-            with self._jobs_lock:
-                if job_id in self._jobs:
-                    if response_size is not None:
-                        self._jobs[job_id]["response_size"] = response_size
-                    if transfer_size is not None:
-                        self._jobs[job_id]["transfer_size"] = transfer_size
+        jobs = self._fetch_jobs
+        job_id = jobs.start(destination_hash_hex, path)
 
         def _worker():
             try:
                 content, error = self.fetch_page(
                     destination_hash_hex, path, field_data,
-                    progress_cb=_set_progress,
-                    sizes_cb=_set_sizes,
+                    progress_cb=lambda p: jobs.set_progress(job_id, p),
+                    sizes_cb=lambda response_size, transfer_size: jobs.set_sizes(
+                        job_id, response_size, transfer_size),
                     identify_with=identify_with,
                 )
                 # Move to "scanning" before running the (possibly slow)
@@ -1664,9 +1637,7 @@ class NodeBrowser:
                     scanner       = getattr(self, "scanner", None)
                     scan_required = getattr(self, "scan_required", False)
                     if scanner is not None:
-                        with self._jobs_lock:
-                            if job_id in self._jobs:
-                                self._jobs[job_id]["status"] = "scanning"
+                        jobs.mark_scanning(job_id)
                         filename = path.rsplit("/", 1)[-1]
                         try:
                             scan = scanner.scan(content, filename)
@@ -1691,74 +1662,36 @@ class NodeBrowser:
                                 f"is set: {scan.detail or 'no detail'}"
                             )
                             content = None
-                with self._jobs_lock:
-                    if job_id in self._jobs:
-                        self._jobs[job_id]["content"]     = content
-                        self._jobs[job_id]["error"]       = error
-                        self._jobs[job_id]["status"]      = "error" if error else "done"
-                        self._jobs[job_id]["progress"]    = 1.0 if content else self._jobs[job_id]["progress"]
-                        self._jobs[job_id]["completed"]   = time.time()
-                        self._jobs[job_id]["scan_result"] = scan_dict
+                jobs.finish(job_id, content, error, scan_dict)
             except Exception as exc:
                 log.exception("fetch_page_async worker crashed")
-                with self._jobs_lock:
-                    if job_id in self._jobs:
-                        self._jobs[job_id]["status"]    = "error"
-                        self._jobs[job_id]["error"]     = f"Internal error: {exc}"
-                        self._jobs[job_id]["completed"] = time.time()
+                jobs.crash(job_id, exc)
 
         threading.Thread(target=_worker, daemon=True, name=f"fetch-{job_id}").start()
         return job_id
 
+    # The job table lives in FetchJobs; these are the browser's face of it.
+
     def get_job(self, job_id: str) -> Optional[dict]:
         """Snapshot of a job's current state, or None if unknown / evicted."""
-        with self._jobs_lock:
-            j = self._jobs.get(job_id)
-            return dict(j) if j else None
+        return self._fetch_jobs.get(job_id)
 
     def drop_job(self, job_id: str, grace_seconds: int = 0) -> None:
-        """Evict a job entry — call after the client has retrieved the result.
-
-        ``grace_seconds`` defers the actual eviction to
-        ``cleanup_jobs()``, keeping the entry serveable for that
-        window. Load-bearing for browsers that re-request the
-        download URL from a separate context after the initial
-        page-context request — DuckDuckGo's Android download
-        manager does this (WebView fetches from the page, then
-        DDG's download-handler process re-requests the same URL
-        to actually persist the file). Without a grace window,
-        the second request hits 404 and DDG reports "Failed to
-        download. Check Internet connection." even though the
-        WebView successfully received all bytes.
-
-        ``grace_seconds=0`` (default) preserves the historical
-        behaviour: immediate eviction. Callers that know a legit
-        double-fetch is possible pass a small window (30-60 s).
-        """
-        with self._jobs_lock:
-            if grace_seconds <= 0:
-                self._jobs.pop(job_id, None)
-                return
-            j = self._jobs.get(job_id)
-            if j is not None:
-                j["_drop_after"] = time.time() + grace_seconds
+        """Evict a job once the client has its result (see FetchJobs.drop)."""
+        self._fetch_jobs.drop(job_id, grace_seconds)
 
     def cleanup_jobs(self, max_age: int = 300) -> int:
-        """Evict completed jobs older than max_age seconds OR past
-        their grace expiry set by ``drop_job(grace_seconds=…)``.
-        Returns count removed.
-        """
-        now = time.time()
-        cutoff = now - max_age
-        with self._jobs_lock:
-            stale = [
-                jid for jid, j in self._jobs.items()
-                if (j.get("completed") and j["completed"] < cutoff)
-                or (j.get("_drop_after") and j["_drop_after"] < now)
-            ]
-            for jid in stale:
-                del self._jobs[jid]
-            return len(stale)
+        return self._fetch_jobs.cleanup(max_age)
+
+    def add_finished_job(self, node_hash: str, path: str, content, error=None, **extra) -> str:
+        """A job whose outcome is already known (local site, saved copy)."""
+        return self._fetch_jobs.add_finished(node_hash, path, content, error, **extra)
+
+    def flag_job(self, job_id: str, **flags) -> bool:
+        return self._fetch_jobs.flag(job_id, **flags)
+
+    def jobs_summary(self) -> dict:
+        return self._fetch_jobs.summary()
 
     def ping_node(
         self, destination_hash_hex: str, timeout: int = PING_TIMEOUT

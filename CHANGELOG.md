@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Page-fetch jobs have one owner.** The table of in-flight and finished page
+  fetches used to be reached into directly by four places in the routes (they
+  took its lock and wrote its entries). It now lives in `fetch_jobs.py`
+  (`FetchJobs`: start, progress, finish, crash, results known at once, flags,
+  summary, eviction with the download grace window) and the browser and routes
+  use only that interface. No behaviour change; 39 tests (the old grace-window
+  tests moved there, plus the worker's success, error, crash and virus-scan
+  paths, which had no tests).
 - **Admin account created in the app, not in an environment variable.** On
   first start the sign-in page leads to a setup page that needs a one-time
   code, read from a private file in the config directory (`admin_setup_code`;

@@ -2,13 +2,13 @@
 nodes, split into live vs saved-copy, and nothing else."""
 
 import json
-import threading
 from unittest import mock
 
 import pytest
 from flask import Flask
 from flask_login import LoginManager
 
+from tests.job_table import JobsMixin
 from nomadnet_web import routes
 from nomadnet_web.cache import PageCache
 from nomadnet_web.kiosk_cache import KioskCache, kiosk_key
@@ -19,10 +19,9 @@ PRESCRIBED = "dd" * 16
 OTHER = "cc" * 16
 
 
-class Browser:
+class Browser(JobsMixin):
     def __init__(self):
-        self._jobs = {}
-        self._jobs_lock = threading.Lock()
+        self.__init_jobs__()
 
     def is_blocked(self, _h):
         return False
@@ -30,9 +29,8 @@ class Browser:
     def _record_fetch(self, *a, **k):
         pass
 
-    def fetch_page_async(self, *a, **k):
-        self._jobs["job1"] = {"status": "fetching"}
-        return "job1"
+    def fetch_page_async(self, *args, **k):
+        return self._fetch_jobs.start(args[0], args[1] if len(args) > 1 else "/")
 
 
 @pytest.fixture
