@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import admin_mock  # noqa: E402  (sits beside this file)
+import chrome_data  # noqa: E402
 
 app = Flask(__name__, template_folder=os.path.join(ROOT, "templates"),
             static_folder=os.path.join(ROOT, "static"))
@@ -39,6 +40,7 @@ DEFAULTS = {
     "access": None,        # /api/ui/settings "access" snapshot (None = omit)
     "ui_fail": False,      # make /api/ui/settings fail
     "admin": False,        # /api/auth/status says admin
+    "chrome": None,        # dev-only: "demo|worst|empty|one|huge" data for the interface around the page
     "admin_role": "admin", # who the real /admin pages see: "admin", "user", "anon", or "real" (use the real session)
     "admin_env_password": "",   # turns the ADMIN_PASSWORD override on
     "admin_account": None, # {"username", "password"}: start with the stored admin account set up
@@ -62,9 +64,29 @@ S = dict(DEFAULTS)
 admin_mock.mount(app, lambda: S)
 
 
+DATA_KINDS = ("demo", "worst", "empty", "one", "huge")
+TOGGLE_JS = """<script>(function(){var k=%r,kinds=%r;var b=document.createElement('div');
+b.style.cssText='position:fixed;left:50%%;bottom:8px;transform:translateX(-50%%);z-index:99999;display:flex;gap:2px;padding:3px;background:#ddd;border-radius:8px;font:12px system-ui;box-shadow:0 1px 4px #0006';
+kinds.forEach(function(n){var a=document.createElement('a');a.textContent=n;a.href='?data='+n;
+a.style.cssText='padding:4px 10px;border-radius:6px;text-decoration:none;color:#222;'+(n===k?'background:#fff;font-weight:600':'');b.appendChild(a)});
+document.body.appendChild(b)})()</script>"""
+
+
 @app.get("/")
 def index():
-    return render_template("index.html")
+    """Dev-only: ``?data=worst|demo|empty|one|huge`` picks the data the
+    interface around the page is drawn from, with a small switcher."""
+    kind = request.args.get("data")
+    if kind in DATA_KINDS:
+        S["chrome"] = kind
+    html = render_template("index.html")
+    if S.get("chrome"):
+        html = html.replace("</body>", TOGGLE_JS % (S["chrome"], list(DATA_KINDS)) + "</body>")
+    return html
+
+
+def _kind():
+    return S.get("chrome") or "demo"
 
 
 @app.get("/page/<path:rest>")
@@ -100,6 +122,13 @@ def setup_code():
     return jsonify(code=open(path).read().strip() if os.path.exists(path) else None)
 
 
+@app.post("/__admin_seed")
+def admin_seed():
+    """Dev-only: fill the admin pages with worst-case rows."""
+    admin_mock.seed_worst(app)
+    return jsonify(ok=True)
+
+
 @app.get("/__stats")
 def stats():
     return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
@@ -109,6 +138,10 @@ def stats():
 
 @app.get("/api/auth/status")
 def auth():
+    if S.get("chrome"):
+        return jsonify(logged_in=True, is_admin=True, super_admin=False,
+                       user={"name": chrome_data.user_name(_kind()), "email": ""},
+                       login_url="/auth/start", logout_url="/auth/logout", admin_url="/admin")
     return jsonify(logged_in=S["admin"], is_admin=S["admin"], user="admin" if S["admin"] else None)
 
 
@@ -117,6 +150,8 @@ def ui():
     if S["ui_fail"]:
         return jsonify(error="down"), 503
     d = {}
+    if S.get("chrome"):
+        d.update(chrome_data.ui(_kind()))
     if S["access"] is not None:
         d["access"] = S["access"]
     return jsonify(d)
@@ -180,6 +215,41 @@ def media():
     finally:
         with _media_lock:
             S["media_inflight"] -= 1
+
+
+@app.get("/api/calls/status")
+def calls_status():
+    return jsonify(status="idle")
+
+
+@app.get("/api/nodes")
+def api_nodes_chrome():
+    return jsonify(nodes=chrome_data.nodes(_kind())) if S.get("chrome") else jsonify([])
+
+
+@app.get("/api/lxmf-peers")
+def api_peers_chrome():
+    return jsonify(peers=chrome_data.peers(_kind())) if S.get("chrome") else jsonify([])
+
+
+@app.get("/api/relays")
+def api_relays_chrome():
+    return jsonify(relays=chrome_data.relays(_kind())) if S.get("chrome") else jsonify([])
+
+
+@app.get("/api/contacts")
+def api_contacts_chrome():
+    return jsonify(contacts=chrome_data.contacts(_kind()) if S.get("chrome") else [])
+
+
+@app.get("/api/messages/received")
+def api_received_chrome():
+    return jsonify(messages=chrome_data.messages(_kind())[0] if S.get("chrome") else [])
+
+
+@app.get("/api/messages/sent")
+def api_sent_chrome():
+    return jsonify(messages=chrome_data.messages(_kind())[1] if S.get("chrome") else [])
 
 
 @app.route("/api/<path:rest>", methods=["GET", "POST", "PUT", "DELETE"])

@@ -22,6 +22,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 log = logging.getLogger(__name__)
 
 
+MAX_USERNAME = 64
+
+
 class UserStore:
     def __init__(self, path: str):
         self._path = path
@@ -115,12 +118,17 @@ class UserStore:
         self, username: str, password: str, is_admin: bool = False
     ) -> tuple[Optional[dict], str]:
         """Create a local (non-OIDC) user. Returns (record, error_string)."""
+        username = (username or "").strip()
+        if not username:
+            return None, "Username is required"
+        if any(ord(c) < 32 or ord(c) == 127 for c in username):
+            return None, "Username must not contain control characters"
+        if len(username) > MAX_USERNAME:
+            return None, f"Username must be at most {MAX_USERNAME} characters"
         sub = f"local:{username}"
         with self._lock:
             if sub in self._data["users"]:
                 return None, "Username already exists"
-            if not username.strip():
-                return None, "Username is required"
             if len(password) < 8:
                 return None, "Password must be at least 8 characters"
             record = {

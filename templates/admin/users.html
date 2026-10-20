@@ -12,7 +12,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
       <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;">
         <label class="dim" style="font-size:11px;">Username</label>
-        <input type="text" name="username" required autocomplete="off"
+        <input type="text" name="username" required autocomplete="off" maxlength="64"
                style="background:var(--bg);border:1px solid var(--border);color:var(--text);
                       font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:2px;outline:none;">
       </div>
@@ -80,7 +80,7 @@
     <tbody>
       {% for u in users %}
       <tr>
-        <td>{{ u.name }}</td>
+        <td>{{ u.name or u.email or u.sub }}</td>
         <td class="dim" style="font-size:11px;">
           {% if u.get('local') %}
             <span style="color:var(--warn);">local</span>
@@ -88,7 +88,7 @@
             {{ u.email or u.sub }}
           {% endif %}
         </td>
-        <td class="dim">{{ u.last_seen | strftime }}</td>
+        <td class="dim nowrap">{{ u.last_seen | strftime }}</td>
         <td>
           {% if u.enabled %}
             <span class="badge badge-ok">enabled</span>

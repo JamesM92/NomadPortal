@@ -87,3 +87,46 @@ def mount(app, scenario):
     csrf_mod.init_csrf(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
+
+
+def seed_worst(app):
+    """Fill the admin stores with realistic worst-case rows (dev-only; the
+    ``/__admin_seed`` route calls this). Long names and addresses that real
+    deployments do have: federated emails, IPv6, long hostnames, names with
+    markup characters, empty and one-letter names."""
+    import yaml
+    from nomadnet_web import auth
+    store = app.config["USER_STORE"]
+    for name in ("aleksandra.wisniewska-kowalczyk", "Jo", "n" * 64, "o'brien<b>"):
+        store.create_local_user(name, "pw12345678", is_admin=(name == "Jo"))
+    for sub, email, name in (
+        ("oidc|1", "bartholomew.fitzgerald@northwind-industries-holdings.example.com", "Bartholomew Fitzgerald-Montgomery III"),
+        ("oidc|2", "x@y.io", ""),
+        ("oidc|3", "", "Мария Ивановна Петрова-Сидорова"),
+        ("oidc|4", "a.very.long.local.part.that.is.still.valid.under.rfc.5321@sub.domain.example.co.uk", "👩🏽‍🚀"),
+    ):
+        store.register_or_update(sub, email, name)
+    for i, (name, ip) in enumerate((
+        ("Aleksandra Wiśniewska-Kowalczyk", "2001:0db8:85a3:0000:0000:8a2e:0370:7334"),
+        ("Jo", "10.0.0.2"), ("", "203.0.113.200"),
+        ("bartholomew.fitzgerald@northwind-industries-holdings.example.com", "198.51.100.17"),
+    )):
+        auth._record_session(auth.OIDCUser(f"sess{i}", email=name if "@" in name else "", name=name, is_admin=(i == 0)), ip)
+    idstore = app.config["IDENTITY_STORE"]
+    for sub, name in (("local:aleksandra", "Aleksandra Wiśniewska-Kowalczyk"), ("oidc|1", "B" * 64), ("oidc|2", "")):
+        try:
+            idstore.ensure_for_user(sub, name)
+        except Exception:
+            pass
+    traffic = app.config["TRAFFIC"]
+    for path, n in (("/page/index.mu", 40), ("/page/" + "a-very-long-section-name/" * 6 + "index.mu", 12),
+                    ("/page/ünïcode/пример.mu", 5), ("/page/x?q=" + "z" * 120, 1)):
+        for _ in range(n):
+            traffic.record("ab" * 16, path, "web")
+    cfg = {"interfaces": {
+        "tcp_clients": [{"name": "Primary northern hub (Winnipeg) - do not remove, contact the operator first",
+                         "host": "a-really-long-hostname.subdomain.example-network-operations.co.uk", "port": 4242, "enabled": True},
+                        {"name": "H", "host": "h", "port": 1, "enabled": False}],
+        "auto": {"enabled": True}}}
+    with open(app.config["CONFIG_YML"], "w") as fh:
+        yaml.safe_dump(cfg, fh)

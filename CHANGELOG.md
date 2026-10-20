@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The interface around the page now copes with worst-case data.** Feeding the
+  header, sidebar lists, chat list and admin pages realistic worst-case data
+  found and fixed: a long site title or display name pushed Settings, Admin and
+  Sign out off the screen (the title and name now end in an ellipsis with the
+  full text in a tooltip, and the address bar keeps room; at phone width the
+  user links wrap); admin tables (Users, Sessions, Identities, Interfaces,
+  Settings) widened the whole page, so Disable/Delete could be out of reach
+  (they now scroll inside their card, long names wrap, "Last seen" stays on
+  one line); a long email as a chat name clipped its unread badge; ages read
+  "-7196s ago" or "9600h ago" (now "just now", "5d ago", "13mo ago", "never");
+  nodes and accounts with no name showed a blank row (they show the start of
+  the address, or email, or id); Escape did not close the Settings dialog;
+  a plain-text site title was written into the page as HTML (it is now text);
+  and usernames had no length limit (64 now, no control characters). The
+  rendered page area was not touched. The test mock has a dev-only
+  `?data=worst|demo|empty|one|huge` switch for this (`tests/e2e/chrome_data.py`),
+  and suite 17 keeps the fixes from regressing (41 checks).
 - **Page-fetch jobs have one owner.** The table of in-flight and finished page
   fetches used to be reached into directly by four places in the routes (they
   took its lock and wrote its entries). It now lives in `fetch_jobs.py`

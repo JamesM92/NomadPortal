@@ -35,7 +35,7 @@
           {% if s.email %}{{ s.email }}
           {% else %}{{ s.sub[:24] }}…{% endif %}
         </td>
-        <td class="dim">{{ s.login_at | strftime }}</td>
+        <td class="dim nowrap">{{ s.login_at | strftime }}</td>
         <td class="dim">
           {% if age < 60 %}{{ age }}s ago
           {% elif age < 3600 %}{{ (age // 60) }}m ago

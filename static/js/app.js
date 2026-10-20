@@ -307,7 +307,7 @@ function renderNodeList() {
   const filter = nodeFilter.value.trim().toLowerCase();
   const visible = filter
     ? _allNodes.filter(n =>
-        n.name.toLowerCase().includes(filter) ||
+        (n.name || '').toLowerCase().includes(filter) ||
         n.hash.toLowerCase().includes(filter))
     : _allNodes;
 
@@ -491,7 +491,7 @@ function makeNodeItem(node) {
     `<div class="node-icon-row">` +
       `<span class="node-identicon">${_identiconSvg(node.hash, 22, _RING_SITE)}</span>` +
       `<div class="node-text">` +
-        `<span class="node-name">${dot}${esc(node.name)}</span>` +
+        `<span class="node-name">${dot}${esc(node.name || node.hash.slice(0, 12) + '…')}</span>` +
         `<span class="node-hash">${node.hash.slice(0, 24)}…</span>` +
         `<span class="node-age">${age}</span>` +
       `</div>` +
@@ -648,10 +648,14 @@ async function removePageFavorite(hash, path) {
 }
 
 function formatAge(ts) {
+  if (!ts) return 'never';                       // 0 / missing: not seen yet
   const secs = Math.floor(Date.now() / 1000 - ts);
-  if (secs < 60)   return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 5)      return 'just now';          // includes clocks that are a little ahead
+  if (secs < 60)     return `${secs}s ago`;
+  if (secs < 3600)   return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400)  return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 86400 * 60) return `${Math.floor(secs / 86400)}d ago`;
+  return `${Math.floor(secs / (86400 * 30))}mo ago`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,7 +2121,13 @@ document.addEventListener('keydown', e => {
   }
   // Esc → close any visible modal; then blur the address bar
   if (e.key === 'Escape') {
-    const openModal = document.querySelector('#msg-modal:not([hidden])');
+    if (document.querySelector('#settings-modal:not([hidden])')) {
+      _closeSettingsModal();
+      e.preventDefault();
+      return;
+    }
+    const openModal = document.querySelector(
+      '#icon-picker-modal:not([hidden]), #qr-modal:not([hidden]), #msg-modal:not([hidden])');
     if (openModal) {
       openModal.hidden = true;
       e.preventDefault();
@@ -2304,6 +2314,7 @@ function applyAuthUI() {
   $('ub-user-section').hidden   = !logged_in;
   if (logged_in && user) {
     $('ub-name').textContent    = user.name || user.email || '';
+    $('ub-name').title          = user.email ? `${user.name || ''} <${user.email}>`.trim() : (user.name || '');
     $('ub-admin-badge').hidden  = !is_admin;
     $('ub-admin-link').hidden   = !is_admin;
     $('ub-admin-sep').hidden    = !is_admin;
@@ -4129,7 +4140,11 @@ function applyUISettings(s) {
   // App title — app_title_html is Micron-rendered; app_title is plain fallback
   if (s.app_title_html || s.app_title) {
     document.querySelectorAll('.brand').forEach(el => {
-      el.innerHTML = s.app_title_html || s.app_title;
+      // The server renders the title's Micron to HTML; the plain text is only
+      // a fallback and must never be treated as markup.
+      if (s.app_title_html) el.innerHTML = s.app_title_html;
+      else el.textContent = s.app_title;
+      el.title = s.app_title_plain || el.textContent;
     });
     document.title = s.app_title_plain || s.app_title || 'NomadNet';
   }

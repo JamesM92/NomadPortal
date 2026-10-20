@@ -33,7 +33,13 @@
     }
     #user-area a { color: var(--accent); text-decoration: none; }
     #user-area a:hover { text-decoration: underline; }
-    #user-area .user-name { color: var(--accent2); }
+    #user-area { flex-shrink: 0; }
+    /* A long display name or email is cut with an ellipsis (full name in the tooltip). */
+    #user-area .user-name {
+      color: var(--accent2);
+      display: inline-block; vertical-align: bottom;
+      max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     #user-area .ub-sep { color: var(--border); }
     #user-area .badge-admin {
       background: #1a2a1a; border: 1px solid var(--accent2);

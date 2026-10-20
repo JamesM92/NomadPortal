@@ -77,6 +77,8 @@ nav.admin-nav a.active { color: var(--accent2); border-bottom-color: var(--accen
 /* Tables */
 table.admin-table {
   width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px;
+  /* A wide table scrolls inside its card instead of widening the page. */
+  display: block; max-width: 100%; overflow-x: auto;
 }
 table.admin-table th {
   text-align: left; padding: 7px 10px;
@@ -87,7 +89,9 @@ table.admin-table th {
 table.admin-table td {
   padding: 8px 10px; border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  overflow-wrap: anywhere;      /* a long unbroken name wraps instead of stretching the table */
 }
+table.admin-table td.nowrap, table.admin-table th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 table.admin-table tr:last-child td { border-bottom: none; }
 table.admin-table tr:hover td { background: var(--bg3); }
 

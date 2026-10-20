@@ -111,6 +111,13 @@ body {
   white-space: nowrap;
   font-size: 14px;
   user-select: none;
+  /* A long site title shrinks with an ellipsis (the full title is in the
+     tooltip) instead of pushing the user area off the screen. */
+  flex: 0 1 auto;
+  min-width: 5em;
+  max-width: 30vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Desktop sidebar collapse toggle — mobile has its own hamburger
@@ -123,6 +130,7 @@ body {
   align-items: center;
   gap: 4px;
   flex: 1;
+  min-width: 0;          /* lets the address bar shrink instead of forcing the bar wider */
 }
 #nav-bar[hidden] { display: none; }
 
@@ -141,6 +149,7 @@ body {
 
 #address-bar {
   flex: 1;
+  min-width: 8em;        /* stays usable next to a long title; the bar wraps below 640px */
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
@@ -1112,9 +1121,13 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 6px;
   margin-bottom: 2px;
 }
-.conv-name { font-size: 12px; color: var(--text-dim); }
+/* min-width:0 + overflow-wrap lets a long unbroken name (an email) wrap
+   inside the row, so the unread badge and the time stay visible. */
+.conv-name { font-size: 12px; color: var(--text-dim); flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.conv-time { flex-shrink: 0; }
 .conv-time { font-size: 10px; color: var(--text-dim); flex-shrink: 0; margin-left: 4px; }
 .conv-preview {
   font-size: 11px;
@@ -1263,7 +1276,12 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   #nav-bar { order: 2; width: 100%; }
   #topbar-actions { order: 3; }
   #status-indicator { order: 4; }
-  #user-area { order: 5; border-left: none; padding-left: 0; }
+  #user-area { order: 5; border-left: none; padding-left: 0; flex-wrap: wrap; row-gap: 2px; max-width: 100%; }
+  #user-area .user-name { max-width: 9em; }
+  /* The name, badge and links wrap onto a second line instead of widening the page.
+     (:not([hidden]) because an id rule's display would otherwise beat the hidden attribute.) */
+  #ub-user-section:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+  .brand { max-width: 100%; }
   /* Mobile has its own hamburger (#btn-sidebar-toggle, injected by
      _initMobileSidebar) for opening/closing the full-page overlay —
      this desktop-only collapse control would be a confusing second
