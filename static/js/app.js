@@ -2938,78 +2938,9 @@ async function refreshChats() {
   } catch (_) {}
 }
 
-// ---------------------------------------------------------------------------
-// Conversation filter (All / Trusted / Untrusted), pinning and peer notes --
-// NomadNet 1.2.0's conversation extras. A peer nobody has classified is
-// "unknown" and is listed with the untrusted ones; "All" is the default so
-// nobody's existing conversations vanish into a tab.
-// ---------------------------------------------------------------------------
-const _CHAT_FILTERS = ['all', 'trusted', 'untrusted'];
-let _chatFilter = 'all';
-try {
-  const saved = localStorage.getItem('chatFilter');
-  if (_CHAT_FILTERS.includes(saved)) _chatFilter = saved;
-} catch (_) {}
-
-function _trustOf(hash) {
-  const c = _contacts.find(x => x.hash === hash);
-  return (c && c.trust) || 'unknown';
-}
-
-function _inFilter(hash, filter) {
-  const t = _trustOf(hash);
-  if (filter === 'trusted')   return t === 'trusted';
-  if (filter === 'untrusted') return t !== 'trusted';       // unknown + untrusted
-  return true;
-}
-
-// Pinned conversations first; otherwise the order they arrive in (newest first).
-function _visibleConversations(conversations) {
-  const isPinned = c => !!(_contacts.find(x => x.hash === c.hash) || {}).pinned;
-  return conversations
-    .filter(c => _inFilter(c.hash, _chatFilter))
-    .map((c, i) => ({ c, i, pin: isPinned(c) ? 0 : 1 }))
-    .sort((a, b) => a.pin - b.pin || a.i - b.i)
-    .map(x => x.c);
-}
-
-function _renderChatFilters(conversations) {
-  document.querySelectorAll('.chat-filter').forEach(btn => {
-    const f = btn.dataset.filter;
-    const inF = conversations.filter(c => _inFilter(c.hash, f));
-    const unread = inF.reduce((n, c) => n + (c.unread || 0), 0);
-    const label = f.charAt(0).toUpperCase() + f.slice(1);
-    btn.textContent = `${label} (${inF.length})`;
-    if (unread > 0) {
-      const badge = document.createElement('span');
-      badge.className = 'chat-filter-unread';
-      badge.textContent = unread;
-      btn.appendChild(badge);
-    }
-    btn.classList.toggle('active', f === _chatFilter);
-    btn.setAttribute('aria-selected', f === _chatFilter ? 'true' : 'false');
-  });
-}
-
-document.querySelectorAll('.chat-filter').forEach(btn => {
-  btn.addEventListener('click', () => {
-    _chatFilter = btn.dataset.filter;
-    try { localStorage.setItem('chatFilter', _chatFilter); } catch (_) {}
-    renderConversationList(_allConversations);
-  });
-});
-
 function renderConversationList(conversations) {
   const inner = $('chat-list-inner');
   if (!inner) return;
-  _renderChatFilters(conversations);
-  const total = conversations.length;
-  conversations = _visibleConversations(conversations);
-  if (total && !conversations.length) {
-    inner.innerHTML = '<div class="msg-empty">No ' +
-      (_chatFilter === 'all' ? '' : _chatFilter + ' ') + 'conversations.</div>';
-    return;
-  }
   if (!conversations.length) {
     inner.innerHTML =
       '<div class="msg-empty">' +
@@ -3048,16 +2979,12 @@ function renderConversationList(conversations) {
     const callBadge = peer?.call_capable
       ? ' <span title="This contact has announced call support (lxst.telephony)">&#128222;</span>'
       : '';
-    const pinMark = contact?.pinned
-      ? '<span class="conv-pin" title="Pinned">&#128204;</span>' : '';
-    const noteMark = contact?.note
-      ? ` <span class="conv-note" title="${esc(String(contact.note).slice(0, 200))}">&#128221;</span>` : '';
     const convIcon = _contactIcon(contact, 36);
     el.innerHTML =
       (convIcon ? `<div style="width:36px;height:36px;flex-shrink:0;">${convIcon}</div>` : '') +
       `<div style="flex:1;min-width:0;">` +
         `<div class="conv-header">` +
-          `<span class="conv-name">${pinMark}${esc(name)}${noteMark}${callBadge}${badge}${blockedLabel}</span>` +
+          `<span class="conv-name">${esc(name)}${callBadge}${badge}${blockedLabel}</span>` +
           `<span class="conv-time">${formatAge(conv.lastTime)}</span>` +
         `</div>` +
         `<div class="conv-preview">` +
@@ -3313,61 +3240,6 @@ $('btn-rename-chat').addEventListener('click', () => {
     if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
     if (e.key === 'Escape') { input.value = current; input.blur(); }
   });
-});
-
-// Peer info: trust level, pin and notes for the open conversation.
-const _peerModal = $('peer-modal');
-function _peerStatus(msg, bad) {
-  const el = $('peer-modal-status');
-  el.textContent = msg || '';
-  el.style.color = bad ? 'var(--error)' : 'var(--text-dim)';
-}
-function _openPeerInfo() {
-  if (!_currentConvHash) return;
-  const c = _contacts.find(x => x.hash === _currentConvHash) || {};
-  $('peer-modal-hash').textContent = _currentConvHash;
-  const trust = c.trust || 'unknown';
-  document.querySelectorAll('input[name="peer-trust"]').forEach(r => { r.checked = (r.value === trust); });
-  $('peer-pinned').checked = !!c.pinned;
-  $('peer-note').value = c.note || '';
-  _peerStatus('');
-  _peerModal.hidden = false;
-  const first = document.querySelector('input[name="peer-trust"]:checked');
-  if (first) first.focus();
-}
-function _closePeerInfo() {
-  _peerModal.hidden = true;
-  const b = $('btn-peer-info');
-  if (b) b.focus();
-}
-$('btn-peer-info').addEventListener('click', _openPeerInfo);
-$('btn-peer-cancel').addEventListener('click', _closePeerInfo);
-_peerModal.addEventListener('click', e => { if (e.target === _peerModal) _closePeerInfo(); });
-_peerModal.addEventListener('keydown', e => { if (e.key === 'Escape') _closePeerInfo(); });
-$('btn-peer-save').addEventListener('click', async () => {
-  const hash = _currentConvHash;
-  if (!hash) return;
-  const picked = document.querySelector('input[name="peer-trust"]:checked');
-  const body = {
-    trust:  picked ? picked.value : 'unknown',
-    pinned: $('peer-pinned').checked,
-    note:   $('peer-note').value,
-  };
-  _peerStatus('Saving…');
-  try {
-    const d = await apiFetch(`/api/contacts/${encodeURIComponent(hash)}/settings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const i = _contacts.findIndex(x => x.hash === hash);
-    if (i >= 0) _contacts[i] = { ..._contacts[i], ...d.contact };
-    else _contacts = [..._contacts, d.contact];
-    _closePeerInfo();
-    loadContacts();
-  } catch (err) {
-    _peerStatus(humanizeError(err.message), true);
-  }
 });
 
 $('btn-block-chat').addEventListener('click', async () => {
