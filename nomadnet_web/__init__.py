@@ -216,13 +216,6 @@ def create_app(
     app.config["USER_STORE"]  = UserStore(users_yml)
     app.config["UI_SETTINGS"] = UISettings(config_dir)   # must be before site server
 
-    # Incoming-message proof of work (Admin → Settings). Applied before the
-    # deferred startup creates any delivery identity, so each one registers
-    # with the right cost from the start.
-    _ui_boot = app.config["UI_SETTINGS"].get_all()
-    messaging.set_stamp_policy(_ui_boot.get("lxmf_stamp_cost", 0),
-                               _ui_boot.get("lxmf_enforce_stamps", False))
-
     # Kiosk pre-warm: keeps the prescribed nodes' landing pages (and their
     # same-node links) fresh in the kiosk cache so a first-time visitor
     # rarely waits on the mesh. Reads the prescribed list live, so an

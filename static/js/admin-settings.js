@@ -143,8 +143,6 @@
       payload.site_name     = document.getElementById('s-site-name').value.trim();
       payload.default_node  = document.getElementById('s-default-node').value.trim().toLowerCase();
       payload.prescribed_nodes = document.getElementById('s-prescribed-nodes').value;
-      payload.lxmf_stamp_cost = parseInt(document.getElementById('s-stamp-cost').value || '0', 10) || 0;
-      payload.lxmf_enforce_stamps = document.getElementById('s-stamp-enforce').checked;
       payload.abuse_contact = document.getElementById('s-abuse-contact').value.trim();
       // Site-hosting tri-state. Empty string from the dropdown means
       // "fall through to env var" — send as null so the server keeps
