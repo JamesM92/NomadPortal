@@ -33,11 +33,7 @@ the default-node keepalive is exactly the recovery mechanism we
 already have.
 """
 
-import json
 import logging
-import os
-import re
-import tempfile
 import threading
 import time
 from typing import Optional
@@ -70,56 +66,6 @@ NODE_FRESHNESS_S = 60 * 60 * 6  # 6 h
 # one lxmf.propagation announce before we look at the pool.
 STARTUP_GRACE_S = 60
 
-# Shortest time between two "Sync now" presses by the same account, so the
-# button cannot be used to hammer a propagation node.
-MANUAL_SYNC_COOLDOWN_S = 10
-
-# What LXMRouter.propagation_transfer_state means, in words for a person.
-# (name, still_working). Codes 1-6 are a transfer in progress; 7 is done;
-# 240 and above are the ways it can fail.
-_TRANSFER_STATES = {
-    0:   ("idle", False),
-    1:   ("finding a path", True),
-    2:   ("connecting", True),
-    3:   ("connected", True),
-    4:   ("asking for messages", True),
-    5:   ("receiving messages", True),
-    6:   ("processing messages", True),
-    7:   ("complete", False),
-    10:  ("timed out finding a path", False),
-    240: ("no path to the node", False),
-    241: ("could not connect to the node", False),
-    242: ("the transfer failed", False),
-    243: ("the node did not receive your identity", False),
-    244: ("the node refused access", False),
-    254: ("failed", False),
-}
-
-_NODE_HEX_RE = re.compile(r"[0-9a-f]{32}")      # a 128-bit destination hash
-
-
-def transfer_state_name(code) -> tuple:
-    """``(words, still_working)`` for a router transfer-state code."""
-    if code is None:
-        return "idle", False
-    return _TRANSFER_STATES.get(code, ("unknown", False))
-
-
-def _parse_node_hex(value) -> Optional[bytes]:
-    """A propagation node hash from user input: None for blank, bytes for
-    32 hex characters, ValueError for anything else."""
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("A node hash must be text")
-    v = value.strip().lower()
-    if not v:
-        return None
-    if not _NODE_HEX_RE.fullmatch(v):
-        raise ValueError("A node hash is 32 hexadecimal characters")
-    return bytes.fromhex(v)
-
-
 # How often the loop wakes up to check the interval. Small enough that
 # a re-pick trigger takes effect quickly; large enough that CPU is
 # negligible when nothing needs to happen.
@@ -142,25 +88,13 @@ class PropagationSyncService:
         own default-node keepalive as belt-and-braces)
     """
 
-    def __init__(self, rns, messaging_service, storage_dir: Optional[str] = None) -> None:
+    def __init__(self, rns, messaging_service) -> None:
         """Store references. Does NOT touch RNS.Transport yet — call
         ``start()`` to register the announce handler and launch the
         loop. Keeps the constructor safe to call before RNS is up.
-
-        ``storage_dir`` (optional) is where each account's chosen node is
-        kept between restarts.
         """
         self._rns = rns
         self._messaging = messaging_service
-
-        # user_sub -> bytes: a node the account chose instead of the
-        # automatic pick. Missing means automatic.
-        self._prefs: dict = {}
-        self._prefs_lock = threading.Lock()
-        self._prefs_path = (os.path.join(storage_dir, "propagation_prefs.json")
-                            if storage_dir else None)
-        self._last_manual: dict = {}          # user_sub -> time of the last "Sync now"
-        self._load_prefs()
 
         # bytes(destination_hash) → {"hops": int, "first_seen": float,
         #                            "last_seen": float,
@@ -416,7 +350,7 @@ class PropagationSyncService:
                     for status in self._status_by_user.values():
                         status["consecutive_failures"] = 0
 
-        if self._picked is None and not self._prefs:
+        if self._picked is None:
             log.info(
                 "PropagationSyncService: no propagation node known yet "
                 "— skipping tick"
@@ -435,8 +369,8 @@ class PropagationSyncService:
         for user_sub, data in routers:
             self._sync_one(user_sub, data)
 
-    def _sync_one(self, user_sub: str, data: dict) -> bool:
-        """Fire one sync for one router. True if the request went out."""
+    def _sync_one(self, user_sub: str, data: dict) -> None:
+        """Fire one sync for one router."""
         router = data.get("router")
         identity = data.get("identity")
         if router is None or identity is None:
@@ -447,17 +381,13 @@ class PropagationSyncService:
                 "present" if router is not None else "missing",
                 "present" if identity is not None else "missing",
             )
-            return False
-
-        node = self.effective_node_for(user_sub)
-        if node is None:
-            return False
+            return
 
         try:
-            router.set_outbound_propagation_node(node)
+            router.set_outbound_propagation_node(self._picked)
         except Exception as exc:
             self._record_failure(user_sub, exc)
-            return False
+            return
 
         try:
             router.request_messages_from_propagation_node(identity)
@@ -466,152 +396,17 @@ class PropagationSyncService:
                 "PropagationSyncService: sync ok for user %s "
                 "→ propagation %s",
                 (user_sub or "anon")[:16],
-                node.hex()[:16],
+                self._picked.hex()[:16],
             )
-            return True
         except Exception as exc:
             self._record_failure(user_sub, exc)
             log.info(
                 "PropagationSyncService: sync failed for user %s "
                 "→ propagation %s: %s",
                 (user_sub or "anon")[:16],
-                node.hex()[:16],
+                self._picked.hex()[:16],
                 exc,
             )
-            return False
-
-    # ------------------------------------------------------------------
-    # Choosing a node, syncing on demand, reporting status
-    # ------------------------------------------------------------------
-
-    def preferred_for(self, user_sub: str) -> Optional[bytes]:
-        """The node this account chose, or None for automatic."""
-        with self._prefs_lock:
-            return self._prefs.get(user_sub)
-
-    def effective_node_for(self, user_sub: str) -> Optional[bytes]:
-        """The node this account's messages actually use: its own choice,
-        otherwise the automatic pick."""
-        return self.preferred_for(user_sub) or self._picked
-
-    def set_preferred(self, user_sub: str, node_hex) -> None:
-        """Pin a propagation node for this account (32 hex characters, a
-        node heard on the network or typed in by hand), or pass None or an
-        empty string to go back to automatic. Raises ValueError for a
-        value that is not a node hash; nothing changes then."""
-        node = _parse_node_hex(node_hex)
-        with self._prefs_lock:
-            if node is None:
-                self._prefs.pop(user_sub, None)
-            else:
-                self._prefs[user_sub] = node
-            snapshot = {sub: n.hex() for sub, n in self._prefs.items()}
-        self._save_prefs(snapshot)
-
-    def _routers_of(self, user_sub: str) -> list:
-        try:
-            return [data for sub, data in self._messaging.active_routers() if sub == user_sub]
-        except Exception:
-            log.exception("PropagationSyncService: could not read active routers")
-            return []
-
-    def sync_now(self, user_sub: str) -> dict:
-        """Collect this account's waiting messages now instead of at the
-        next 5-minute pass. The transfer itself runs in the background;
-        ``status_for`` shows how it is going. Returns ``{"ok", "error",
-        "node"}``."""
-        routers = self._routers_of(user_sub)
-        if not routers:
-            return {"ok": False, "node": None,
-                    "error": "There is no delivery identity to sync for this account."}
-        node = self.effective_node_for(user_sub)
-        if node is None:
-            return {"ok": False, "node": None,
-                    "error": "No propagation node is known yet. Wait for one to announce, or enter one by hand."}
-        now = time.time()
-        with self._status_lock:
-            last = self._last_manual.get(user_sub, 0.0)
-            if now - last < MANUAL_SYNC_COOLDOWN_S:
-                return {"ok": False, "node": node.hex(),
-                        "error": "Please wait a few seconds before syncing again."}
-            self._last_manual[user_sub] = now
-        started = [self._sync_one(user_sub, data) for data in routers]
-        if any(started):
-            return {"ok": True, "node": node.hex(), "error": None}
-        with self._status_lock:
-            err = (self._status_by_user.get(user_sub) or {}).get("last_error")
-        return {"ok": False, "node": node.hex(), "error": err or "The sync could not be started."}
-
-    def status_for(self, user_sub: str) -> dict:
-        """Everything the picker needs for one account: which node is in
-        use and why, the nodes heard so far, when the last sync happened
-        and how the current one is going."""
-        pref = self.preferred_for(user_sub)
-        node = self.effective_node_for(user_sub)
-        nodes = self.list_known_nodes()
-        for n in nodes:
-            n["preferred"] = (pref is not None and n["hash"] == pref.hex())
-        if pref is not None and pref.hex() not in {n["hash"] for n in nodes}:
-            nodes.append({"hash": pref.hex(), "hops": None, "first_seen": None, "last_seen": None,
-                          "announce_count": 0, "picked": False, "preferred": True})
-        nodes.sort(key=lambda n: (not n["preferred"], n["hops"] if n["hops"] is not None else 999,
-                                  -(n["last_seen"] or 0)))
-        with self._status_lock:
-            st = dict(self._status_by_user.get(user_sub) or {})
-        routers = self._routers_of(user_sub)
-        router = routers[0]["router"] if routers else None
-        code = getattr(router, "propagation_transfer_state", None)
-        words, active = transfer_state_name(code)
-        return {
-            "mode": "manual" if pref is not None else "auto",
-            "node": node.hex() if node else None,
-            "preferred": pref.hex() if pref else None,
-            "picked": self._picked.hex() if self._picked else None,
-            "nodes": nodes,
-            "last_synced_at": st.get("last_synced_at"),
-            "last_error": st.get("last_error"),
-            "consecutive_failures": st.get("consecutive_failures", 0),
-            "transfer": {
-                "state": words,
-                "code": code,
-                "active": active,
-                "progress": getattr(router, "propagation_transfer_progress", 0.0) or 0.0,
-                "last_result": getattr(router, "propagation_transfer_last_result", None),
-                "last_duplicates": getattr(router, "propagation_transfer_last_duplicates", None),
-            },
-        }
-
-    def _load_prefs(self) -> None:
-        if not self._prefs_path:
-            return
-        try:
-            with open(self._prefs_path, "r", encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except FileNotFoundError:
-            return
-        except (OSError, ValueError):
-            log.warning("PropagationSyncService: preferences file unreadable, ignoring it")
-            return
-        if not isinstance(raw, dict):
-            return
-        for sub, value in raw.items():
-            try:
-                node = _parse_node_hex(value)
-            except ValueError:
-                continue
-            if node is not None:
-                self._prefs[str(sub)] = node
-
-    def _save_prefs(self, snapshot: dict) -> None:
-        if not self._prefs_path:
-            return
-        try:
-            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self._prefs_path), suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(snapshot, fh)
-            os.replace(tmp, self._prefs_path)
-        except OSError:
-            log.exception("PropagationSyncService: could not save preferences")
 
     # ------------------------------------------------------------------
     # Node selection

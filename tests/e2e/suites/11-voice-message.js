@@ -278,19 +278,11 @@ async function recorderChecks(ctx) {
   await p.keyboard.press('Escape');
   ctx.check(await p.locator('#chat-voice-bar').isHidden() && await tracksEnded(p), 'Escape cancels a recording and releases the microphone');
 
-  // 5. a recording that is far too short is not sent. Start and stop happen
-  //    inside one page call, so the length does not depend on how busy the
-  //    machine running the test is.
-  await p.evaluate(async () => {
-    document.getElementById('btn-chat-voice').click();
-    await new Promise(resolve => {
-      const t = setInterval(() => {
-        if (!document.getElementById('chat-voice-bar').hidden) { clearInterval(t); resolve(); }
-      }, 5);
-    });
-    document.getElementById('btn-voice-stop').click();
-  });
-  await p.waitForFunction(() => document.getElementById('chat-voice-bar').hidden && !document.getElementById('btn-chat-voice').disabled, null, { timeout: 5000 });
+  // 5. a recording that is far too short is not sent
+  await p.click('#btn-chat-voice');
+  await p.waitForSelector('#chat-voice-bar', { state: 'visible', timeout: 5000 });
+  await p.click('#btn-voice-stop');
+  await p.waitForFunction(() => document.getElementById('chat-voice-bar').hidden, null, { timeout: 5000 });
   ctx.check(await p.locator('#chat-attach-list .attach-chip').count() === 0, 'a recording under half a second is dropped, not staged');
 
   // 6. permission denied: a clear message, nothing stuck

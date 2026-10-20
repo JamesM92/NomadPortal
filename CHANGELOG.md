@@ -9,26 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Propagation nodes: choose one, sync on demand, and use it when a message
-  cannot be delivered (MeshChat parity).** New **Settings → Propagation**
-  tab: pick a node from the ones the portal has heard (with distance and
-  when it was last heard), type one in by hand (as NomadNet 1.2.0 now
-  allows), or leave it on Automatic (the nearest, as before). The choice
-  is per account and survives a restart. **Sync now** collects waiting
-  messages immediately (no more than once every 10 seconds) and the tab shows
-  the progress, how many messages arrived and how many you already had, when
-  the last sync was, and any problem; the inbox refreshes afterwards. New
-  ``GET /api/propagation``, ``POST /api/propagation/node`` and
-  ``POST /api/propagation/sync``. **Correction:** until now the node only
-  affected *receiving*; the portal never sent through a node, so a message to
-  an offline person just failed. Now, when direct delivery fails and the
-  sender has a node, the message is handed to it and shows as **stored on a
-  relay**. It never says "delivered", because the node accepting it is not
-  the recipient having it. This never happens for a cancelled message, never
-  loops, and not when no node is known. It can be turned off in Admin →
-  Settings. A message the node holds cannot be cancelled. 81 new tests (the
-  fallback runs the real delivery code against fakes) and 18 browser checks.
-  See check I in docs/design/validation-suite.md.
 - **Voice messages (MeshChat parity).** A microphone button beside the
   paperclip records a voice message: it is encoded as Opus with the
   browser's WebCodecs encoder (the same settings as voice calls), wrapped
@@ -174,10 +154,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 163 checks across twelve suites (saved-copy
+  against a small mock backend: 146 checks across eleven suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, inline images, conversation extras, send control, voice messages, and propagation). It runs as a new CI job,
+  partials, inline images, conversation extras, send control, and voice messages). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real

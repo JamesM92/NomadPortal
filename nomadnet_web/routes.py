@@ -1545,54 +1545,6 @@ def api_conversation_delete(hash_hex: str):
     return jsonify({"ok": True, "removed": removed})
 
 
-# ---------------------------------------------------------------------------
-# Propagation node: which one this account uses, and syncing on demand
-# ---------------------------------------------------------------------------
-
-def _prop_sync():
-    svc = current_app.config.get("PROP_SYNC")
-    if svc is None:
-        abort(503)
-    return svc
-
-
-@bp.get("/api/propagation")
-@login_required
-def api_propagation():
-    """The propagation node this account uses (its own choice or the
-    automatic pick), the nodes heard so far, and how the last sync went."""
-    return jsonify(_prop_sync().status_for(current_user.id))
-
-
-@bp.post("/api/propagation/node")
-@login_required
-def api_propagation_set_node():
-    """Pin a propagation node (``{"node": "<32 hex>"}``) or go back to
-    automatic (``{"node": ""}``)."""
-    data = request.get_json(silent=True) or {}
-    svc = _prop_sync()
-    try:
-        svc.set_preferred(current_user.id, data.get("node"))
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    return jsonify({"ok": True, **svc.status_for(current_user.id)})
-
-
-@bp.post("/api/propagation/sync")
-@login_required
-def api_propagation_sync():
-    """Collect this account's waiting messages now. The transfer runs in the
-    background; poll ``GET /api/propagation`` to follow it."""
-    ip = request.remote_addr or "unknown"
-    if not rate_limit.check(f"prop:{ip}", 12, 60):
-        return jsonify({"ok": False, "error": "Rate limit exceeded — slow down"}), 429
-    svc = _prop_sync()
-    out = svc.sync_now(current_user.id)
-    if not out["ok"]:
-        return jsonify({"ok": False, "error": out["error"]}), 409
-    return jsonify({"ok": True, **svc.status_for(current_user.id)})
-
-
 def _message_action(action) -> tuple:
     """Shared body for cancel / retry: the sender's own message only."""
     messaging = current_app.config.get("MESSAGING")

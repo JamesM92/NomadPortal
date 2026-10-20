@@ -3283,12 +3283,7 @@ function renderChatLog(messages, { forceScroll = false } = {}) {
     if (m.direction === 'sent') {
       const bad = m.state === 'failed' || m.state === 'cancelled';
       const cls = m.state === 'delivered' ? 'ok' : bad ? 'fail' : 'pend';
-      // "held": a propagation node has the message but the recipient has not
-      // collected it, which is not the same as delivered.
-      const label = m.state === 'held' ? 'stored on a relay' : m.state;
-      const tip = m.state === 'held'
-        ? ' title="A propagation node is holding this message until the recipient collects it."' : '';
-      inner += ` <span class="chat-state-${cls}"${tip}>${esc(label)}</span>`;
+      inner += ` <span class="chat-state-${cls}">${esc(m.state)}</span>`;
       if (m.resends) {
         inner += ` <span class="chat-resent" title="Sent again automatically when the recipient came back online">&#8635;${esc(m.resends)}</span>`;
       }
@@ -4751,7 +4746,6 @@ function _openSettingsModal(tab) {
 }
 function _closeSettingsModal() {
   $('settings-modal').hidden = true;
-  _stopPropagationPolling();
   // Stops the status/output polling loop, not the session itself — a
   // live rnsh session keeps running server-side (RnshManager doesn't
   // tear it down just because nobody's watching); reopening the
@@ -4767,8 +4761,6 @@ function _switchSettingsTab(tab) {
   $('settings-panel-identities').hidden = tab !== 'identities';
   $('settings-panel-terminal').hidden   = tab !== 'terminal';
   $('settings-panel-calls').hidden      = tab !== 'calls';
-  $('settings-panel-propagation').hidden = tab !== 'propagation';
-  if (tab !== 'propagation') _stopPropagationPolling();
   if (tab === 'identities') {
     _loadIdentitiesList();
   } else if (tab === 'terminal') {
@@ -4776,120 +4768,8 @@ function _switchSettingsTab(tab) {
   } else if (tab === 'calls') {
     _loadCallsSettings();
     _loadCallsHistory();
-  } else if (tab === 'propagation') {
-    _loadPropagation();
   }
 }
-
-// ---- Propagation: which node this account uses, and sync on demand ----
-let _propTimer = null;
-function _stopPropagationPolling() {
-  if (_propTimer) { clearTimeout(_propTimer); _propTimer = null; }
-}
-
-function _propShort(hash) { return hash.slice(0, 8) + '…' + hash.slice(-4); }
-
-function _renderPropagation(st) {
-  const sel = $('prop-node-select');
-  sel.innerHTML = '';
-  const auto = document.createElement('option');
-  auto.value = '';
-  auto.textContent = st.picked
-    ? `Automatic (the nearest: ${_propShort(st.picked)})`
-    : 'Automatic (no node heard yet)';
-  sel.appendChild(auto);
-  for (const n of st.nodes || []) {
-    const o = document.createElement('option');
-    o.value = n.hash;
-    const where = n.hops == null ? 'not heard on the network'
-      : `${n.hops} hop${n.hops === 1 ? '' : 's'}, heard ${formatAge(n.last_seen)}`;
-    o.textContent = `${_propShort(n.hash)} · ${where}`;
-    sel.appendChild(o);
-  }
-  sel.value = st.preferred || '';
-
-  const lines = [];
-  lines.push(st.node
-    ? `Using ${_propShort(st.node)} (${st.mode === 'manual' ? 'your choice' : 'chosen automatically'}).`
-    : 'No propagation node is known yet. One will be used when it announces, or enter one by hand.');
-  lines.push(st.last_synced_at ? `Last sync: ${formatAge(st.last_synced_at)}.` : 'Not synced yet.');
-  const t = st.transfer || {};
-  if (t.active) {
-    lines.push(`Collecting messages: ${t.state}${t.progress ? ` (${Math.round(t.progress * 100)}%)` : ''}…`);
-  } else if (t.last_result != null && t.state === 'complete') {
-    const dup = t.last_duplicates ? `, ${t.last_duplicates} you already had` : '';
-    lines.push(`Last collection: ${t.last_result} new message${t.last_result === 1 ? '' : 's'}${dup}.`);
-  } else if (t.state && t.state !== 'idle') {
-    lines.push(`Last attempt: ${t.state}.`);
-  }
-  if (st.last_error) lines.push(`Problem: ${st.last_error}`);
-  const box = $('prop-status');
-  box.textContent = '';
-  lines.forEach(l => { const d = document.createElement('div'); d.textContent = l; box.appendChild(d); });
-  return !!t.active;
-}
-
-async function _loadPropagation({ follow = false } = {}) {
-  const err = $('prop-error');
-  try {
-    const st = await apiFetch('/api/propagation');
-    const working = _renderPropagation(st);
-    if (follow && working) {
-      _stopPropagationPolling();
-      _propTimer = setTimeout(() => _loadPropagation({ follow: true }), 1500);
-    } else if (follow) {
-      refreshChats();                // what was collected is now in the inbox
-    }
-  } catch (e) {
-    err.hidden = false;
-    err.textContent = `Could not load propagation settings: ${humanizeError(e.message)}`;
-  }
-}
-
-async function _setPropagationNode(value) {
-  const err = $('prop-error');
-  err.hidden = true;
-  try {
-    const st = await apiFetch('/api/propagation/node', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node: value }),
-    });
-    _renderPropagation(st);
-    $('prop-node-input').value = '';
-  } catch (e) {
-    err.hidden = false;
-    err.textContent = humanizeError(e.message);
-    _loadPropagation();
-  }
-}
-
-$('prop-node-select')?.addEventListener('change', e => _setPropagationNode(e.target.value));
-$('btn-prop-use')?.addEventListener('click', () => {
-  const v = $('prop-node-input').value.trim();
-  if (v) _setPropagationNode(v);
-});
-$('prop-node-input')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); $('btn-prop-use').click(); }
-});
-$('btn-prop-sync')?.addEventListener('click', async () => {
-  const btn = $('btn-prop-sync');
-  const err = $('prop-error');
-  err.hidden = true;
-  btn.disabled = true;
-  try {
-    const st = await apiFetch('/api/propagation/sync', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    _renderPropagation(st);
-    _loadPropagation({ follow: true });
-  } catch (e) {
-    err.hidden = false;
-    err.textContent = humanizeError(e.message);
-  } finally {
-    btn.disabled = false;
-  }
-});
 
 $('btn-settings')?.addEventListener('click', () => _openSettingsModal('identities'));
 $('btn-settings-close')?.addEventListener('click', _closeSettingsModal);
