@@ -52,13 +52,7 @@ class TestRememberIdentity:
     """Uses real Reticulum identities (no network needed)."""
 
     @pytest.fixture
-    def ident(self, monkeypatch):
-        # Newer Reticulum's recall() notes the lookup on the running instance;
-        # there is none here, so give it one that ignores the note.
-        class _Instance:
-            def _used_destination_data(self, _h):
-                pass
-        monkeypatch.setattr(RNS.Reticulum, "get_instance", staticmethod(lambda: _Instance()))
+    def ident(self):
         i = RNS.Identity()
         dest = RNS.Destination.hash_from_name_and_identity("lxmf.delivery", i)
         yield i, dest
