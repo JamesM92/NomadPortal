@@ -265,7 +265,7 @@ The three parts, separated by backticks, are: the page to show, how often to rel
 - The shortest reload time is 10 seconds, and reloading stops while the browser tab is hidden or the reader leaves the page.
 - A page can show at most 10 partials. A partial can contain partials, but only two levels deep. Anything beyond that shows as plain text.
 - If a partial cannot load, the reader sees a short note. If a reload fails, the last good content stays on screen.
-- Search engines and link previews see the plain `[live]` text, not the loaded content.
+- Search engines and link previews get the content too, for a partial that has no settings other than `pid` and that is a static page on your own site (or a saved copy of another node's page): the server puts it in the page they receive. A partial that takes fields, or that is an executable page, shows as the plain `[live]` link there, and a partial inside a partial is not followed.
 
 ## Security boundary
 

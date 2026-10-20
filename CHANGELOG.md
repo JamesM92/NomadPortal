@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the Wrap/Raw toggles; it is back on its own line, and suite 18 now
   checks that. 26 browser checks (suite 18). Things only a real phone can show
   are check N in docs/design/validation-suite.md.
+- **Kiosk: the hosted site now has a saved copy too.** A page of your own site
+  that is visited anonymously is remembered on disk (in the same 30 MB store as
+  remote pages). If it later fails (a script that errors or times out, a file
+  being edited) a plain visit shows the last good copy with the red indicator
+  instead of an error. Forms and visits made with the reader's identity are
+  never remembered or replaced. 10 tests.
+- **Kiosk: the server-rendered copy of a page now shows its images and
+  partials.** What a crawler or a browser without JavaScript receives used to be
+  text only. Images now load from the portal (`/api/media`), and a partial
+  without form fields is replaced by its content when the portal already holds
+  it (your static pages, or the saved copy of an allowed node), one level deep
+  and at most 10 per page. Executable partials are never run for a crawler.
+  JavaScript browsers are unaffected: the page script replaces this copy as
+  before. 21 tests (`ssr_inline.py` and the page route).
 - **The interface around the page now copes with worst-case data.** Feeding the
   header, sidebar lists, chat list and admin pages realistic worst-case data
   found and fixed: a long site title or display name pushed Settings, Admin and

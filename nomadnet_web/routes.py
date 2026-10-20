@@ -962,8 +962,22 @@ def api_page_fetch_start():
                 ok=(content_b is not None),
                 update_status=is_index,
             )
+            # A plain anonymous visit is remembered on disk; if the page later
+            # fails (a script that errors or times out, a file mid-edit) the
+            # last good copy is shown with the failure marked, as for a
+            # remote node. Forms and identified visits are never remembered
+            # or substituted.
+            kiosk = _kiosk_cache()
+            saveable = kiosk is not None and kiosk_cacheable(field_data, local_id or None)
             if error:
+                entry = kiosk.get(kiosk_key(node_hash, path)) if saveable else None
+                if entry is not None:
+                    job_id = _browser().add_finished_job(node_hash, path, None, error)
+                    return jsonify({"job_id": job_id, "raw": raw,
+                                    "cached": _cached_payload(entry, node_hash, path)})
                 return jsonify({"error": error}), 503
+            if saveable and content_b:
+                kiosk.set(kiosk_key(node_hash, path), content_b)
             # Don't cache form-submission output — the next plain GET should
             # hit the script again with no field_data and render the canonical
             # post-save view.

@@ -25,6 +25,7 @@ from flask import Response, abort, current_app, render_template, request
 from . import seo
 from .access import BROWSE
 from .kiosk_cache import kiosk_key
+from .ssr_inline import add_image_sources, inline_partials
 from .routes import _kiosk_cache, _policy, _render_micron, _render_title_plain
 
 _RESERVED_PREFIXES = ("api/", "admin/", "auth/", "static/")
@@ -53,6 +54,34 @@ def _base_url() -> str:
     is set."""
     pinned = (current_app.config.get("PUBLIC_URL") or "").strip().rstrip("/")
     return pinned or request.url_root.rstrip("/")
+
+
+def _saved_content(node: str, path: str, hosted: str):
+    """Bytes of a page the portal already holds: the hosted site's static
+    pages, or the saved copy of a remote one. Never runs anything."""
+    if node == hosted:
+        site = current_app.config.get("SITE_SERVER")
+        return site.read_static_page(path) if site else None
+    kiosk = _kiosk_cache()
+    entry = kiosk.get(kiosk_key(node, path)) if kiosk is not None else None
+    return entry.content if entry is not None else None
+
+
+def _complete(html: str, node: str, hosted: str, policy) -> str:
+    """Give the server-rendered copy its images and partials (see
+    ssr_inline.py). A partial is used only if the viewer may read its node
+    and the portal already holds it; one level deep, like a page."""
+    def load(target_node, target_path):
+        if not target_path.startswith("/page/"):
+            return None
+        if not policy.is_trusted(target_node) or policy.check(target_node, BROWSE) is not None:
+            return None
+        body = _saved_content(target_node, target_path, hosted)
+        if body is None:
+            return None
+        inner = _render_micron(body.decode("utf-8", errors="replace"), target_node, target_path, False)
+        return add_image_sources(inner)
+    return inline_partials(add_image_sources(html), load)
 
 
 def _page_context(pathname: str):
@@ -86,7 +115,7 @@ def _page_context(pathname: str):
         return ctx
 
     text = content.decode("utf-8", errors="replace")
-    html = _render_micron(text, node, path, False)
+    html = _complete(_render_micron(text, node, path, False), node, hosted, policy)
     ctx["html"] = html
     ctx["title"] = seo.page_title(text, _site_name(settings), _render_title_plain)
     ctx["description"] = seo.page_description(html)
