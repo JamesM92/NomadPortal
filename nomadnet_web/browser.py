@@ -2026,49 +2026,6 @@ class NodeBrowser:
 
         return out
 
-    # Most destinations route_info() will describe in one call.
-    ROUTE_INFO_MAX = 2000
-
-    def route_info(self, hash_hexes) -> dict:
-        """Routing facts for many destinations at once, for the network map:
-        ``{hash: {"hops", "iface", "via"}}``. ``iface`` is the name of the
-        interface packets would leave through and ``via`` the hex id of the
-        next hop (None when the destination is directly reachable). Any
-        field Reticulum cannot answer is None. Bad hashes are skipped and
-        the batch is capped; this never raises."""
-        RNS = self._rns
-        out: dict = {}
-        for raw in hash_hexes:
-            if len(out) >= self.ROUTE_INFO_MAX:
-                break
-            try:
-                h = bytes.fromhex(raw)
-            except (ValueError, TypeError):
-                continue
-            if len(h) != 16:
-                continue
-            entry = {"hops": None, "iface": None, "via": None}
-            try:
-                hops = RNS.Transport.hops_to(h)
-                if hops is not None and hops < _HOPS_UNKNOWN:
-                    entry["hops"] = int(hops)
-            except Exception:
-                pass
-            try:
-                iface = RNS.Transport.next_hop_interface(h)
-                if iface is not None:
-                    entry["iface"] = getattr(iface, "name", str(iface))
-            except Exception:
-                pass
-            try:
-                via = RNS.Transport.next_hop(h)
-                if via and bytes(via) != h:
-                    entry["via"] = bytes(via).hex()
-            except Exception:
-                pass
-            out[raw.lower()] = entry
-        return out
-
     @staticmethod
     def _new_node_record(hash_hex: str, name: str, announce_count: int = 0) -> dict:
         """The one place this record's shape is written down — every path

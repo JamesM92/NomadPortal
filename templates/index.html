@@ -268,14 +268,6 @@
       display: flex; align-items: center; justify-content: center; z-index: 200;
     }
     #announce-info-modal[hidden] { display: none; }
-
-    /* Network map: a large dialog; below the other dialogs so that clicking a
-       destination can open its details on top of the map. */
-    #netmap-modal {
-      position: fixed; inset: 0; background: rgba(0,0,0,.7);
-      display: flex; align-items: center; justify-content: center; z-index: 150;
-    }
-    #netmap-modal[hidden] { display: none; }
     #announce-info-rows { display: flex; flex-direction: column; gap: 6px; }
     .info-row {
       display: flex; justify-content: space-between; align-items: baseline;
@@ -709,7 +701,6 @@
     <div id="sidebar-panel-network" hidden>
       <div class="sidebar-header">
         Network
-        <button id="btn-network-map" class="icon-btn" title="Show the network map" aria-label="Show the network map">&#9678;</button>
         <button id="btn-refresh-network" class="icon-btn" title="Refresh">&#8635;</button>
       </div>
       <div id="network-filter-wrap">
@@ -802,36 +793,6 @@
   <span id="cache-info"></span>
   <span id="abuse-contact" hidden style="margin-left:auto;font-size:10px;color:var(--text-dim);"></span>
 </footer>
-
-<!-- ===== Network map ================================================== -->
-<div id="netmap-modal" hidden>
-  <div class="modal-box netmap-box" role="dialog" aria-labelledby="netmap-title">
-    <div id="netmap-head">
-      <div class="modal-title" id="netmap-title" style="margin:0;">Network map</div>
-      <div id="netmap-kinds" role="group" aria-label="Show">
-        <label class="netmap-kind"><input type="checkbox" data-kind="site" checked><span class="nm-key nm-site"></span>Sites</label>
-        <label class="netmap-kind"><input type="checkbox" data-kind="peer" checked><span class="nm-key nm-peer"></span>Peers</label>
-        <label class="netmap-kind"><input type="checkbox" data-kind="relay" checked><span class="nm-key nm-relay"></span>Relays</label>
-      </div>
-      <div id="netmap-zoom">
-        <button type="button" id="btn-netmap-zoom-in" class="icon-btn" title="Zoom in" aria-label="Zoom in">+</button>
-        <button type="button" id="btn-netmap-zoom-out" class="icon-btn" title="Zoom out" aria-label="Zoom out">&minus;</button>
-        <button type="button" id="btn-netmap-reset" class="icon-btn" title="Fit everything" aria-label="Fit everything">&#9635;</button>
-      </div>
-    </div>
-    <div id="netmap-wrap">
-      <svg id="netmap-svg" role="group" aria-label="Map of the network, centred on this portal"></svg>
-      <div id="netmap-empty" hidden></div>
-    </div>
-    <div id="netmap-foot">
-      <span id="netmap-summary"></span>
-      <span class="dim">Scroll to zoom, drag to move, click a destination for details. Rings are hop counts; slices are interfaces; diamonds are next-hop nodes.</span>
-    </div>
-    <div class="modal-actions">
-      <button type="button" class="btn-modal-cancel" id="btn-netmap-close">Close</button>
-    </div>
-  </div>
-</div>
 
 <!-- ===== Announce technical info dialog (Network tab row click) ======= -->
 <div id="announce-info-modal" hidden>
@@ -987,7 +948,6 @@
 
 <script src="/static/js/call-audio.js"></script>
 <script src="/static/js/ogg-opus.js"></script>
-<script src="/static/js/network-map.js"></script>
 <script src="/static/js/voice-message.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
