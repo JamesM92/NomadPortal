@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1c1c1c">
+  <meta name="color-scheme" content="dark">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Sign in</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -39,7 +41,8 @@
       font-family: var(--font-mono); font-size: 14px; font-weight: bold;
       margin-top: 4px;
     }
-    .btn-login:hover { background: #7ec8e3; }
+    @media (hover: hover) and (pointer: fine) { .btn-login:hover { background: #7ec8e3; } }
+    .btn-login:active { background: #7ec8e3; }
 
     /* Divider */
     .divider {
@@ -57,12 +60,14 @@
       border-radius: 2px; cursor: pointer; font-family: var(--font-mono);
       font-size: 13px; text-decoration: none;
     }
-    .btn-sso:hover { border-color: var(--accent); color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .btn-sso:hover { border-color: var(--accent); color: var(--accent); } }
+    .btn-sso:active { border-color: var(--accent); color: var(--accent); }
 
     .login-note { font-size: 11px; color: var(--text-dim); line-height: 1.5;
                   margin-top: 18px; text-align: center; }
     .login-note a { color: var(--accent); text-decoration: none; }
-    .login-note a:hover { text-decoration: underline; }
+    @media (hover: hover) and (pointer: fine) { .login-note a:hover { text-decoration: underline; } }
+    .login-note a:active { text-decoration: underline; }
     .login-disclaimer {
       margin-top: 18px; padding: 10px 12px;
       border-top: 1px solid var(--border);

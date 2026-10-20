@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#1c1c1c">
+  <meta name="color-scheme" content="dark">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{{ seo.title if seo and seo.title else 'NomadPortal' }}</title>
   {%- if seo %}
@@ -32,7 +34,8 @@
       border-left: 1px solid var(--border); padding-left: 10px; margin-left: 4px;
     }
     #user-area a { color: var(--accent); text-decoration: none; }
-    #user-area a:hover { text-decoration: underline; }
+    @media (hover: hover) and (pointer: fine) { #user-area a:hover { text-decoration: underline; } }
+    #user-area a:active { text-decoration: underline; }
     #user-area { flex-shrink: 0; }
     /* A long display name or email is cut with an ellipsis (full name in the tooltip). */
     #user-area .user-name {
@@ -76,12 +79,14 @@
       padding: 6px 16px; border-radius: 2px; cursor: pointer;
       font-family: var(--font-mono); font-weight: bold; font-size: 13px;
     }
-    .btn-modal-send:hover { background: #7ec8e3; }
+    @media (hover: hover) and (pointer: fine) { .btn-modal-send:hover { background: #7ec8e3; } }
+    .btn-modal-send:active { background: #7ec8e3; }
     .btn-modal-cancel {
       background: none; border: 1px solid var(--border); color: var(--text-dim);
       padding: 6px 12px; border-radius: 2px; cursor: pointer; font-family: var(--font-mono);
     }
-    .btn-modal-cancel:hover { border-color: var(--error); color: var(--error); }
+    @media (hover: hover) and (pointer: fine) { .btn-modal-cancel:hover { border-color: var(--error); color: var(--error); } }
+    .btn-modal-cancel:active { border-color: var(--error); color: var(--error); }
 
     /* ---- Messages panel (inside sidebar) ---- */
     .msg-item {
@@ -100,7 +105,8 @@
       color: var(--text-dim); padding: 5px 4px; cursor: pointer;
       font-family: var(--font-mono); font-size: 11px; position: relative;
     }
-    .msg-tab:hover { color: var(--text); }
+    @media (hover: hover) and (pointer: fine) { .msg-tab:hover { color: var(--text); } }
+    .msg-tab:active { color: var(--text); }
     .msg-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .msg-tab-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
     .msg-tab-panel[hidden] { display: none; }
@@ -168,7 +174,8 @@
       font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
       border-radius: 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
     }
-    .icon-picker-chip:hover  { color: var(--text); border-color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .icon-picker-chip:hover { color: var(--text); border-color: var(--accent); } }
+    .icon-picker-chip:active { color: var(--text); border-color: var(--accent); }
     .icon-picker-chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
     #icon-picker-grid {
       flex: 1; overflow-y: auto; min-height: 220px;
@@ -180,7 +187,8 @@
       border-radius: 3px; cursor: pointer; aspect-ratio: 1;
       display: flex; align-items: center; justify-content: center; padding: 4px;
     }
-    .icon-picker-item:hover { border-color: var(--accent); color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .icon-picker-item:hover { border-color: var(--accent); color: var(--accent); } }
+    .icon-picker-item:active { border-color: var(--accent); color: var(--accent); }
     .icon-picker-item svg { width: 100%; height: 100%; display: block; }
 
     /* ---- Settings modal (Identities + Terminal) ---- */
@@ -201,7 +209,8 @@
       color: var(--text-dim); padding: 6px 10px; cursor: pointer;
       font-family: var(--font-mono); font-size: 12px;
     }
-    .settings-tab:hover { color: var(--text); }
+    @media (hover: hover) and (pointer: fine) { .settings-tab:hover { color: var(--text); } }
+    .settings-tab:active { color: var(--text); }
     .settings-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .settings-panel[hidden] { display: none; }
     .settings-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 10px; }
@@ -229,8 +238,10 @@
       font-family: var(--font-mono); font-size: 10px; padding: 3px 6px;
       border-radius: 2px; cursor: pointer;
     }
-    .identity-row button:hover { color: var(--text); border-color: var(--accent); }
-    .identity-row button.identity-delete-btn:hover { color: var(--error); border-color: var(--error); }
+    @media (hover: hover) and (pointer: fine) { .identity-row button:hover { color: var(--text); border-color: var(--accent); } }
+    .identity-row button:active { color: var(--text); border-color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .identity-row button.identity-delete-btn:hover { color: var(--error); border-color: var(--error); } }
+    .identity-row button.identity-delete-btn:active { color: var(--error); border-color: var(--error); }
 
     #identities-add-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
     #identities-add-row input[type="text"] {
@@ -277,7 +288,8 @@
       color: var(--text); text-align: right; word-break: break-all;
     }
     .info-row .info-value.info-copyable { cursor: pointer; }
-    .info-row .info-value.info-copyable:hover { color: var(--accent); }
+    @media (hover: hover) and (pointer: fine) { .info-row .info-value.info-copyable:hover { color: var(--accent); } }
+    .info-row .info-value.info-copyable:active { color: var(--accent); }
 
     /* ---- Calls tab (Settings) ---- */
     .calls-toggle-row {

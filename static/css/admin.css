@@ -25,7 +25,8 @@ nav.admin-nav a {
   color: var(--text-dim); text-decoration: none; font-size: 13px;
   border-bottom: 2px solid transparent;
 }
-nav.admin-nav a:hover  { color: var(--text); background: var(--bg3); }
+@media (hover: hover) and (pointer: fine) { nav.admin-nav a:hover { color: var(--text); background: var(--bg3); } }
+nav.admin-nav a:active { color: var(--text); background: var(--bg3); }
 nav.admin-nav a.active { color: var(--accent2); border-bottom-color: var(--accent2); }
 .admin-user {
   margin-left: auto; padding: 0 14px;
@@ -34,7 +35,8 @@ nav.admin-nav a.active { color: var(--accent2); border-bottom-color: var(--accen
   border-left: 1px solid var(--border); height: 100%;
 }
 .admin-user a { color: var(--warn); text-decoration: none; font-size: 12px; }
-.admin-user a:hover { text-decoration: underline; }
+@media (hover: hover) and (pointer: fine) { .admin-user a:hover { text-decoration: underline; } }
+.admin-user a:active { text-decoration: underline; }
 
 /* Flash messages */
 .flash-wrap { padding: 10px 24px 0; }
@@ -93,7 +95,8 @@ table.admin-table td {
 }
 table.admin-table td.nowrap, table.admin-table th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 table.admin-table tr:last-child td { border-bottom: none; }
-table.admin-table tr:hover td { background: var(--bg3); }
+@media (hover: hover) and (pointer: fine) { table.admin-table tr:hover td { background: var(--bg3); } }
+table.admin-table tr:active td { background: var(--bg3); }
 
 /* Forms */
 .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
@@ -111,14 +114,18 @@ input:focus, select:focus { border-color: var(--accent); }
   font-family: var(--font-mono); font-size: 13px; border: 1px solid transparent;
 }
 .btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: bold; }
-.btn-primary:hover { background: #7ec8e3; }
+@media (hover: hover) and (pointer: fine) { .btn-primary:hover { background: #7ec8e3; } }
+.btn-primary:active { background: #7ec8e3; }
 .btn-sm { padding: 3px 9px; font-size: 12px; }
 .btn-danger { background: none; border-color: var(--error); color: var(--error); }
-.btn-danger:hover { background: var(--error); color: var(--bg); }
+@media (hover: hover) and (pointer: fine) { .btn-danger:hover { background: var(--error); color: var(--bg); } }
+.btn-danger:active { background: var(--error); color: var(--bg); }
 .btn-neutral { background: var(--bg3); border-color: var(--border); color: var(--text); }
-.btn-neutral:hover { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .btn-neutral:hover { border-color: var(--accent); color: var(--accent); } }
+.btn-neutral:active { border-color: var(--accent); color: var(--accent); }
 .btn-warn { background: none; border-color: var(--warn); color: var(--warn); }
-.btn-warn:hover { background: var(--warn); color: var(--bg); }
+@media (hover: hover) and (pointer: fine) { .btn-warn:hover { background: var(--warn); color: var(--bg); } }
+.btn-warn:active { background: var(--warn); color: var(--bg); }
 
 .badge {
   display: inline-block; padding: 1px 6px; border-radius: 2px;

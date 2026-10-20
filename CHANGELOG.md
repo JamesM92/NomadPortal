@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phone behaviour for the interface around the page.** No grey flash on tap;
+  no 300 ms tap delay on controls; a long press no longer selects a button or
+  tab label; no pull-to-refresh or page bounce, and lists and dialogs do not
+  drag the page behind them at their end; every hover style now applies only
+  where there is a mouse, and every control has a pressed (`:active`) state, so
+  touch no longer leaves a control stuck in its hover look; fields in the chrome
+  are 16px on touch screens so iOS does not zoom into them (zoom itself is never
+  disabled); the page extends under the notch and the top bar, status bar and
+  sides pad for it; the browser bar takes the top bar's colour (admin and
+  sign-in pages too). The rendered page area, its links and its form fields are
+  not touched. Fixes a mistake in the previous commit: giving the navigation row
+  `min-width: 0` let it share the title's row on phones, so the Go button sat
+  under the Wrap/Raw toggles; it is back on its own line, and suite 18 now
+  checks that. 26 browser checks (suite 18). Things only a real phone can show
+  are check N in docs/design/validation-suite.md.
 - **The interface around the page now copes with worst-case data.** Feeding the
   header, sidebar lists, chat list and admin pages realistic worst-case data
   found and fixed: a long site title or display name pushed Settings, Admin and

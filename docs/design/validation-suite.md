@@ -31,6 +31,7 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
 | `15-admin-pages` | The genuine admin pages (real templates, routes, stores and scripts; only Reticulum is faked): every page loads with no failed requests or console errors, the navigation reaches all of them, non-admins and signed-out visitors are refused, Settings saves and cleans its fields, and the Node page runs a propagation node end to end (off, start, status, peers, live storage limit, restart notice, validation messages, announce and its rate limit, switching off, a failed start shown with its reason). |
 | `17-chrome-worst-case` | The interface around the page against realistic worst-case data (from the mock's dev-only `?data=worst` switch): a 118-character title and long display name keep Settings, Admin and Sign out on screen from 320 px to 1280 px, in right-to-left and at 200% zoom; a plain-text title is not read as HTML; ages read sensibly; nameless nodes and accounts show a fallback; a long email chat name keeps its badge; Escape closes Settings; admin tables scroll inside their card instead of widening the page. |
+| `18-mobile-native` | Phone behaviour of the interface around the page, in a touch-emulated Chromium: the page extends under the notch and zoom is never disabled, no tap flash, no tap delay, controls cannot be selected by long press, no scroll chaining, hover styles do not apply without a hover (and do with a mouse), pressed feedback, 16px fields (but not inside the rendered page), safe-area padding present, the phone navigation row intact, admin pages too. |
 | `16-admin-setup` | First-run admin setup in Chromium: no account leads to the setup page, the one-time code is in a private file and never on a page, a wrong code / mismatched / short password are explained and the code survives them, the right code (typed loosely) creates the account and signs in, the code file is deleted, setup is then closed, the normal sign-in accepts the right password and refuses a wrong one, signing out works, and `ADMIN_PASSWORD` set skips setup and still signs in. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
@@ -93,6 +94,19 @@ On a fresh install (empty `config/`, no `ADMIN_PASSWORD`):
 4. Sign in on two browsers. Run `docker exec -it <c> python -m nomadnet_web.admin_cli reset-password`. Both browsers must be signed out on their next click; the old password must fail and the new one work.
 5. Set `ADMIN_PASSWORD` in the compose file and restart: no setup page, that password signs in. Remove it and restart: the stored account works again.
 6. Check the file mode of `config/admin_account.json` (`-rw-------`).
+
+### N. On a real phone (iPhone and Android)
+
+Open the site by its address on each phone, in portrait and landscape.
+
+1. Tap every button in the top bar and sidebar. There must be no grey flash, and each must show a pressed look while held and not stay highlighted afterwards.
+2. Tap the address bar and the node filter. The page must not zoom in.
+3. Scroll a long list to its end and keep pulling. The page behind must not move, and the browser must not start a refresh.
+4. On a phone with a notch or Dynamic Island, the title and top buttons must clear it. In landscape the sidebar and content must clear the side cut-outs. At the bottom, the status line must clear the home bar.
+5. Long-press a tab and a button. No text selection or callout may appear. Long-press a line of text in a page: it must still select.
+6. Open a chat and the keyboard. The message box must stay visible above the keyboard.
+7. The browser's address bar colour must match the dark top bar.
+8. Tap a link inside a hosted page and a form field inside a page. Their look must be exactly as before (NomadNet rendering is unchanged).
 
 ### D. Public site
 

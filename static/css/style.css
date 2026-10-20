@@ -58,6 +58,43 @@ body {
   overflow: hidden;
 }
 
+/* =========================================================
+   Phone behaviour: touch, safe areas, scroll chaining
+   (the interface around the page; the rendered page is untouched)
+   ========================================================= */
+html {
+  -webkit-tap-highlight-color: transparent;   /* no grey flash; controls have :active states */
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;                  /* the app scrolls inside its own panes */
+}
+/* Notch, rounded corners and the home bar (needs viewport-fit=cover). */
+body {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+/* No 300 ms tap delay on controls. */
+:where(button, a, [role="button"], label, summary, select):not(#page-content *) {
+  touch-action: manipulation;
+}
+/* Controls are not text: a long press must not select their label. */
+:where(button, [role="button"], .sidebar-tab, .msg-tab, .settings-tab, .icon-btn, .type-chip):not(#page-content *) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* A list or dialog that reaches its end must not drag the page behind it. */
+#node-list, #network-list, #user-list-inner, #chat-list-inner, #chat-log, .modal-box {
+  overscroll-behavior: contain;
+}
+/* iOS zooms the page into any field under 16px and never zooms back. */
+@media (pointer: coarse) {
+  input:not(#page-content *):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea:not(#page-content *),
+  select:not(#page-content *) {
+    font-size: 16px !important;
+  }
+}
+
 /* ---- Disclaimer banner ---- */
 #disclaimer-banner {
   display: flex;
@@ -83,7 +120,8 @@ body {
   border-radius: 2px;
   flex-shrink: 0;
 }
-#disclaimer-banner button:hover { background: #2a2000; }
+@media (hover: hover) and (pointer: fine) { #disclaimer-banner button:hover { background: #2a2000; } }
+#disclaimer-banner button:active { background: #2a2000; }
 
 /* ---- Scrollbar ---- */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -94,13 +132,13 @@ body {
    Top bar
    ========================================================= */
 #topbar {
-  height: var(--topbar-h);
+  height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: env(safe-area-inset-top, 0px) 10px 0;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -144,7 +182,8 @@ body {
   font-size: 13px;
   border-radius: 2px;
 }
-#nav-bar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { #nav-bar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); } }
+#nav-bar button:active:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 #nav-bar button:disabled { opacity: 0.35; cursor: default; }
 
 #address-bar {
@@ -171,7 +210,8 @@ body {
   font-weight: bold;
   border-radius: 2px;
 }
-#btn-go:hover { background: #7ec8e3; }
+@media (hover: hover) and (pointer: fine) { #btn-go:hover { background: #7ec8e3; } }
+#btn-go:active { background: #7ec8e3; }
 
 #status-indicator {
   font-size: 10px;
@@ -229,7 +269,8 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-.sidebar-tab:hover { color: var(--text); }
+@media (hover: hover) and (pointer: fine) { .sidebar-tab:hover { color: var(--text); } }
+.sidebar-tab:active { color: var(--text); }
 .sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 #sidebar-panel-nodes,
@@ -272,7 +313,8 @@ body {
   padding: 0 2px;
   line-height: 1;
 }
-.icon-btn:hover { color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .icon-btn:hover { color: var(--accent); } }
+.icon-btn:active { color: var(--accent); }
 .icon-btn.fav-active { color: var(--warn); }
 #btn-fav-page { font-size: 18px; padding: 0 6px; }
 
@@ -325,7 +367,8 @@ body {
   font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
   border-radius: 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
 }
-.type-chip:hover  { color: var(--text); border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .type-chip:hover { color: var(--text); border-color: var(--accent); } }
+.type-chip:active { color: var(--text); border-color: var(--accent); }
 .type-chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 
 #node-list,
@@ -356,8 +399,10 @@ body {
    first). */
 #node-list li[data-hash],
 #network-list li[data-hash] { display: flex; align-items: flex-start; gap: 6px; }
-#node-list li:hover,
-#network-list li:hover  { background: var(--bg3); border-left-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { #node-list li:hover,
+#network-list li:hover { background: var(--bg3); border-left-color: var(--accent); } }
+#node-list li:active,
+#network-list li:active { background: var(--bg3); border-left-color: var(--accent); }
 #node-list li.active,
 #network-list li.active { background: var(--bg3); border-left-color: var(--accent2); color: var(--accent2); }
 /* Identicon + name/hash/age stack. flex:1 + min-width:0 is what lets it
@@ -430,14 +475,22 @@ body {
   border-top: none;
   margin-top: 0;
 }
-#node-list .node-section-header:hover {
+@media (hover: hover) and (pointer: fine) { #node-list .node-section-header:hover {
+  background: transparent;
+  border-left-color: transparent;
+} }
+#node-list .node-section-header:active {
   background: transparent;
   border-left-color: transparent;
 }
 #node-list .node-section-header.collapsible {
   cursor: pointer;
 }
-#node-list .node-section-header.collapsible:hover {
+@media (hover: hover) and (pointer: fine) { #node-list .node-section-header.collapsible:hover {
+  color: var(--text);
+  background: var(--bg3);
+} }
+#node-list .node-section-header.collapsible:active {
   color: var(--text);
   background: var(--bg3);
 }
@@ -474,7 +527,8 @@ body {
   color: #777;
 }
 .node-fav-btn.fav-active { color: var(--warn); }
-.node-fav-btn:hover { color: var(--warn); }
+@media (hover: hover) and (pointer: fine) { .node-fav-btn:hover { color: var(--warn); } }
+.node-fav-btn:active { color: var(--warn); }
 
 .node-placeholder { color: var(--text-dim); font-style: italic; font-size: 12px; }
 
@@ -488,10 +542,12 @@ body {
   cursor: pointer;
   user-select: none;
 }
-.list-load-more:hover { color: var(--text); background: var(--bg3); }
+@media (hover: hover) and (pointer: fine) { .list-load-more:hover { color: var(--text); background: var(--bg3); } }
+.list-load-more:active { color: var(--text); background: var(--bg3); }
 
 #node-list li.node-locked { opacity: 0.35; cursor: default; }
-#node-list li.node-locked:hover { background: transparent; }
+@media (hover: hover) and (pointer: fine) { #node-list li.node-locked:hover { background: transparent; } }
+#node-list li.node-locked:active { background: transparent; }
 
 #sidebar-footer,
 .sidebar-footer {
@@ -600,7 +656,8 @@ body {
   border-radius: 2px;
   cursor: pointer;
 }
-.bc-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .bc-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); } }
+.bc-btn:active:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .bc-btn:disabled { opacity: 0.4; cursor: default; }
 .bc-btn[hidden] { display: none; }
 
@@ -798,12 +855,12 @@ body {
    Status bar
    ========================================================= */
 #statusbar {
-  height: var(--statusbar-h);
+  height: calc(var(--statusbar-h) + env(safe-area-inset-bottom, 0px));
   background: var(--bg2);
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 10px env(safe-area-inset-bottom, 0px);
   gap: 16px;
   font-size: 11px;
   color: var(--text-dim);
@@ -994,7 +1051,8 @@ a.mu-link:hover { text-decoration: underline; }
   cursor: pointer;
   font: inherit;
 }
-.page-unavailable-retry:hover { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .page-unavailable-retry:hover { border-color: var(--accent); } }
+.page-unavailable-retry:active { border-color: var(--accent); }
 .page-unavailable-why { font-size: 11px; opacity: 0.8; }
 /* A link the viewer isn't allowed to follow, shown as plain text. */
 .mu-offnode { cursor: help; text-decoration: none; }
@@ -1107,7 +1165,8 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   cursor: pointer;
   border-radius: 2px;
 }
-#btn-compose-new:hover { background: #1a2a35; }
+@media (hover: hover) and (pointer: fine) { #btn-compose-new:hover { background: #1a2a35; } }
+#btn-compose-new:active { background: #1a2a35; }
 
 /* Conversation list items */
 .conv-item {
@@ -1115,7 +1174,8 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
-.conv-item:hover { background: var(--bg3); }
+@media (hover: hover) and (pointer: fine) { .conv-item:hover { background: var(--bg3); } }
+.conv-item:active { background: var(--bg3); }
 .conv-item.conv-unread .conv-name { font-weight: bold; color: var(--text); }
 .conv-header {
   display: flex;
@@ -1224,7 +1284,8 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   align-self: flex-end;
   line-height: 1;
 }
-#btn-chat-send:hover { background: #7ec8e3; }
+@media (hover: hover) and (pointer: fine) { #btn-chat-send:hover { background: #7ec8e3; } }
+#btn-chat-send:active { background: #7ec8e3; }
 #btn-chat-send:disabled { opacity: 0.4; cursor: default; }
 
 /* Chat bubbles */
@@ -1272,8 +1333,9 @@ input[type="checkbox"][disabled], input[type="radio"][disabled] {
   :root { --sidebar-w: 100%; }
 
   /* Topbar: let items wrap and shrink */
-  #topbar { flex-wrap: wrap; height: auto; padding: 6px 8px; gap: 6px; }
-  #nav-bar { order: 2; width: 100%; }
+  #topbar { flex-wrap: wrap; height: auto; padding: calc(6px + env(safe-area-inset-top, 0px)) 8px 6px; gap: 6px; }
+  #nav-bar { order: 2; flex: 1 1 100%; width: 100%; }   /* its own row; flex-basis, because flex:1 elsewhere ignores width */
+  #address-bar { min-width: 0; }      /* the bar has the whole row; let it give way to the buttons */
   #topbar-actions { order: 3; }
   #status-indicator { order: 4; }
   #user-area { order: 5; border-left: none; padding-left: 0; flex-wrap: wrap; row-gap: 2px; max-width: 100%; }
