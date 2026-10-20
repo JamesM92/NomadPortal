@@ -3220,28 +3220,6 @@ function _renderAttachment(msgId, att) {
 // conversation always paints on first open.
 let _chatLogSignature = null;
 
-// Cancel / Retry buttons on sent messages (one delegated listener; the log
-// is rebuilt whenever a message changes state).
-$('chat-log').addEventListener('click', async e => {
-  const btn = e.target.closest && e.target.closest('button.chat-msg-action');
-  if (!btn) return;
-  btn.disabled = true;
-  try {
-    await apiFetch(`/api/messages/${encodeURIComponent(btn.dataset.id)}/${btn.dataset.action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    });
-    setStatus(btn.dataset.action === 'cancel' ? 'Message cancelled.' : 'Sending the message again…', 'ok');
-  } catch (err) {
-    setStatus(humanizeError(err.message), 'error');
-    // The message did not change, so the log is not rebuilt: give the
-    // button back or it stays disabled.
-    btn.disabled = false;
-  }
-  await refreshChats();
-});
-
 function renderChatLog(messages, { forceScroll = false } = {}) {
   const log = $('chat-log');
   if (!log) return;
@@ -3251,7 +3229,7 @@ function renderChatLog(messages, { forceScroll = false } = {}) {
     return;
   }
 
-  const signature = messages.map(m => `${m.id}:${m.state || ''}:${m.read}:${m.resends || 0}`).join('|');
+  const signature = messages.map(m => `${m.id}:${m.state || ''}:${m.read}`).join('|');
   if (!forceScroll && signature === _chatLogSignature) return;
   _chatLogSignature = signature;
 
@@ -3281,19 +3259,8 @@ function renderChatLog(messages, { forceScroll = false } = {}) {
     }
     inner += `<div class="chat-meta"><span class="chat-time">${formatAge(m.time)}</span>`;
     if (m.direction === 'sent') {
-      const bad = m.state === 'failed' || m.state === 'cancelled';
-      const cls = m.state === 'delivered' ? 'ok' : bad ? 'fail' : 'pend';
+      const cls = m.state === 'delivered' ? 'ok' : m.state === 'failed' ? 'fail' : 'pend';
       inner += ` <span class="chat-state-${cls}">${esc(m.state)}</span>`;
-      if (m.resends) {
-        inner += ` <span class="chat-resent" title="Sent again automatically when the recipient came back online">&#8635;${esc(m.resends)}</span>`;
-      }
-      // A message still on its way can be stopped; one that failed or was
-      // stopped can be sent again.
-      if (m.state === 'queued') {
-        inner += ` <button type="button" class="chat-msg-action" data-action="cancel" data-id="${esc(m.id)}">Cancel</button>`;
-      } else if (bad) {
-        inner += ` <button type="button" class="chat-msg-action" data-action="retry" data-id="${esc(m.id)}">Retry</button>`;
-      }
     }
     inner += '</div>';
     bubble.innerHTML = inner;

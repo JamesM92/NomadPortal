@@ -193,9 +193,6 @@ def create_app(
 
     lxmf_tracker = LXMFPeerTracker(config_dir)
     app.config["LXMF_TRACKER"] = lxmf_tracker
-    # When a recipient announces again, messages that failed while they
-    # were away are tried once more (see MessagingService.resend_failed_for).
-    lxmf_tracker.add_announce_listener(messaging.resend_failed_for)
 
     def _register_lxmf_tracker():
         import RNS
@@ -225,7 +222,6 @@ def create_app(
     _ui_boot = app.config["UI_SETTINGS"].get_all()
     messaging.set_stamp_policy(_ui_boot.get("lxmf_stamp_cost", 0),
                                _ui_boot.get("lxmf_enforce_stamps", False))
-    messaging.set_auto_resend(_ui_boot.get("lxmf_auto_resend", True))
 
     # Kiosk pre-warm: keeps the prescribed nodes' landing pages (and their
     # same-node links) fresh in the kiosk cache so a first-time visitor

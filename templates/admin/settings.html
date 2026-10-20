@@ -143,21 +143,6 @@
   </div>
 
   <div class="form-field" style="margin-bottom:18px;">
-    <label>Failed messages</label>
-    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-      <input type="checkbox" id="s-auto-resend" {% if settings.lxmf_auto_resend %}checked{% endif %}>
-      Send a failed message again when the recipient next announces
-    </label>
-    <span class="dim" style="margin-top:4px;">
-      A message fails when the recipient is offline for too long. With this on,
-      the portal tries again when they come back (as MeshChat does). It tries a
-      message at most 3 times, only within 24 hours of sending, and not more
-      than once every 2 minutes for the same person. Cancelled messages are never
-      sent again. A message that did arrive but whose receipt was lost can arrive twice.
-    </span>
-  </div>
-
-  <div class="form-field" style="margin-bottom:18px;">
     <label>Default node (loaded on startup)</label>
     <input type="text" id="s-default-node" value="{{ settings.default_node | e }}"
            style="max-width:480px;font-size:12px;" maxlength="128"

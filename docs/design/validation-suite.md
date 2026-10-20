@@ -30,7 +30,6 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `07-partials` | A partial loads in place and refreshes on a timer. A `p:` link reloads it by id. Links inside partial content work. Failures are shown plainly. Nesting and count are capped. Leaving the page stops the timers. |
 | `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
 | `09-conversation-extras` | Chats can be filtered All / Trusted / Untrusted (unknown counts as untrusted), with counts and unread badges. "All" is the default and the choice is remembered. Pinned conversations sort first. A peer with a note shows a marker. The peer dialog saves trust, pin and note, and Escape saves nothing. |
-| `10-send-control` | A queued message offers Cancel, a failed or cancelled one offers Retry, a delivered one has no buttons. A refusal is explained and the button works again. Automatic re-sends are marked. |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -93,16 +92,6 @@ Use an account on the portal and a second LXMF client (Sideband, MeshChat or Nom
 5. Set the cost back to 0. Messages must arrive from every client again.
 
 If step 2 never delays, the client has not seen the new cost. Announce again and retry.
-
-### G. Cancel, retry and automatic re-send
-
-Use an account on the portal and a second client that you can switch off (a phone with Sideband or MeshChat).
-
-1. Switch the second client off. Send it a message. While the message shows "queued", press **Cancel**. The message must show "cancelled" and the client must never receive it, even after you switch it on.
-2. Press **Retry** on the cancelled message. Switch the client on. It must arrive once.
-3. Switch the client off again and send another message. Wait until it shows "failed" (several minutes).
-4. Switch the client on and wait for it to announce. The failed message must arrive without you doing anything, and it must show the resend marker. Check that it arrived once, not twice.
-5. In **Admin > Settings**, turn off "Send a failed message again". Repeat steps 3 and 4. The message must stay failed. **Retry** must still work by hand.
 
 ### D. Public site
 

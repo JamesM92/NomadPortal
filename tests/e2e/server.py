@@ -54,9 +54,6 @@ DEFAULTS = {
     "contacts": [],        # /api/contacts (each: hash, name, trust?, pinned?, note?)
     "settings_posts": [],  # bodies POSTed to /api/contacts/<hash>/settings
     "ui_extra": {},        # extra keys merged into /api/ui/settings (e.g. panel visibility)
-    "sent": [],            # /api/messages/sent (each: id, dest, content, sent_at, state, resends?)
-    "msg_actions": [],     # ["cancel:<id>", "retry:<id>"] in the order they were POSTed
-    "msg_refuse": "",      # when set, cancel/retry answer 409 with this text
 }
 S = dict(DEFAULTS)
 
@@ -89,8 +86,6 @@ def scenario():
     S["media_inflight"] = 0
     S["media_max_inflight"] = 0
     S["contacts"] = [dict(c) for c in S["contacts"]]
-    S["sent"] = [dict(m) for m in S["sent"]]
-    S["msg_actions"] = []
     S["settings_posts"] = []
     return jsonify(ok=True)
 
@@ -100,7 +95,7 @@ def stats():
     return jsonify(fetches=S["fetches"], refresh_flag=S.get("last_refresh_flag"),
                    path_fetches=S["path_fetches"], media_calls=S["media_calls"],
                    media_max_inflight=S["media_max_inflight"],
-                   settings_posts=S["settings_posts"], msg_actions=S["msg_actions"])
+                   settings_posts=S["settings_posts"])
 
 
 @app.get("/api/auth/status")
@@ -185,20 +180,7 @@ def messages_received():
 
 @app.get("/api/messages/sent")
 def messages_sent():
-    return jsonify(messages=S["sent"])
-
-
-@app.post("/api/messages/<mid>/<action>")
-def message_action(mid, action):
-    if action not in ("cancel", "retry"):
-        return jsonify(error="no"), 404
-    S["msg_actions"].append(f"{action}:{mid}")
-    if S["msg_refuse"]:
-        return jsonify(ok=False, error=S["msg_refuse"]), 409
-    for m in S["sent"]:
-        if m["id"] == mid:
-            m["state"] = "cancelled" if action == "cancel" else "queued"
-    return jsonify(ok=True)
+    return jsonify(messages=[])
 
 
 @app.get("/api/contacts")

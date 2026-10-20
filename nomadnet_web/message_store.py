@@ -58,26 +58,6 @@ class MessageStore:
         with self._lock:
             return list(self._received)
 
-    def get_sent(self, msg_id: str):
-        """A copy of one sent message, or None."""
-        with self._lock:
-            for m in self._sent:
-                if m.get("id") == msg_id:
-                    return dict(m)
-        return None
-
-    def patch_sent(self, msg_id: str, **fields) -> None:
-        """Set extra fields on a sent message (for example a retry count)."""
-        with self._lock:
-            for m in self._sent:
-                if m.get("id") == msg_id:
-                    m.update(fields)
-                    snapshot = self._snapshot()
-                    break
-            else:
-                return
-        self._persist(snapshot)
-
     def update_sent(self, msg_id: str, state: str, real_id: str = None) -> None:
         """Update state (and optionally final ID) of a queued sent message."""
         with self._lock:

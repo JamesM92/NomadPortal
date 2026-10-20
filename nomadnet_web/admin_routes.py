@@ -799,7 +799,7 @@ def api_ui_settings_save():
         "users_can_message",
         # General settings
         "app_title", "site_name", "default_node", "prescribed_nodes",
-        "lxmf_stamp_cost", "lxmf_enforce_stamps", "lxmf_auto_resend",
+        "lxmf_stamp_cost", "lxmf_enforce_stamps",
         "access_mode", "lockdown_node",  # presets / backwards-compat alias
         "abuse_contact",
         # Site-server toggles (None = "fall through to env var")
@@ -897,11 +897,6 @@ def api_ui_settings_save():
             current = ui.get_all()
             messaging.set_stamp_policy(current["lxmf_stamp_cost"],
                                        current["lxmf_enforce_stamps"])
-
-    if "lxmf_auto_resend" in patch:
-        messaging = current_app.config.get("MESSAGING")
-        if messaging is not None:
-            messaging.set_auto_resend(ui.get_all()["lxmf_auto_resend"])
 
     _audit_warn("ui_settings_save: actor=%s ip=%s patch=%s",
                    getattr(current_user, "name", "?"), request.remote_addr, patch)

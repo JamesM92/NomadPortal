@@ -22,13 +22,6 @@ log = logging.getLogger(__name__)
 
 PATH_WAIT = 10  # seconds to wait for identity recall after path request
 
-# Re-sending messages that failed while the recipient was away (as MeshChat
-# does): when the recipient announces again, recent failures are tried once
-# more. Bounded so a flaky or abusive peer cannot cause endless traffic.
-AUTO_RESEND_MAX_AGE_S = 24 * 3600
-AUTO_RESEND_MAX_ATTEMPTS = 3
-AUTO_RESEND_COOLDOWN_S = 120
-
 
 def _hex_to_bytes(value: str) -> bytes:
     """Convert '#rrggbb' (or 'rrggbb') to a 3-byte color tuple. Falls back to grey."""
@@ -290,13 +283,6 @@ class MessagingService:
         # operator turns it on; applied to every delivery identity.
         self._stamp_cost: int = 0
         self._enforce_stamps: bool = False
-        # Messages handed to a router and not yet delivered or failed:
-        # msg_id -> {"router", "lxm"}, so one can be cancelled. A message
-        # id in _cancelled must never be marked failed or queued again.
-        self._outbound: dict = {}
-        self._cancelled: set = set()
-        self._auto_resend: bool = True
-        self._resend_last: dict = {}        # dest hash -> time of the last auto-resend
         os.makedirs(storage_path, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -1031,15 +1017,14 @@ class MessagingService:
                 RNS.Transport.request_path(dest_hash)
                 deadline = time.time() + PATH_WAIT
                 while dest_identity is None:
-                    if self._is_cancelled(msg_id):
-                        return
                     if time.time() > deadline:
                         log.warning(
                             "Identity not recalled for %s after %ss — "
                             "peer may not have announced recently",
                             dest_hash_hex[:16], PATH_WAIT,
                         )
-                        self._mark_failed(msg_id)
+                        if self._msg_store:
+                            self._msg_store.update_sent(msg_id, "failed")
                         return
                     time.sleep(0.25)
                     dest_identity = RNS.Identity.recall(dest_hash)
@@ -1123,143 +1108,25 @@ class MessagingService:
             # Callbacks update the store whenever delivery completes —
             # no fixed wait so long messages don't time out prematurely.
             def _delivered(_m):
-                self._forget(msg_id)
                 real_id = _m.hash.hex() if _m.hash else msg_id
                 if self._msg_store:
                     self._msg_store.update_sent(msg_id, "delivered", real_id=real_id)
                 log.info("Delivered %s → %s", msg_id[:8], dest_hash_hex[:16])
 
             def _failed(_m):
-                self._mark_failed(msg_id)
+                if self._msg_store:
+                    self._msg_store.update_sent(msg_id, "failed")
                 log.warning("Delivery failed %s → %s", msg_id[:8], dest_hash_hex[:16])
 
             lxmf_msg.register_delivery_callback(_delivered)
             lxmf_msg.register_failed_callback(_failed)
-            with self._lock:
-                self._outbound[msg_id] = {"router": router, "lxm": lxmf_msg}
-            if self._is_cancelled(msg_id):
-                self._forget(msg_id)
-                return
             router.handle_outbound(lxmf_msg)
-            # A cancel that arrived while the message was being handed over
-            # could not reach it (LXMF does not know it yet), so repeat it.
-            if self._is_cancelled(msg_id):
-                router.cancel_outbound(lxmf_msg.message_id)
-                self._forget(msg_id)
             log.info("Queued LXMF message %s → %s", msg_id[:8], dest_hash_hex[:16])
 
         except Exception:
             log.exception("Async LXMF delivery error for %s", msg_id[:8])
-            self._mark_failed(msg_id)
-
-    # -- cancel, retry and automatic re-send ------------------------------
-
-    def _is_cancelled(self, msg_id: str) -> bool:
-        with self._lock:
-            return msg_id in self._cancelled
-
-    def _forget(self, msg_id: str) -> None:
-        with self._lock:
-            self._outbound.pop(msg_id, None)
-
-    def _mark_failed(self, msg_id: str) -> None:
-        """Record a failure, unless the user cancelled it first (a cancel
-        is the user's decision and a late failure must not undo it)."""
-        self._forget(msg_id)
-        if self._is_cancelled(msg_id):
-            return
-        if self._msg_store:
-            self._msg_store.update_sent(msg_id, "failed")
-
-    def cancel_send(self, msg_id: str, user_sub: str) -> tuple:
-        """Stop a message that has not yet been delivered. Returns
-        ``(ok, reason)``. Only the sender's own queued messages can be
-        cancelled; one that already went through says so."""
-        entry = self._msg_store.get_sent(msg_id) if self._msg_store else None
-        if entry is None or entry.get("owner", "") != user_sub:
-            return False, "Message not found"
-        state = entry.get("state")
-        if state != "queued":
-            return False, f"This message is already {state}"
-        # Flag first so the delivery thread stops at its next check, then
-        # tell the router in case it already has the message.
-        with self._lock:
-            self._cancelled.add(msg_id)
-            rec = self._outbound.get(msg_id)
-        if rec is not None:
-            try:
-                rec["router"].cancel_outbound(rec["lxm"].message_id)
-            except Exception:
-                log.exception("Router could not cancel %s", msg_id[:8])
-        self._msg_store.update_sent(msg_id, "cancelled")
-        return True, ""
-
-    def _requeue(self, entry: dict, user_sub: str) -> bool:
-        """Start delivery of a stored sent message again, under the same
-        id, using the sender's current delivery identity."""
-        user_data = self._get_user_router(user_sub)
-        if user_data is None:
-            return False
-        try:
-            dest_hash = bytes.fromhex(entry["dest"])
-        except (KeyError, ValueError):
-            return False
-        msg_id = entry["id"]
-        with self._lock:
-            self._cancelled.discard(msg_id)
-        self._msg_store.update_sent(msg_id, "queued")
-        self._launch_delivery(
-            msg_id, entry["dest"], dest_hash, entry.get("title", ""),
-            entry.get("content", ""), user_sub, list(entry.get("attachments") or []),
-            user_data["router"], user_data["dest"],
-        )
-        return True
-
-    def retry_send(self, msg_id: str, user_sub: str) -> tuple:
-        """Send a failed or cancelled message again. Returns ``(ok, reason)``."""
-        entry = self._msg_store.get_sent(msg_id) if self._msg_store else None
-        if entry is None or entry.get("owner", "") != user_sub:
-            return False, "Message not found"
-        if entry.get("state") not in ("failed", "cancelled"):
-            return False, f"This message is {entry.get('state')}; only failed or cancelled messages can be retried"
-        if not self._requeue(entry, user_sub):
-            return False, "No delivery identity is available to send it"
-        return True, ""
-
-    def auto_resend_enabled(self) -> bool:
-        with self._lock:
-            return self._auto_resend
-
-    def set_auto_resend(self, enabled: bool) -> None:
-        with self._lock:
-            self._auto_resend = bool(enabled)
-
-    def resend_failed_for(self, dest_hash_hex: str) -> int:
-        """The recipient just announced: try recent failed messages to them
-        once more. Skips cancelled messages, anything older than a day, a
-        message already retried too often, and a peer that was retried in
-        the last couple of minutes. Returns how many were started."""
-        if not dest_hash_hex or not self._msg_store or not self.auto_resend_enabled():
-            return 0
-        now = time.time()
-        with self._lock:
-            last = self._resend_last.get(dest_hash_hex, 0.0)
-            if now - last < AUTO_RESEND_COOLDOWN_S:
-                return 0
-        started = 0
-        for entry in self._msg_store.sent_messages():
-            if (entry.get("dest") != dest_hash_hex or entry.get("state") != "failed"
-                    or now - entry.get("sent_at", 0) > AUTO_RESEND_MAX_AGE_S
-                    or (entry.get("resends") or 0) >= AUTO_RESEND_MAX_ATTEMPTS):
-                continue
-            if self._requeue(entry, entry.get("owner", "")):
-                self._msg_store.patch_sent(entry["id"], resends=(entry.get("resends") or 0) + 1)
-                started += 1
-        if started:
-            with self._lock:
-                self._resend_last[dest_hash_hex] = now
-            log.info("Re-sending %d failed message(s) to %s", started, dest_hash_hex[:16])
-        return started
+            if self._msg_store:
+                self._msg_store.update_sent(msg_id, "failed")
 
     def _launch_delivery(self, *args) -> None:
         threading.Thread(target=self._run_delivery, args=args, daemon=True).start()
