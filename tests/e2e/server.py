@@ -217,10 +217,6 @@ def media():
             S["media_inflight"] -= 1
 
 
-@app.get("/api/calls/status")
-def calls_status():
-    return jsonify(status="idle")
-
 
 @app.get("/api/nodes")
 def api_nodes_chrome():

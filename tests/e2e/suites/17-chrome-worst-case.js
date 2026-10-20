@@ -28,9 +28,6 @@ module.exports = async ctx => {
     ctx.check(await sideways(p) <= 0, `top bar @${w}px: the page does not scroll sideways`);
     const vw = await p.evaluate(() => document.documentElement.clientWidth);
     ctx.check(await rightEdge(p, '#ub-logout') <= vw + 1, `top bar @${w}px: Sign out stays on screen`);
-    if (w >= 768) {
-      ctx.check(await rightEdge(p, '#btn-settings') <= vw + 1, `top bar @${w}px: the settings button stays on screen`);
-    }
     await p._ctx.close();
   }
   let p = await openWorst(ctx, 1280);
@@ -87,12 +84,6 @@ module.exports = async ctx => {
   });
   ctx.check(badge && badge.inside && badge.time, 'a federated email as a chat name wraps and keeps its unread badge and its time inside the row');
 
-  // ---- Escape ------------------------------------------------------------
-  await p.click('#btn-settings');
-  await p.waitForSelector('#settings-modal:not([hidden])');
-  await p.keyboard.press('Escape');
-  await p.waitForTimeout(200);
-  ctx.check(await p.evaluate(() => document.getElementById('settings-modal').hidden), 'Escape closes the settings dialog');
   await p._ctx.close();
 
   // ---- admin tables ------------------------------------------------------

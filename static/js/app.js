@@ -2121,13 +2121,8 @@ document.addEventListener('keydown', e => {
   }
   // Esc → close any visible modal; then blur the address bar
   if (e.key === 'Escape') {
-    if (document.querySelector('#settings-modal:not([hidden])')) {
-      _closeSettingsModal();
-      e.preventDefault();
-      return;
-    }
     const openModal = document.querySelector(
-      '#icon-picker-modal:not([hidden]), #qr-modal:not([hidden]), #msg-modal:not([hidden])');
+      '#icon-picker-modal:not([hidden]), #msg-modal:not([hidden])');
     if (openModal) {
       openModal.hidden = true;
       e.preventDefault();

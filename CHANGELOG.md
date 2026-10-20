@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > taken off this branch and kept on the branch `parked/chat-mesh`; hosting a
 > propagation node is kept on `feature/expanded-capabilities`. Nothing was
 > deleted. The audio-attachment format fix stays.
+>
+> **Second round (2026-10-20).** Four older unreleased features were also taken
+> off `dev` (they are all still in the history of `parked/chat-mesh`): voice
+> calls, multi-identity accounts with the Settings menu and the rnsh terminal,
+> per-contact blocking, and the "show my QR" identity sharing. The Network tab
+> (sites, peers and relays for guests) stays: the kiosk's access settings are
+> built around it.
 
 ### Added
 
