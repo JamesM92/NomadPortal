@@ -19,7 +19,6 @@ from flask_login import login_required, current_user
 from micron2html import MicronConverter, default_url_resolver
 from . import rate_limit
 from . import media
-from .lxmf_address import parse_lxmf_address, remember_identity
 from .access import BROWSE, DOWNLOAD, INTERACT, policy_for
 from .cache_directive import parse_cache_seconds
 from .kiosk_cache import kiosk_cacheable, kiosk_key
@@ -1491,7 +1490,7 @@ def api_message_send():
 
     if not dest_hash:
         abort(400, description="dest_hash is required")
-    if len(dest_hash) > 256:
+    if len(dest_hash) > 128:
         abort(400, description="dest_hash too long")
     if len(title) > 256:
         abort(400, description="title exceeds 256 characters")
@@ -1501,19 +1500,6 @@ def api_message_send():
     # Reject empty sends — no text AND no attachments is not a message.
     if not (content or "").strip() and not attachments:
         abort(400, description="message must have content or an attachment")
-
-    # The address may be a bare hash, lxmf@<hash>, or an lxma:// link (the
-    # portal's own QR code). A link carries the person's public key, which
-    # lets the first message go out before they announce, but only after the
-    # key is checked against the address.
-    try:
-        address = parse_lxmf_address(dest_hash)
-        if address.public_key:
-            import RNS
-            remember_identity(RNS, address)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    dest_hash = address.dest_hash
 
     messaging = current_app.config["MESSAGING"]
     ok, result = messaging.send_message(

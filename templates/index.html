@@ -830,13 +830,8 @@
   <div class="modal-box">
     <div class="modal-title">&#9670; Compose Message</div>
     <div class="modal-field">
-      <label for="msg-dest">To: LXMF address</label>
-      <input type="text" id="msg-dest" spellcheck="false" autocomplete="off"
-             placeholder="address, lxmf@address, or an lxma:// link">
-      <div class="dim" style="font-size:10px;margin-top:3px;">
-        An <code>lxma://</code> link (from someone's QR code) lets you message
-        them before they have announced.
-      </div>
+      <label>To: destination hash</label>
+      <input type="text" id="msg-dest" placeholder="hex hash of recipient">
     </div>
     <div class="modal-field">
       <label>Title (optional)</label>
