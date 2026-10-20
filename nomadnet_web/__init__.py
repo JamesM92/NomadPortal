@@ -28,7 +28,6 @@ from .access import PolicyConfig
 from .prewarm import PreWarmer
 from .traffic import TrafficCounters
 from .log_buffer import buffer as log_buffer
-from .rnsh_client import RnshManager
 from . import csrf as csrf_mod
 
 log = logging.getLogger(__name__)
@@ -131,7 +130,6 @@ def create_app(
         attachment_store=att_store,
     )
     app.config["MESSAGING"] = messaging
-    app.config["RNSH"] = RnshManager()
 
     # Pre-create the local admin's identity at startup (when local login
     # is enabled) so its LXMF router comes up immediately during
