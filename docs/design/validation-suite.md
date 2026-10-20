@@ -31,7 +31,6 @@ The suites are in `tests/e2e/suites/`. Each one states the behaviour it protects
 | `08-inline-images` | Images load through `/api/media` as data URLs, two at a time. Alt text shows while loading and when an image fails. A busy server is retried. Leaving the page drops waiting images. Malformed targets are never requested. |
 | `09-conversation-extras` | Chats can be filtered All / Trusted / Untrusted (unknown counts as untrusted), with counts and unread badges. "All" is the default and the choice is remembered. Pinned conversations sort first. A peer with a note shows a marker. The peer dialog saves trust, pin and note, and Escape saves nothing. |
 | `10-send-control` | A queued message offers Cancel, a failed or cancelled one offers Retry, a delivered one has no buttons. A refusal is explained and the button works again. Automatic re-sends are marked. |
-| `11-voice-message` | The Ogg Opus muxer, checked with an independent parser and (when ffmpeg exists) a real decoder: the audio comes out bit-identical. The recorder in Chromium: timer, stop, cancel, Escape, a staged `audio/ogg` file that the browser's own decoder opens, the microphone always released, a refused microphone explained, no room in the message, no button without WebCodecs. **Microphone capture is stubbed** (see below). |
 
 When you change front-end behaviour, add a check to the suite that owns it. When you find a bug in the browser, write the failing check first.
 
@@ -104,19 +103,6 @@ Use an account on the portal and a second client that you can switch off (a phon
 3. Switch the client off again and send another message. Wait until it shows "failed" (several minutes).
 4. Switch the client on and wait for it to announce. The failed message must arrive without you doing anything, and it must show the resend marker. Check that it arrived once, not twice.
 5. In **Admin > Settings**, turn off "Send a failed message again". Repeat steps 3 and 4. The message must stay failed. **Retry** must still work by hand.
-
-### H. Voice messages
-
-Use a real microphone and a second client that plays voice messages (MeshChat is the one to check).
-
-1. In the portal, open a chat and press the microphone button. Allow the microphone. Speak for about five seconds and press **Stop**. A `voice-message-...ogg` chip must appear. Press send.
-2. In MeshChat, the message must show an audio player, and it must play your voice. (MeshChat shows "Unsupported Audio" if the field is wrong.)
-3. Send a voice message from MeshChat to the portal. It must play inline in the portal. If MeshChat's quality menu has Codec2 options, send one: the portal must show a downloadable file, not a dead player.
-4. Record, then press **Cancel**. The browser's recording indicator (the red dot on the tab) must go out at once.
-5. Start a recording and close the tab. The microphone indicator must go out.
-6. Open the portal in Firefox and Safari. The microphone button should appear only where the browser can encode Opus; if it does not appear, the paperclip must still attach an audio file.
-
-The automated browser test cannot run the real microphone path. The headless Chromium used in CI and in development has no audio hardware, and without an audio device the browser never starts the AudioWorklet thread (its `addModule` waits forever). The test therefore replaces only the capture step with a generated tone, and runs everything after it for real. The worklet file (`call-audio-worklet.js`, shared with voice calls) and the real microphone are what this check covers.
 
 ### D. Public site
 
