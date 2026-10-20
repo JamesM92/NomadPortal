@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Scope note (2026-10-19).** Work is focused on the public kiosk site. The
+> chat and mesh features built after the kiosk work (conversation tabs and
+> pins, stamp cost, cancel/retry/auto-resend, voice-message recorder,
+> propagation picker and fallback, message-by-address, network map) were
+> taken off this branch and kept on the branch `parked/chat-mesh`; hosting a
+> propagation node is kept on `feature/expanded-capabilities`. Nothing was
+> deleted. The audio-attachment format fix stays.
+
 ### Added
 
 - **Page-fetch jobs have one owner.** The table of in-flight and finished page
@@ -44,99 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Admin pages in the browser tests.** The mock backend now mounts the real
   admin blueprint, templates and stores (only Reticulum is faked), so suite
   `15-admin-pages` loads all eleven admin pages in Chromium, follows the
-  navigation, checks who is refused, and drives Settings and the new Node page
-  (73 checks). The template filters moved into `register_template_filters` so
+  navigation, checks who is refused, and drives Settings (39 checks). The template filters moved into `register_template_filters` so
   the test backend uses the very same ones. The CI browser job now installs
   `requirements.txt` for this.
-- **Host a propagation node.** Admin > Node switches on an LXMF propagation
-  node: a mailbox that holds messages for people who are offline and passes
-  them on, peering with other nodes. Off by default. It has its own identity
-  and keeps its store on local disk (it refuses to start on network storage),
-  capped at 500 MB by default (changes at once); name, largest message,
-  stamp-cost spam brake and peering settings (fixed list only by default) are
-  saved at once and used after a restart, which the page says. It announces
-  itself every 6 hours, can announce on demand (once a minute at most), and
-  shows state, address, uptime, messages held, storage used, peers and
-  traffic. A failure to start leaves the node off and the portal running,
-  with the reason shown. Design: `docs/design/propagation-hosting.md`.
-  Tested with fakes for LXMF and Reticulum (63 new tests); real peering and
-  hand-off is check L in the validation suite. Your own users are not moved
-  to the node automatically: that needs Reticulum to carry traffic to a
-  destination in the same process, which is untested (check L step 4).
-- **Network map (MeshChat parity).** A map button in the Network tab opens a
-  picture of everything the portal has heard, centred on the portal: its
-  interfaces around it (red when down, each labelled with how many
-  destinations it carries, and a slice of the circle that grows with its
-  load), the next-hop nodes shared by several destinations drawn as
-  diamonds, and destinations on rings by hop count; anything Reticulum has
-  no route for goes in a grey slice. Sites, peers and relays are coloured as
-  in the Network tab and can be switched on and off; scroll or the +/- buttons
-  zoom, dragging moves, a button fits everything. Clicking (or Enter on) a
-  destination opens its usual details on top of the map. It reads the
-  routing table through a new ``GET /api/network/routes`` (a public read like
-  the three lists it summarises) and the existing lists. The layout is
-  deterministic and keeps destinations apart (a crowded ring grows extra rows
-  instead of piling up), and 2000 destinations lay out in about 35 ms. It was
-  tested with random networks of up to 1500 destinations; whether it matches a
-  real mesh is check K in docs/design/validation-suite.md. The test mock
-  also now returns the real call-status shape; the old empty-list answer
-  made a phantom call overlay appear and swallow clicks in some runs.
-- **Message anyone by address, in the forms people share.** The New Message
-  dialog now takes a bare address, ``lxmf@<address>`` (also in angle brackets),
-  or the ``lxma://<address>:<public key>`` link from this portal's own QR code
-  (the portal could show that link but never read one). A link carries the
-  person's public key, so the first message can go out **before they
-  announce**, instead of waiting for a path that may never come. The key is
-  checked first: the address is rebuilt from the key and the link is refused
-  unless they match, because otherwise anyone could plant a false key for any
-  address and read or impersonate that person. A wrong address gets a plain
-  explanation, not "Invalid destination hash". Typing or pasting a messaging
-  address into the page address bar opens a new message instead of failing as a
-  page fetch. Also adds ``tests/conftest.py``, which clears the rate limiter
-  between tests (its counts are global, so a test could be refused by requests
-  made in earlier tests). 33 + 14 Python tests (the key check uses real
-  Reticulum identities) and 11 browser checks. See check J in
-  docs/design/validation-suite.md.
-- **Propagation nodes: choose one, sync on demand, and use it when a message
-  cannot be delivered (MeshChat parity).** New **Settings → Propagation**
-  tab: pick a node from the ones the portal has heard (with distance and
-  when it was last heard), type one in by hand (as NomadNet 1.2.0 now
-  allows), or leave it on Automatic (the nearest, as before). The choice
-  is per account and survives a restart. **Sync now** collects waiting
-  messages immediately (no more than once every 10 seconds) and the tab shows
-  the progress, how many messages arrived and how many you already had, when
-  the last sync was, and any problem; the inbox refreshes afterwards. New
-  ``GET /api/propagation``, ``POST /api/propagation/node`` and
-  ``POST /api/propagation/sync``. **Correction:** until now the node only
-  affected *receiving*; the portal never sent through a node, so a message to
-  an offline person just failed. Now, when direct delivery fails and the
-  sender has a node, the message is handed to it and shows as **stored on a
-  relay**. It never says "delivered", because the node accepting it is not
-  the recipient having it. This never happens for a cancelled message, never
-  loops, and not when no node is known. It can be turned off in Admin →
-  Settings. A message the node holds cannot be cancelled. 81 new tests (the
-  fallback runs the real delivery code against fakes) and 18 browser checks.
-  See check I in docs/design/validation-suite.md.
-- **Voice messages (MeshChat parity).** A microphone button beside the
-  paperclip records a voice message: it is encoded as Opus with the
-  browser's WebCodecs encoder (the same settings as voice calls), wrapped
-  in an Ogg container by a new small muxer (``ogg-opus.js``, RFC 7845), and
-  staged like any attachment, so the size limits and the send path are
-  unchanged. It goes out as ``FIELD_AUDIO`` mode ``AM_OPUS_OGG``, which
-  MeshChat plays inline. A bar shows a timer and the longest clip that
-  fits the message; Stop adds the clip, Cancel or Escape throws it away.
-  The microphone is always released (on stop, cancel, error, and when the
-  page is closed). The button appears only in browsers that can encode
-  Opus (Chromium today; attaching an audio file works everywhere), and is
-  refused during a call. Quality is Opus at 24 kbit/s, mono: about 3 KB a
-  second, so up to about 2 minutes fit in the 500 KB limit. The muxer was
-  checked against an independent parser and against ffmpeg (the decoded
-  audio is bit-identical to the original encoding); in Chromium the
-  browser's own decoder opens what the recorder produces. 35 new browser
-  checks. **Not covered here:** the real microphone and the AudioWorklet
-  (the test environment has no audio hardware, so the test stubs only the
-  capture step) and playback in MeshChat: see check H in
-  docs/design/validation-suite.md.
 - **Fix: audio attachments now use the wire format real clients expect.**
   ``FIELD_AUDIO`` is ``[mode, bytes]`` where the mode is an **integer** from
   LXMF (checked against the LXMF constants and MeshChat's source). The
@@ -213,12 +131,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nine more browser checks cover the front end.
 - **Browser tests in CI, and a written validation plan.** New ``tests/e2e``
   runs the real ``index.html`` and ``app.js`` in headless Chromium
-  against a small mock backend: 322 checks across sixteen suites (saved-copy
-  against a small mock backend: 301 checks across fifteen suites (saved-copy
-  against a small mock backend: 70 checks across eight suites (saved-copy
+  against a small mock backend: 130 checks across ten suites (saved-copy
   refresh indicator, lockdown, off-limits links, the cold-miss page,
   server-rendered pages with JavaScript off, the cache directive,
-  partials, and inline images). It runs as a new CI job,
+  partials, inline images, the admin pages and first-run admin setup). It runs as a new CI job,
   **Browser tests**, and locally with ``cd tests/e2e && npm ci && node
   run.js`` (see CONTRIBUTING.md). ``docs/design/validation-suite.md``
   lists every layer of checking, the manual checks that need a real
